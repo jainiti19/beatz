@@ -16,3 +16,5 @@
 *.tmp
 *.bak
 .DS_Store
+mp3 files/
+exports/

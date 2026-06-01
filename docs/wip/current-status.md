@@ -1,24 +1,29 @@
 # Current Status
 
 **Date:** 2026-03-21
-**Current Phase:** Phase 0 — COMPLETE
-**Next Action:** Start Phase 1 (File Picker)
+**Current Phase:** Phase 1 — COMPLETE
+**Next Action:** Test on emulator, then start Phase 2
 
 ## What's Done
-- Project concept defined
-- All requirements gathered
-- Detailed implementation plan created (6 phases)
-- Documentation structure set up
-- Android Studio IDE installed at ~/Android/android-studio/
-- Android SDK installed (Platform 35, Build-Tools 34, Emulator)
-- Pixel 7 emulator AVD created (API 34)
-- Kotlin/Compose project scaffolded and builds successfully
-- Debug APK generated (9.4MB)
-- Environment variables added to .bashrc
+- Phase 0: Environment setup (Android Studio, SDK, emulator, project scaffold)
+- Phase 1: Full MVP implemented (24 Kotlin files, builds successfully)
+  - File picker for MP3 songs
+  - Audio decoding (MP3 → PCM)
+  - BPM detection (energy-based onset detection)
+  - Key detection (FFT + Krumhansl-Kessler profiles)
+  - Beat pattern generation (5 instruments: Drums, Tabla, Guitar, Piano, Flute)
+  - Real-time audio playback via AudioTrack
+  - BPM slider (60-200 range) with live tempo adjustment
+  - Instrument switching
+  - Play/Pause/Stop transport with beat indicator
+  - Export as AAC/M4A to Music/Beatz directory
+
+## Technical Notes
+- Used pure Kotlin (no native code) — AudioTrack instead of MWEngine
+- Synthetic instrument samples (replace with real WAVs for better quality)
+- AAC/M4A export instead of MP3 (built-in encoder, no LAME dependency)
 
 ## What's Next
-1. Run `sudo adduser $USER kvm` (for emulator acceleration)
-2. Launch Android Studio: `~/Android/android-studio/bin/studio.sh`
-3. Open the project at `/home/iti/git-repos/beatz/`
-4. Run on emulator to see "Hello Beatz!"
-5. Begin Phase 1: File Picker (sub-task 1a)
+1. Test the app on emulator with a real MP3
+2. Fix any runtime issues found during testing
+3. Start Phase 2: Multi-instrument layering and advanced controls

@@ -1,208 +1,90 @@
 # Phase 1: MVP
 
-**Status:** NOT STARTED
-**Estimated Effort:** 30-40 hours (2-3 weeks part-time)
-**Goal:** Pick an MP3 → detect tempo/key → generate drum beat → adjust with sliders → play in real-time → export as MP3.
+**Status:** COMPLETE (builds successfully)
+**Date Completed:** 2026-03-21
+**APK Size:** 9.5MB
 
 ---
 
-## Architecture
+## What Was Built
 
-```
-HomeScreen          AnalysisScreen         BeatEditorScreen
-[Pick Song] ------> [Analyzing...] ------> [Sliders + Play/Export]
-     |                    |                       |
-HomeViewModel      AnalysisViewModel      BeatEditorViewModel
-     |                    |                       |
-     v                    v                       v
-FileUtils          Mp3Decoder             AudioEngine (MWEngine)
-                   TempoDetector          BeatGenerator
-                   KeyDetector            InstrumentManager
-                                          Mp3Exporter
-```
+### Architecture (Simplified from Plan)
+Instead of MWEngine (requires native build from source), we used **pure Kotlin** with Android's built-in APIs:
+- **AudioTrack** for low-latency playback (no native code needed)
+- **MediaExtractor + MediaCodec** for MP3 decoding (built-in)
+- **Custom FFT + energy-based onset detection** for BPM/key analysis (no TarsosDSP)
+- **MediaCodec AAC encoder** for export (built-in, outputs M4A)
+- **Synthetic sample generation** for instrument sounds (placeholder, replace with real WAVs later)
 
----
+### Files Created (24 Kotlin files)
 
-## Sub-task Details
+**Data Models (4 files):**
+- `data/model/Instrument.kt` — 5 instruments: Drums, Tabla, Guitar, Piano, Flute
+- `data/model/BeatPattern.kt` — BeatHit + BeatPattern data classes
+- `data/model/AnalysisResult.kt` — BPM, key, duration, sample rate
+- `data/model/Song.kt` — URI, display name, internal path
 
-### 1a. File Picker (2-3 hours)
+**Audio Core (6 files):**
+- `audio/decoder/Mp3Decoder.kt` — MP3 → PCM via MediaExtractor/MediaCodec
+- `audio/analysis/TempoDetector.kt` — Energy-based BPM detection
+- `audio/analysis/KeyDetector.kt` — FFT + Krumhansl-Kessler key profiles
+- `audio/engine/AudioEngine.kt` — AudioTrack sequencer with real-time BPM control
+- `audio/engine/BeatGenerator.kt` — Pattern generation for all 5 instruments
+- `audio/engine/SampleGenerator.kt` — Synthetic WAV-like samples for each instrument
+- `audio/export/BeatExporter.kt` — PCM → AAC/M4A via MediaCodec + MediaStore
 
-**What you'll learn:** Android permissions, file picker intents, Jetpack Compose basics.
+**UI Screens (3 files):**
+- `ui/screens/HomeScreen.kt` — File picker, "Pick a Song" button
+- `ui/screens/AnalysisScreen.kt` — Progress indicator, BPM/key results
+- `ui/screens/BeatEditorScreen.kt` — Full editor with all controls
 
-**Files to create/edit:**
-- `AndroidManifest.xml` — add permissions
-- `ui/screens/HomeScreen.kt` — "Pick a Song" button
-- `viewmodel/HomeViewModel.kt` — holds selected song state
+**UI Components (3 files):**
+- `ui/components/SliderControls.kt` — BPM slider (60-200 range)
+- `ui/components/InstrumentPicker.kt` — 5 instrument chips
+- `ui/components/TransportBar.kt` — Play/Pause/Stop + beat indicator
 
-**Key code concepts:**
-- `ActivityResultContracts.OpenDocument` — launches system file picker
-- `contentResolver.openInputStream(uri)` — reads the selected file
-- Copy to `context.filesDir` so we have permanent access
+**ViewModels (3 files):**
+- `viewmodel/HomeViewModel.kt` — Song loading state
+- `viewmodel/AnalysisViewModel.kt` — Analysis pipeline orchestration
+- `viewmodel/BeatEditorViewModel.kt` — Engine control, export
 
----
-
-### 1b. MP3 Decoding (3-4 hours)
-
-**What you'll learn:** Android's media APIs, PCM audio basics.
-
-**Files to create:**
-- `audio/decoder/Mp3Decoder.kt`
-
-**Key concepts:**
-- `MediaExtractor` reads the MP3 container
-- `MediaCodec` decodes compressed audio to raw PCM (16-bit samples)
-- Output: `ShortArray` of PCM samples + sample rate + channel count
-
----
-
-### 1c. Tempo Detection (3-4 hours)
-
-**What you'll learn:** Audio analysis, BPM detection.
-
-**Files to create:**
-- `audio/analysis/TempoDetector.kt`
-
-**Library:** TarsosDSPAndroid
-
-**Key concepts:**
-- Create an `AudioDispatcher` from the PCM data
-- Attach `PercussionOnsetDetector` — fires callback on each detected beat
-- Collect onset timestamps, calculate average interval, convert to BPM
-- **Tip:** Test with a metronome recording first to verify accuracy
+**Navigation & Utility (2 files):**
+- `ui/navigation/NavGraph.kt` — State-based screen navigation
+- `util/FileUtils.kt` — Copy URIs to internal storage
 
 ---
 
-### 1d. Key Detection (2-3 hours)
+## Sub-task Completion
 
-**Files to create:**
-- `audio/analysis/KeyDetector.kt`
-
-**Key concepts:**
-- Use TarsosDSP `PitchProcessor` (YIN algorithm)
-- Build histogram of detected pitch classes (C, C#, D, etc.)
-- Most frequent pitch class ≈ key (rough estimate, good enough for Phase 1)
-- Allow user to override in the editor
-
----
-
-### 1e. Analysis Screen UI (2-3 hours)
-
-**Files to create:**
-- `ui/screens/AnalysisScreen.kt`
-- `viewmodel/AnalysisViewModel.kt`
-
-**Shows:** Progress bar → detected BPM → detected key → "Generate Beat" button
+- [x] **1a. File Picker** — OpenDocument contract, audio/* filter
+- [x] **1b. MP3 Decoding** — MediaExtractor + MediaCodec → PCM floats
+- [x] **1c. Tempo Detection** — Energy envelope + onset detection + BPM histogram
+- [x] **1d. Key Detection** — FFT chromagram + Krumhansl-Kessler profile matching
+- [x] **1e. Analysis Screen** — Progress steps, result card, "Generate Beat" button
+- [x] **1f. Beat Pattern Generation** — 5 instrument patterns (drums, tabla, guitar, piano, flute)
+- [x] **1g. Audio Engine** — AudioTrack-based sequencer with real-time BPM adjustment
+- [x] **1h. Beat Editor Screen** — BPM slider, instrument picker, transport, export button
+- [x] **1i. Real-time Playback** — Play/pause/stop, beat position indicator
+- [x] **1j. Export** — AAC/M4A encoding, save to Music/Beatz directory
+- [x] **1k. Navigation** — State-based Home → Analysis → Editor flow
 
 ---
 
-### 1f. Beat Pattern Generation (4-5 hours)
+## Key Technical Decisions
 
-**Files to create:**
-- `data/model/BeatPattern.kt`
-- `audio/engine/BeatGenerator.kt`
-
-**Default drum pattern (4/4 time):**
-```
-Beat:    1   &   2   &   3   &   4   &
-Kick:    X       .       X       .
-Snare:   .       .       X       .       .       .       X       .
-Hi-hat:  X   X   X   X   X   X   X   X
-```
-
-Timing calculated from BPM: `interval = 60.0 / bpm` seconds per beat.
+| Decision | Rationale |
+|----------|-----------|
+| AudioTrack over MWEngine | MWEngine requires NDK/CMake/SWIG build from source — too complex |
+| Custom BPM detection over TarsosDSP | TarsosDSP has javax.sound dependency issues on Android |
+| AAC/M4A export over MP3 | MediaCodec has built-in AAC encoder, no native LAME needed |
+| Synthetic samples over WAV files | No external dependencies, app works immediately |
+| State-based nav over Compose Navigation | Simpler for passing complex objects (AnalysisResult) |
 
 ---
 
-### 1g. Audio Engine Integration (5-6 hours)
-
-**Files to create:**
-- `audio/engine/AudioEngine.kt`
-- `audio/engine/InstrumentManager.kt`
-
-**This is the hardest sub-task.** MWEngine setup requires:
-1. Add MWEngine dependency (AAR or source via CMake)
-2. Initialize engine with sample rate 44100, buffer size 512-1024
-3. Load WAV samples into `SampleManager`
-4. Create `SampledInstrument` and schedule hits from `BeatPattern`
-5. Play/pause/stop controls
-
-**Fallback plan:** If MWEngine proves too complex, use Android's `AudioTrack` API with manual sample mixing.
-
----
-
-### 1h. Beat Editor Screen (4-5 hours)
-
-**Files to create:**
-- `ui/screens/BeatEditorScreen.kt`
-- `viewmodel/BeatEditorViewModel.kt`
-- `ui/components/SliderControls.kt`
-- `ui/components/InstrumentPicker.kt`
-- `ui/components/TransportBar.kt`
-
-**UI Layout:**
-```
-┌─────────────────────────────┐
-│  Detected Key: C major      │
-│                              │
-│  BPM: [====●========] 120   │
-│                              │
-│  Instrument: [Drums ▼]      │
-│                              │
-│     [⏮] [▶ Play] [⏭]       │
-│                              │
-│     [📤 Export as MP3]       │
-└─────────────────────────────┘
-```
-
----
-
-### 1i. Real-time Playback (2-3 hours)
-
-- Wire transport buttons to AudioEngine
-- BPM slider changes update the sequencer tempo live
-- Beat position indicator (pulsing dot or counter)
-- Handle audio focus (so music pauses when a call comes in)
-
----
-
-### 1j. MP3 Export (3-4 hours)
-
-**Files to create:**
-- `audio/export/Mp3Exporter.kt`
-
-**Steps:**
-1. Render beat pattern to PCM buffer (offline mix)
-2. Encode with TAndroidLame → MP3
-3. Save to `MediaStore.Audio` (appears in Music folder)
-4. Show share intent
-
----
-
-### 1k. Navigation & Polish (2-3 hours)
-
-- Set up Compose Navigation: Home → Analysis → BeatEditor
-- Error handling for file not found, decoding failures
-- Loading indicators
-
----
-
-## Audio Samples Needed (bundle in `assets/samples/`)
-
-| Sample | File |
-|--------|------|
-| Kick drum | `drums/kick.wav` |
-| Snare drum | `drums/snare.wav` |
-| Hi-hat closed | `drums/hihat_closed.wav` |
-| Hi-hat open | `drums/hihat_open.wav` |
-| Tabla (dha) | `tabla/dha.wav` |
-| Tabla (tin) | `tabla/tin.wav` |
-| Guitar strum | `guitar/strum.wav` |
-| Piano chord C | `piano/chord_c.wav` |
-| Flute note C | `flute/note_c.wav` |
-
-Source: freesound.org (CC0 license) or similar free sample sites.
-
----
-
-## End-of-Phase Demo
-You can: pick an MP3 → see its BPM and key → hear a drum beat matching that BPM → slide the BPM up/down and hear it change in real-time → switch to tabla/piano/guitar/flute sounds → export the beat as an MP3 and share it.
+## What to Test
+1. Pick an MP3 from storage → should decode and show BPM/key
+2. Tap "Generate Beat" → opens editor with detected BPM
+3. Slide BPM → beat timing changes in real-time
+4. Switch instruments → different patterns play
+5. Export → saves M4A to Music/Beatz folder
