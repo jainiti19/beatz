@@ -4,208 +4,183 @@ import com.beatz.app.audio.analysis.MelodyNote
 import com.beatz.app.data.model.BeatHit
 import com.beatz.app.data.model.BeatPattern
 import com.beatz.app.data.model.Instrument
+import com.beatz.app.data.model.Scale
 
 /**
  * Generates beat patterns for different instruments at a given BPM.
- * Drums and Tabla use rhythmic patterns.
- * Guitar, Piano, and Flute use extracted melody notes from the song.
+ * Supports scale-aware melody snapping and arpeggio generation.
  */
 object BeatGenerator {
 
-    /**
-     * Generate a 1-bar (4 beats) pattern.
-     * @param melodyNotes extracted melody from the original song (used for Guitar, Piano, Flute)
-     */
     fun generate(
         instrument: Instrument,
         bpm: Float,
-        melodyNotes: List<MelodyNote> = emptyList()
+        melodyNotes: List<MelodyNote> = emptyList(),
+        scale: Scale = Scale.MAJOR,
+        rootMidi: Int = 60
     ): BeatPattern {
         val beatMs = 60_000.0 / bpm
         val barMs = beatMs * 4
 
-        // Melodic instruments use 2 bars if melody spans 2 bars
         val hasTwoBarMelody = melodyNotes.any { it.timeMs >= barMs }
-        val patternBars = if (hasTwoBarMelody && instrument in listOf(Instrument.GUITAR, Instrument.PIANO, Instrument.FLUTE)) 2 else 1
+        val isMelodic = instrument in listOf(Instrument.GUITAR, Instrument.PIANO, Instrument.FLUTE)
+        val patternBars = if (hasTwoBarMelody && isMelodic) 2 else 1
         val patternMs = barMs * patternBars
         val eighthMs = beatMs / 2
         val sixteenthMs = beatMs / 4
 
+        // Snap melody notes to the selected scale
+        val scaledMelody = melodyNotes.map { note ->
+            val snapped = scale.snapToScale(note.midiNote, rootMidi)
+            note.copy(midiNote = snapped, noteName = midiToNoteName(snapped))
+        }
+
         val hits = when (instrument) {
             Instrument.DRUMS -> {
-                if (patternBars == 2) {
-                    // Repeat drum pattern for 2 bars
-                    val bar1 = generateDrumPattern(beatMs, eighthMs)
-                    val bar2 = bar1.map { it.copy(timeMs = it.timeMs + barMs) }
-                    bar1 + bar2
-                } else generateDrumPattern(beatMs, eighthMs)
+                val bar1 = generateDrumPattern(beatMs, eighthMs)
+                if (patternBars == 2) bar1 + bar1.map { it.copy(timeMs = it.timeMs + barMs) }
+                else bar1
             }
             Instrument.TABLA -> {
-                if (patternBars == 2) {
-                    val bar1 = generateTablaPattern(beatMs, eighthMs, sixteenthMs)
-                    val bar2 = bar1.map { it.copy(timeMs = it.timeMs + barMs) }
-                    bar1 + bar2
-                } else generateTablaPattern(beatMs, eighthMs, sixteenthMs)
+                val bar1 = generateTablaPattern(beatMs, eighthMs, sixteenthMs)
+                if (patternBars == 2) bar1 + bar1.map { it.copy(timeMs = it.timeMs + barMs) }
+                else bar1
             }
-            Instrument.GUITAR -> generateGuitarMelody(beatMs, eighthMs, patternMs, melodyNotes)
-            Instrument.PIANO -> generatePianoMelody(beatMs, eighthMs, patternMs, melodyNotes)
-            Instrument.FLUTE -> generateFluteMelody(beatMs, eighthMs, patternMs, melodyNotes)
+            Instrument.GUITAR -> {
+                if (scaledMelody.isNotEmpty())
+                    generateGuitarMelody(beatMs, eighthMs, patternMs, scaledMelody)
+                else
+                    generateArpeggio("guitar", beatMs, eighthMs, patternMs, scale, rootMidi)
+            }
+            Instrument.PIANO -> {
+                if (scaledMelody.isNotEmpty())
+                    generatePianoMelody(beatMs, eighthMs, patternMs, scaledMelody)
+                else
+                    generateArpeggio("piano", beatMs, eighthMs, patternMs, scale, rootMidi)
+            }
+            Instrument.FLUTE -> {
+                if (scaledMelody.isNotEmpty())
+                    generateFluteMelody(beatMs, eighthMs, patternMs, scaledMelody)
+                else
+                    generateArpeggio("flute", beatMs, eighthMs, patternMs, scale, rootMidi, longNotes = true)
+            }
         }
 
         return BeatPattern(hits = hits, durationMs = patternMs, bpm = bpm)
     }
 
-    // ---- Melodic patterns using extracted notes ----
+    // ---- Scale-aware arpeggio generator ----
 
     /**
-     * Piano melody: plays extracted notes on eighth-note positions.
-     * Each note gets a unique sample name "piano_<midiNote>".
+     * Generate an arpeggio pattern using chord tones from the scale.
+     * Used as fallback when no melody is detected, or as a creative option.
      */
-    private fun generatePianoMelody(
+    private fun generateArpeggio(
+        prefix: String,
         beatMs: Double,
         eighthMs: Double,
-        barMs: Double,
-        melodyNotes: List<MelodyNote>
+        patternMs: Double,
+        scale: Scale,
+        rootMidi: Int,
+        longNotes: Boolean = false
     ): List<BeatHit> {
-        if (melodyNotes.isEmpty()) return generatePianoFallback(beatMs)
+        val scaleNotes = scale.getNotesInRange(rootMidi, lowMidi = 60, highMidi = 79)
+        if (scaleNotes.isEmpty()) return emptyList()
+
+        // Pick chord tones: root, 3rd, 5th, octave (indices 0, 2, 4, 0+octave)
+        val chordTones = mutableListOf<Int>()
+        chordTones.add(scaleNotes[0])
+        if (scaleNotes.size > 2) chordTones.add(scaleNotes[2])
+        if (scaleNotes.size > 4) chordTones.add(scaleNotes[4])
+        chordTones.add(scaleNotes[0] + 12) // octave
 
         val hits = mutableListOf<BeatHit>()
-        val notesToUse = fitNotesToBar(melodyNotes, eighthMs, barMs)
+        val numBeats = (patternMs / eighthMs).toInt()
 
-        for (note in notesToUse) {
-            hits.add(
-                BeatHit(
-                    timeMs = note.timeMs,
-                    sampleName = "piano_${note.midiNote}",
-                    velocity = note.confidence.coerceIn(0.5f, 1.0f)
-                )
-            )
-        }
+        for (i in 0 until numBeats) {
+            val timeMs = i * eighthMs
+            if (timeMs >= patternMs) break
 
-        return hits.sortedBy { it.timeMs }
-    }
+            val noteIndex = i % chordTones.size
+            val midi = chordTones[noteIndex]
+            val velocity = if (i % 2 == 0) 0.85f else 0.6f
 
-    /**
-     * Guitar melody: plays extracted notes with strumming feel.
-     * Adds slight timing offsets to simulate pick attack.
-     */
-    private fun generateGuitarMelody(
-        beatMs: Double,
-        eighthMs: Double,
-        barMs: Double,
-        melodyNotes: List<MelodyNote>
-    ): List<BeatHit> {
-        if (melodyNotes.isEmpty()) return generateGuitarFallback(beatMs, eighthMs)
-
-        val hits = mutableListOf<BeatHit>()
-        val notesToUse = fitNotesToBar(melodyNotes, eighthMs, barMs)
-
-        for ((index, note) in notesToUse.withIndex()) {
-            // Alternate between slightly different velocities for strum feel
-            val velocity = if (index % 2 == 0) {
-                note.confidence.coerceIn(0.6f, 1.0f)
+            val sampleName = if (longNotes && prefix == "flute") {
+                val suffix = if (i % 4 == 0) "long" else "short"
+                "${prefix}_${midi}_$suffix"
             } else {
-                note.confidence.coerceIn(0.4f, 0.8f)
+                "${prefix}_$midi"
             }
 
-            hits.add(
-                BeatHit(
-                    timeMs = note.timeMs,
-                    sampleName = "guitar_${note.midiNote}",
-                    velocity = velocity
-                )
-            )
+            // Don't play every slot — leave some space
+            if (i % 2 == 0 || (i % 4 == 1)) {
+                hits.add(BeatHit(timeMs = timeMs, sampleName = sampleName, velocity = velocity))
+            }
         }
 
         return hits.sortedBy { it.timeMs }
     }
 
-    /**
-     * Flute melody: plays extracted notes with longer sustain on strong beats.
-     */
-    private fun generateFluteMelody(
-        beatMs: Double,
-        eighthMs: Double,
-        barMs: Double,
-        melodyNotes: List<MelodyNote>
+    // ---- Melodic patterns using extracted + scale-snapped notes ----
+
+    private fun generatePianoMelody(
+        beatMs: Double, eighthMs: Double, barMs: Double, melodyNotes: List<MelodyNote>
     ): List<BeatHit> {
-        if (melodyNotes.isEmpty()) return generateFluteFallback(beatMs)
-
-        val hits = mutableListOf<BeatHit>()
-        val notesToUse = fitNotesToBar(melodyNotes, eighthMs, barMs)
-
-        for (note in notesToUse) {
-            // Strong beats (on beat positions) get long notes, off-beats get short
-            val isOnBeat = (note.timeMs % beatMs) < (eighthMs * 0.5)
-            val sampleSuffix = if (isOnBeat) "long" else "short"
-
-            hits.add(
-                BeatHit(
-                    timeMs = note.timeMs,
-                    sampleName = "flute_${note.midiNote}_$sampleSuffix",
-                    velocity = note.confidence.coerceIn(0.5f, 1.0f)
-                )
+        val notesToUse = fitNotesToPattern(melodyNotes, eighthMs, barMs)
+        return notesToUse.map { note ->
+            BeatHit(
+                timeMs = note.timeMs,
+                sampleName = "piano_${note.midiNote}",
+                velocity = note.confidence.coerceIn(0.5f, 1.0f)
             )
-        }
-
-        return hits.sortedBy { it.timeMs }
+        }.sortedBy { it.timeMs }
     }
 
-    /**
-     * Fit the extracted melody notes into one bar's time grid.
-     * Spaces them evenly across the bar if their original timing
-     * doesn't fit, or uses their quantized positions if they do.
-     */
-    private fun fitNotesToBar(
-        melodyNotes: List<MelodyNote>,
-        eighthMs: Double,
-        barMs: Double  // This is now patternMs (1 or 2 bars)
+    private fun generateGuitarMelody(
+        beatMs: Double, eighthMs: Double, barMs: Double, melodyNotes: List<MelodyNote>
+    ): List<BeatHit> {
+        val notesToUse = fitNotesToPattern(melodyNotes, eighthMs, barMs)
+        return notesToUse.mapIndexed { index, note ->
+            val velocity = if (index % 2 == 0)
+                note.confidence.coerceIn(0.6f, 1.0f)
+            else
+                note.confidence.coerceIn(0.4f, 0.8f)
+            BeatHit(
+                timeMs = note.timeMs,
+                sampleName = "guitar_${note.midiNote}",
+                velocity = velocity
+            )
+        }.sortedBy { it.timeMs }
+    }
+
+    private fun generateFluteMelody(
+        beatMs: Double, eighthMs: Double, barMs: Double, melodyNotes: List<MelodyNote>
+    ): List<BeatHit> {
+        val notesToUse = fitNotesToPattern(melodyNotes, eighthMs, barMs)
+        return notesToUse.map { note ->
+            val isOnBeat = (note.timeMs % beatMs) < (eighthMs * 0.5)
+            val suffix = if (isOnBeat) "long" else "short"
+            BeatHit(
+                timeMs = note.timeMs,
+                sampleName = "flute_${note.midiNote}_$suffix",
+                velocity = note.confidence.coerceIn(0.5f, 1.0f)
+            )
+        }.sortedBy { it.timeMs }
+    }
+
+    private fun fitNotesToPattern(
+        melodyNotes: List<MelodyNote>, eighthMs: Double, patternMs: Double
     ): List<MelodyNote> {
-        // Use melody notes that fit within the pattern duration
-        val withinPattern = melodyNotes.filter { it.timeMs < barMs }
+        val withinPattern = melodyNotes.filter { it.timeMs < patternMs }
         if (withinPattern.isNotEmpty()) return withinPattern
 
-        // Otherwise, space the notes evenly on eighth-note positions
-        val numSlots = (barMs / eighthMs).toInt().coerceAtMost(16)
-        val notesToPlace = melodyNotes.take(numSlots)
-
-        return notesToPlace.mapIndexed { index, note ->
+        val numSlots = (patternMs / eighthMs).toInt().coerceAtMost(16)
+        return melodyNotes.take(numSlots).mapIndexed { index, note ->
             note.copy(timeMs = index * eighthMs)
         }
     }
 
-    // ---- Fallback patterns (when no melody detected) ----
-
-    private fun generatePianoFallback(beatMs: Double): List<BeatHit> {
-        return listOf(
-            BeatHit(timeMs = 0.0, sampleName = "piano_60", velocity = 1.0f),
-            BeatHit(timeMs = beatMs, sampleName = "piano_64", velocity = 0.7f),
-            BeatHit(timeMs = 2 * beatMs, sampleName = "piano_67", velocity = 0.85f),
-            BeatHit(timeMs = 3 * beatMs, sampleName = "piano_72", velocity = 0.7f)
-        )
-    }
-
-    private fun generateGuitarFallback(beatMs: Double, eighthMs: Double): List<BeatHit> {
-        return listOf(
-            BeatHit(timeMs = 0.0, sampleName = "guitar_60", velocity = 1.0f),
-            BeatHit(timeMs = beatMs, sampleName = "guitar_64", velocity = 0.8f),
-            BeatHit(timeMs = 1.5 * beatMs, sampleName = "guitar_67", velocity = 0.6f),
-            BeatHit(timeMs = 2 * beatMs, sampleName = "guitar_60", velocity = 0.85f),
-            BeatHit(timeMs = 3 * beatMs, sampleName = "guitar_64", velocity = 0.8f),
-            BeatHit(timeMs = 3.5 * beatMs, sampleName = "guitar_67", velocity = 0.6f)
-        )
-    }
-
-    private fun generateFluteFallback(beatMs: Double): List<BeatHit> {
-        return listOf(
-            BeatHit(timeMs = 0.0, sampleName = "flute_72_long", velocity = 1.0f),
-            BeatHit(timeMs = 2 * beatMs, sampleName = "flute_76_long", velocity = 0.9f),
-            BeatHit(timeMs = 3 * beatMs, sampleName = "flute_79_short", velocity = 0.6f),
-            BeatHit(timeMs = 3.5 * beatMs, sampleName = "flute_72_short", velocity = 0.5f)
-        )
-    }
-
-    // ---- Percussion patterns (unchanged) ----
+    // ---- Percussion patterns ----
 
     private fun generateDrumPattern(beatMs: Double, eighthMs: Double): List<BeatHit> {
         val hits = mutableListOf<BeatHit>()
@@ -220,18 +195,24 @@ object BeatGenerator {
     }
 
     private fun generateTablaPattern(
-        beatMs: Double,
-        eighthMs: Double,
-        sixteenthMs: Double
+        beatMs: Double, eighthMs: Double, sixteenthMs: Double
     ): List<BeatHit> {
-        val hits = mutableListOf<BeatHit>()
-        hits.add(BeatHit(timeMs = 0.0, sampleName = "dha", velocity = 1.0f))
-        hits.add(BeatHit(timeMs = 2 * beatMs, sampleName = "dha", velocity = 0.9f))
-        hits.add(BeatHit(timeMs = beatMs, sampleName = "tin", velocity = 0.8f))
-        hits.add(BeatHit(timeMs = 1.5 * beatMs, sampleName = "tin", velocity = 0.5f))
-        hits.add(BeatHit(timeMs = 3 * beatMs, sampleName = "tin", velocity = 0.8f))
-        hits.add(BeatHit(timeMs = 3.5 * beatMs, sampleName = "tin", velocity = 0.5f))
-        hits.add(BeatHit(timeMs = 2.5 * beatMs, sampleName = "dha", velocity = 0.6f))
-        return hits.sortedBy { it.timeMs }
+        return listOf(
+            BeatHit(timeMs = 0.0, sampleName = "dha", velocity = 1.0f),
+            BeatHit(timeMs = 2 * beatMs, sampleName = "dha", velocity = 0.9f),
+            BeatHit(timeMs = beatMs, sampleName = "tin", velocity = 0.8f),
+            BeatHit(timeMs = 1.5 * beatMs, sampleName = "tin", velocity = 0.5f),
+            BeatHit(timeMs = 3 * beatMs, sampleName = "tin", velocity = 0.8f),
+            BeatHit(timeMs = 3.5 * beatMs, sampleName = "tin", velocity = 0.5f),
+            BeatHit(timeMs = 2.5 * beatMs, sampleName = "dha", velocity = 0.6f)
+        ).sortedBy { it.timeMs }
+    }
+
+    private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+
+    private fun midiToNoteName(midi: Int): String {
+        val note = NOTE_NAMES[((midi % 12) + 12) % 12]
+        val octave = (midi / 12) - 1
+        return "$note$octave"
     }
 }

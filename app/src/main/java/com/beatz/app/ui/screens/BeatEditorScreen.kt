@@ -30,6 +30,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.beatz.app.data.model.AnalysisResult
 import com.beatz.app.ui.components.BpmSlider
 import com.beatz.app.ui.components.LayerList
+import com.beatz.app.ui.components.ScaleSelector
 import com.beatz.app.ui.components.TransportBar
 import com.beatz.app.viewmodel.BeatEditorViewModel
 import com.beatz.app.viewmodel.ExportState
@@ -43,6 +44,7 @@ fun BeatEditorScreen(
 ) {
     val bpm by viewModel.bpm.collectAsState()
     val key by viewModel.key.collectAsState()
+    val scale by viewModel.scale.collectAsState()
     val layers by viewModel.layers.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val currentBeat by viewModel.currentBeat.collectAsState()
@@ -108,6 +110,12 @@ fun BeatEditorScreen(
         BpmSlider(
             bpm = bpm,
             onBpmChange = { viewModel.setBpm(it) }
+        )
+
+        // Scale selector
+        ScaleSelector(
+            selected = scale,
+            onSelect = { viewModel.setScale(it) }
         )
 
         // Layer list with volume/mute/solo controls

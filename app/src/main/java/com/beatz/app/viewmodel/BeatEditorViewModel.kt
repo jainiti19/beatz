@@ -11,6 +11,7 @@ import com.beatz.app.data.model.AnalysisResult
 import com.beatz.app.data.model.BeatPattern
 import com.beatz.app.data.model.Instrument
 import com.beatz.app.data.model.Layer
+import com.beatz.app.data.model.Scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +26,11 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _key = MutableStateFlow("C major")
     val key: StateFlow<String> = _key
+
+    private val _scale = MutableStateFlow(Scale.MAJOR)
+    val scale: StateFlow<Scale> = _scale
+
+    private var rootMidi: Int = 60
 
     private val _layers = MutableStateFlow<List<Layer>>(emptyList())
     val layers: StateFlow<List<Layer>> = _layers
@@ -45,9 +51,13 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
         this.melodyNotes = analysisResult.melodyNotes
         _bpm.value = analysisResult.bpm
         _key.value = analysisResult.key
-        audioEngine.initialize()
 
-        // Start with a Drums layer
+        // Parse detected key into root note and scale
+        val (root, detectedScale) = Scale.fromKeyString(analysisResult.key)
+        rootMidi = root
+        _scale.value = detectedScale
+
+        audioEngine.initialize()
         addLayer(Instrument.DRUMS)
     }
 
@@ -95,10 +105,18 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
         syncEngine()
     }
 
+    fun setScale(newScale: Scale) {
+        _scale.value = newScale
+        regenerateAllPatterns()
+    }
+
     fun setBpm(newBpm: Float) {
         _bpm.value = newBpm
         audioEngine.setBpm(newBpm)
-        // Regenerate all patterns at new BPM
+        regenerateAllPatterns()
+    }
+
+    private fun regenerateAllPatterns() {
         for (layer in _layers.value) {
             regenerateLayerPattern(layer)
         }
@@ -145,7 +163,13 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun regenerateLayerPattern(layer: Layer) {
-        val pattern = BeatGenerator.generate(layer.instrument, _bpm.value, melodyNotes)
+        val pattern = BeatGenerator.generate(
+            instrument = layer.instrument,
+            bpm = _bpm.value,
+            melodyNotes = melodyNotes,
+            scale = _scale.value,
+            rootMidi = rootMidi
+        )
         layerPatterns[layer.id] = pattern
     }
 
