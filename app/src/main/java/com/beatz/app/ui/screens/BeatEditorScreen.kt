@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -19,7 +21,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.beatz.app.data.model.AnalysisResult
 import com.beatz.app.ui.components.BpmSlider
-import com.beatz.app.ui.components.InstrumentPicker
+import com.beatz.app.ui.components.LayerList
 import com.beatz.app.ui.components.TransportBar
 import com.beatz.app.viewmodel.BeatEditorViewModel
 import com.beatz.app.viewmodel.ExportState
@@ -41,19 +42,17 @@ fun BeatEditorScreen(
     viewModel: BeatEditorViewModel = viewModel()
 ) {
     val bpm by viewModel.bpm.collectAsState()
-    val instrument by viewModel.instrument.collectAsState()
     val key by viewModel.key.collectAsState()
+    val layers by viewModel.layers.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val currentBeat by viewModel.currentBeat.collectAsState()
     val exportState by viewModel.exportState.collectAsState()
     val context = LocalContext.current
 
-    // Initialize engine with analysis results
     LaunchedEffect(Unit) {
         viewModel.initialize(analysisResult, songName)
     }
 
-    // Handle export completion
     LaunchedEffect(exportState) {
         when (val state = exportState) {
             is ExportState.Done -> {
@@ -71,8 +70,9 @@ fun BeatEditorScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Header
         Text(
@@ -110,15 +110,20 @@ fun BeatEditorScreen(
             onBpmChange = { viewModel.setBpm(it) }
         )
 
-        // Instrument Picker
-        InstrumentPicker(
-            selected = instrument,
-            onSelect = { viewModel.setInstrument(it) }
+        // Layer list with volume/mute/solo controls
+        LayerList(
+            layers = layers,
+            onVolumeChange = { id, vol -> viewModel.setLayerVolume(id, vol) },
+            onToggleMute = { viewModel.toggleMute(it) },
+            onToggleSolo = { viewModel.toggleSolo(it) },
+            onChangeInstrument = { id, inst -> viewModel.setLayerInstrument(id, inst) },
+            onRemoveLayer = { viewModel.removeLayer(it) },
+            onAddLayer = { viewModel.addLayer(it) }
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Transport controls (Play/Pause/Stop + beat indicator)
+        // Transport controls
         TransportBar(
             playbackState = playbackState,
             currentBeat = currentBeat,
@@ -127,7 +132,7 @@ fun BeatEditorScreen(
             onStop = { viewModel.stop() }
         )
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Export button
         when (exportState) {
@@ -135,9 +140,7 @@ fun BeatEditorScreen(
                 Button(
                     onClick = {},
                     enabled = false,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     CircularProgressIndicator(
                         modifier = Modifier.padding(end = 8.dp),
@@ -149,9 +152,7 @@ fun BeatEditorScreen(
             else -> {
                 Button(
                     onClick = { viewModel.export() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     Text("Export as Audio", fontSize = 16.sp)
                 }
@@ -168,5 +169,7 @@ fun BeatEditorScreen(
         ) {
             Text("Pick Another Song")
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }

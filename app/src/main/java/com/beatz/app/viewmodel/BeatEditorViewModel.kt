@@ -10,6 +10,7 @@ import com.beatz.app.audio.analysis.MelodyNote
 import com.beatz.app.data.model.AnalysisResult
 import com.beatz.app.data.model.BeatPattern
 import com.beatz.app.data.model.Instrument
+import com.beatz.app.data.model.Layer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,11 +23,11 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
     private val _bpm = MutableStateFlow(120f)
     val bpm: StateFlow<Float> = _bpm
 
-    private val _instrument = MutableStateFlow(Instrument.DRUMS)
-    val instrument: StateFlow<Instrument> = _instrument
-
     private val _key = MutableStateFlow("C major")
     val key: StateFlow<String> = _key
+
+    private val _layers = MutableStateFlow<List<Layer>>(emptyList())
+    val layers: StateFlow<List<Layer>> = _layers
 
     private val _exportState = MutableStateFlow<ExportState>(ExportState.Idle)
     val exportState: StateFlow<ExportState> = _exportState
@@ -34,7 +35,8 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
     val playbackState = audioEngine.playbackState
     val currentBeat = audioEngine.currentBeat
 
-    private var currentPattern: BeatPattern? = null
+    // Pattern cache per layer
+    private val layerPatterns = mutableMapOf<String, BeatPattern>()
     private var songName: String = "unknown"
     private var melodyNotes: List<MelodyNote> = emptyList()
 
@@ -44,45 +46,80 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
         _bpm.value = analysisResult.bpm
         _key.value = analysisResult.key
         audioEngine.initialize()
-        regeneratePattern()
+
+        // Start with a Drums layer
+        addLayer(Instrument.DRUMS)
+    }
+
+    fun addLayer(instrument: Instrument) {
+        val layer = Layer(instrument = instrument)
+        _layers.value = _layers.value + layer
+        regenerateLayerPattern(layer)
+        syncEngine()
+    }
+
+    fun removeLayer(layerId: String) {
+        _layers.value = _layers.value.filter { it.id != layerId }
+        layerPatterns.remove(layerId)
+        audioEngine.removeLayer(layerId)
+        syncEngine()
+    }
+
+    fun setLayerVolume(layerId: String, volume: Float) {
+        _layers.value = _layers.value.map {
+            if (it.id == layerId) it.copy(volume = volume) else it
+        }
+        syncEngine()
+    }
+
+    fun toggleMute(layerId: String) {
+        _layers.value = _layers.value.map {
+            if (it.id == layerId) it.copy(isMuted = !it.isMuted) else it
+        }
+        syncEngine()
+    }
+
+    fun toggleSolo(layerId: String) {
+        _layers.value = _layers.value.map {
+            if (it.id == layerId) it.copy(isSolo = !it.isSolo) else it
+        }
+        syncEngine()
+    }
+
+    fun setLayerInstrument(layerId: String, instrument: Instrument) {
+        _layers.value = _layers.value.map {
+            if (it.id == layerId) it.copy(instrument = instrument) else it
+        }
+        val layer = _layers.value.find { it.id == layerId } ?: return
+        regenerateLayerPattern(layer)
+        syncEngine()
     }
 
     fun setBpm(newBpm: Float) {
         _bpm.value = newBpm
         audioEngine.setBpm(newBpm)
-        regeneratePattern()
+        // Regenerate all patterns at new BPM
+        for (layer in _layers.value) {
+            regenerateLayerPattern(layer)
+        }
+        syncEngine()
     }
 
-    fun setInstrument(newInstrument: Instrument) {
-        _instrument.value = newInstrument
-        regeneratePattern()
-    }
-
-    fun play() {
-        audioEngine.play()
-    }
-
-    fun pause() {
-        audioEngine.pause()
-    }
-
-    fun stop() {
-        audioEngine.stop()
-    }
+    fun play() = audioEngine.play()
+    fun pause() = audioEngine.pause()
+    fun stop() = audioEngine.stop()
 
     fun export() {
         _exportState.value = ExportState.Exporting
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Render 8 bars (about 16 seconds at 120 BPM)
                 val barDurationMs = (4 * 60_000.0 / _bpm.value).toLong()
                 val totalDurationMs = barDurationMs * 8
                 val pcmBuffer = audioEngine.renderToBuffer(totalDurationMs)
 
                 val context = getApplication<Application>()
                 val timestamp = System.currentTimeMillis()
-                // Clean song name: remove extension and non-alphanumeric chars
                 val cleanSongName = songName
                     .substringBeforeLast(".")
                     .replace(Regex("[^a-zA-Z0-9 ]"), "")
@@ -90,7 +127,10 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
                     .replace(Regex("\\s+"), "_")
                     .take(40)
                     .lowercase()
-                val fileName = "beatz_${cleanSongName}_${_instrument.value.name.lowercase()}_${_bpm.value.toInt()}bpm_$timestamp"
+                val layerNames = _layers.value
+                    .filter { !it.isMuted }
+                    .joinToString("+") { it.instrument.name.lowercase() }
+                val fileName = "beatz_${cleanSongName}_${layerNames}_${_bpm.value.toInt()}bpm_$timestamp"
                 val displayName = BeatExporter.export(context, pcmBuffer, fileName)
 
                 _exportState.value = ExportState.Done(displayName)
@@ -104,10 +144,13 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
         _exportState.value = ExportState.Idle
     }
 
-    private fun regeneratePattern() {
-        val pattern = BeatGenerator.generate(_instrument.value, _bpm.value, melodyNotes)
-        currentPattern = pattern
-        audioEngine.setPattern(pattern)
+    private fun regenerateLayerPattern(layer: Layer) {
+        val pattern = BeatGenerator.generate(layer.instrument, _bpm.value, melodyNotes)
+        layerPatterns[layer.id] = pattern
+    }
+
+    private fun syncEngine() {
+        audioEngine.updateLayers(_layers.value, layerPatterns)
     }
 
     override fun onCleared() {

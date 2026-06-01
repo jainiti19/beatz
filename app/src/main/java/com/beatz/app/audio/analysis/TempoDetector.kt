@@ -1,52 +1,90 @@
 package com.beatz.app.audio.analysis
 
 import com.beatz.app.audio.decoder.DecodedAudio
-import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * Detects tempo (BPM) from decoded audio using energy-based onset detection
- * and autocorrelation. Pure Kotlin — no external libraries needed.
+ * and autocorrelation of the onset signal. Pure Kotlin — no external libraries.
  */
 object TempoDetector {
 
-    /**
-     * Detect BPM from decoded audio.
-     * @return estimated BPM (typically 60-200 range)
-     */
     fun detectBpm(audio: DecodedAudio): Float {
-        // Mix to mono if stereo, limit to first 20 seconds
-        val maxSamples = audio.sampleRate * 20
+        val sampleRate = audio.sampleRate
+        val maxSamples = sampleRate * 20
         val rawMono = mixToMono(audio.samples, audio.channels)
         val mono = if (rawMono.size > maxSamples) rawMono.copyOf(maxSamples) else rawMono
 
-        // Compute energy envelope using RMS in windows
-        val windowSize = audio.sampleRate / 10  // 100ms windows
-        val hopSize = windowSize / 2
+        // Compute energy envelope using smaller windows for better resolution
+        val windowSize = sampleRate / 20  // 50ms windows
+        val hopSize = windowSize / 4      // 12.5ms hop
         val envelope = computeEnergyEnvelope(mono, windowSize, hopSize)
+        if (envelope.size < 10) return 120f
 
-        // Detect onsets (peaks in the energy difference)
-        val onsets = detectOnsets(envelope)
-
-        if (onsets.size < 2) {
-            return 120f // Default if we can't detect
+        // Compute onset strength signal (half-wave rectified first difference)
+        val onsetSignal = FloatArray(envelope.size - 1)
+        for (i in onsetSignal.indices) {
+            onsetSignal[i] = maxOf(0f, envelope[i + 1] - envelope[i])
         }
 
-        // Convert onset indices to time in seconds
-        val hopDuration = hopSize.toDouble() / audio.sampleRate
-        val onsetTimes = onsets.map { it * hopDuration }
+        // Autocorrelation of onset signal to find periodicity
+        val hopDurationSec = hopSize.toDouble() / sampleRate
+        val minBpm = 60f
+        val maxBpm = 200f
+        val minLag = (60.0 / maxBpm / hopDurationSec).toInt()
+        val maxLag = (60.0 / minBpm / hopDurationSec).toInt().coerceAtMost(onsetSignal.size / 2)
 
-        // Calculate intervals between successive onsets
-        val intervals = mutableListOf<Double>()
-        for (i in 1 until onsetTimes.size) {
-            intervals.add(onsetTimes[i] - onsetTimes[i - 1])
+        if (minLag >= maxLag) return 120f
+
+        // Compute autocorrelation for each lag
+        val correlations = FloatArray(maxLag + 1)
+        for (lag in minLag..maxLag) {
+            var sum = 0.0
+            var count = 0
+            for (i in 0 until onsetSignal.size - lag) {
+                sum += onsetSignal[i].toDouble() * onsetSignal[i + lag].toDouble()
+                count++
+            }
+            correlations[lag] = if (count > 0) (sum / count).toFloat() else 0f
         }
 
-        // Use autocorrelation on the onset intervals to find the dominant period
-        val bpm = estimateBpmFromIntervals(intervals)
+        // Find the strongest peak in the autocorrelation
+        // Weight towards common BPM ranges (80-160) with a gentle bias
+        var bestLag = minLag
+        var bestScore = 0f
+        for (lag in minLag..maxLag) {
+            val bpmAtLag = 60.0 / (lag * hopDurationSec)
+            // Gentle preference for typical BPM range (80-160)
+            val weight = if (bpmAtLag in 80.0..160.0) 1.1f else 1.0f
+            val score = correlations[lag] * weight
+            if (score > bestScore) {
+                bestScore = score
+                bestLag = lag
+            }
+        }
 
-        // Clamp to reasonable range
-        return bpm.coerceIn(60f, 200f)
+        val detectedBpm = (60.0 / (bestLag * hopDurationSec)).toFloat()
+
+        // Octave correction: if BPM > 160, check if half-tempo has strong correlation too
+        // Most music is 80-160 BPM, so prefer half-tempo when it's plausible
+        val finalBpm = when {
+            detectedBpm > 160f -> {
+                val halfLag = bestLag * 2
+                if (halfLag <= maxLag && correlations[halfLag] > bestScore * 0.5f) {
+                    detectedBpm / 2  // Half-tempo has decent support
+                } else {
+                    detectedBpm / 2  // Still prefer half for very high BPM
+                }
+            }
+            detectedBpm < 75f -> {
+                val doubleBpm = detectedBpm * 2
+                if (doubleBpm in 60f..200f) doubleBpm else detectedBpm
+            }
+            else -> detectedBpm
+        }
+
+        return finalBpm.coerceIn(60f, 200f)
     }
 
     private fun mixToMono(samples: FloatArray, channels: Int): FloatArray {
@@ -82,71 +120,5 @@ object TempoDetector {
             envelope[i] = energy / windowSize
         }
         return envelope
-    }
-
-    private fun detectOnsets(envelope: FloatArray): List<Int> {
-        if (envelope.size < 3) return emptyList()
-
-        // Spectral flux: positive difference between consecutive frames
-        val flux = FloatArray(envelope.size - 1)
-        for (i in flux.indices) {
-            flux[i] = maxOf(0f, envelope[i + 1] - envelope[i])
-        }
-
-        // Adaptive threshold: mean + 1.5 * stddev
-        val mean = flux.average().toFloat()
-        val variance = flux.map { (it - mean) * (it - mean) }.average().toFloat()
-        val stddev = kotlin.math.sqrt(variance)
-        val threshold = mean + 1.5f * stddev
-
-        // Pick peaks above threshold with minimum distance
-        val minDistFrames = 3 // Minimum ~150ms between onsets
-        val onsets = mutableListOf<Int>()
-        var lastOnset = -minDistFrames
-        for (i in flux.indices) {
-            if (flux[i] > threshold && (i - lastOnset) >= minDistFrames) {
-                onsets.add(i)
-                lastOnset = i
-            }
-        }
-        return onsets
-    }
-
-    private fun estimateBpmFromIntervals(intervals: List<Double>): Float {
-        if (intervals.isEmpty()) return 120f
-
-        // Create a histogram of BPM values from intervals
-        val bpmCounts = mutableMapOf<Int, Int>()
-        for (interval in intervals) {
-            if (interval <= 0) continue
-            val bpm = (60.0 / interval).roundToInt()
-            if (bpm in 60..200) {
-                bpmCounts[bpm] = (bpmCounts[bpm] ?: 0) + 1
-                // Also count half and double time
-                val halfBpm = bpm / 2
-                val doubleBpm = bpm * 2
-                if (halfBpm in 60..200) {
-                    bpmCounts[halfBpm] = (bpmCounts[halfBpm] ?: 0) + 1
-                }
-                if (doubleBpm in 60..200) {
-                    bpmCounts[doubleBpm] = (bpmCounts[doubleBpm] ?: 0) + 1
-                }
-            }
-        }
-
-        if (bpmCounts.isEmpty()) return 120f
-
-        // Find the BPM with the most votes, smoothed over ±2 BPM
-        var bestBpm = 120
-        var bestScore = 0
-        for (bpm in 60..200) {
-            val score = (-2..2).sumOf { bpmCounts.getOrDefault(bpm + it, 0) }
-            if (score > bestScore) {
-                bestScore = score
-                bestBpm = bpm
-            }
-        }
-
-        return bestBpm.toFloat()
     }
 }
