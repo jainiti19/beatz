@@ -45,6 +45,7 @@ fun BeatEditorScreen(
     val bpm by viewModel.bpm.collectAsState()
     val key by viewModel.key.collectAsState()
     val scale by viewModel.scale.collectAsState()
+    val raga by viewModel.raga.collectAsState()
     val layers by viewModel.layers.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val currentBeat by viewModel.currentBeat.collectAsState()
@@ -112,10 +113,12 @@ fun BeatEditorScreen(
             onBpmChange = { viewModel.setBpm(it) }
         )
 
-        // Scale selector
+        // Scale / Raga selector
         ScaleSelector(
-            selected = scale,
-            onSelect = { viewModel.setScale(it) }
+            selectedScale = scale,
+            selectedRaga = raga,
+            onSelectScale = { viewModel.setScale(it) },
+            onSelectRaga = { viewModel.setRaga(it) }
         )
 
         // Layer list with volume/mute/solo controls

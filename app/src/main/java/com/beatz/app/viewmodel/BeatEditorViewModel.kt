@@ -11,6 +11,7 @@ import com.beatz.app.data.model.AnalysisResult
 import com.beatz.app.data.model.BeatPattern
 import com.beatz.app.data.model.Instrument
 import com.beatz.app.data.model.Layer
+import com.beatz.app.data.model.Raga
 import com.beatz.app.data.model.Scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,8 +28,11 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
     private val _key = MutableStateFlow("C major")
     val key: StateFlow<String> = _key
 
-    private val _scale = MutableStateFlow(Scale.MAJOR)
-    val scale: StateFlow<Scale> = _scale
+    private val _scale = MutableStateFlow<Scale?>(Scale.MAJOR)
+    val scale: StateFlow<Scale?> = _scale
+
+    private val _raga = MutableStateFlow<Raga?>(null)
+    val raga: StateFlow<Raga?> = _raga
 
     private var rootMidi: Int = 60
 
@@ -107,6 +111,13 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun setScale(newScale: Scale) {
         _scale.value = newScale
+        _raga.value = null
+        regenerateAllPatterns()
+    }
+
+    fun setRaga(newRaga: Raga) {
+        _raga.value = newRaga
+        _scale.value = null
         regenerateAllPatterns()
     }
 
@@ -168,6 +179,7 @@ class BeatEditorViewModel(application: Application) : AndroidViewModel(applicati
             bpm = _bpm.value,
             melodyNotes = melodyNotes,
             scale = _scale.value,
+            raga = _raga.value,
             rootMidi = rootMidi
         )
         layerPatterns[layer.id] = pattern

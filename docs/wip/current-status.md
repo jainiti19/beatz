@@ -1,29 +1,37 @@
 # Current Status
 
-**Date:** 2026-03-21
-**Current Phase:** Phase 1 — COMPLETE
-**Next Action:** Test on emulator, then start Phase 2
+**Date:** 2026-06-01
+**Current Phase:** Phase 2 — Bollywood-focused revision in progress
+**Next Action:** Phase 2e — Raga system
 
 ## What's Done
+
 - Phase 0: Environment setup (Android Studio, SDK, emulator, project scaffold)
-- Phase 1: Full MVP implemented (24 Kotlin files, builds successfully)
-  - File picker for MP3 songs
-  - Audio decoding (MP3 → PCM)
-  - BPM detection (energy-based onset detection)
-  - Key detection (FFT + Krumhansl-Kessler profiles)
-  - Beat pattern generation (5 instruments: Drums, Tabla, Guitar, Piano, Flute)
-  - Real-time audio playback via AudioTrack
-  - BPM slider (60-200 range) with live tempo adjustment
-  - Instrument switching
-  - Play/Pause/Stop transport with beat indicator
-  - Export as AAC/M4A to Music/Beatz directory
+- Phase 1: Full MVP (file picker, decode, BPM/key detect, 5 instruments, playback, export)
+- Phase 2a: Multi-layer audio engine
+- Phase 2b: Layer UI (volume, mute, solo)
+- Phase 2c: Scale-aware melody snapping (Western scales)
+- Phase 2d: Scale selector UI (Western scales)
+
+## Phase 2 — Revised for Bollywood
+
+After critiquing the approach against Bollywood music requirements, Phase 2 was restructured.
+See: `docs/phases/phase-2-bollywood-revised.md` for full details.
+
+**Remaining sub-tasks (in order):**
+
+| # | Sub-phase | Description | Est. Hours |
+|---|-----------|-------------|------------|
+| 1 | **2e** | Raga system (10 ragas, direction-aware snapping) | 8-10 |
+| 2 | **2f** | Taal system (5 taals, 8 tabla bols, variable time) | 12-15 |
+| 3 | **2g** | Bollywood instruments (harmonium, sitar, dholak, bansuri) | 10-12 |
+| 4 | **2h** | Tanpura drone layer | 6-8 |
+| 5 | **2i** | Melody extraction fixes for Bollywood vocals | 3-4 |
+| 6 | **2j** | Timber + texture controls | 6-8 |
+| 7 | **2k** | Key transposition | 2-3 |
 
 ## Technical Notes
-- Used pure Kotlin (no native code) — AudioTrack instead of MWEngine
-- Synthetic instrument samples (replace with real WAVs for better quality)
-- AAC/M4A export instead of MP3 (built-in encoder, no LAME dependency)
-
-## What's Next
-1. Test the app on emulator with a real MP3
-2. Fix any runtime issues found during testing
-3. Start Phase 2: Multi-instrument layering and advanced controls
+- Pure Kotlin (no native code) — AudioTrack engine
+- Synthetic instrument samples (programmatic)
+- WAV export (AAC had silence issues on emulator)
+- 29 Kotlin source files currently

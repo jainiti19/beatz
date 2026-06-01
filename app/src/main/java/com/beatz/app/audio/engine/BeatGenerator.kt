@@ -4,6 +4,7 @@ import com.beatz.app.audio.analysis.MelodyNote
 import com.beatz.app.data.model.BeatHit
 import com.beatz.app.data.model.BeatPattern
 import com.beatz.app.data.model.Instrument
+import com.beatz.app.data.model.Raga
 import com.beatz.app.data.model.Scale
 
 /**
@@ -16,7 +17,8 @@ object BeatGenerator {
         instrument: Instrument,
         bpm: Float,
         melodyNotes: List<MelodyNote> = emptyList(),
-        scale: Scale = Scale.MAJOR,
+        scale: Scale? = Scale.MAJOR,
+        raga: Raga? = null,
         rootMidi: Int = 60
     ): BeatPattern {
         val beatMs = 60_000.0 / bpm
@@ -29,11 +31,8 @@ object BeatGenerator {
         val eighthMs = beatMs / 2
         val sixteenthMs = beatMs / 4
 
-        // Snap melody notes to the selected scale
-        val scaledMelody = melodyNotes.map { note ->
-            val snapped = scale.snapToScale(note.midiNote, rootMidi)
-            note.copy(midiNote = snapped, noteName = midiToNoteName(snapped))
-        }
+        // Snap melody notes to the selected scale or raga
+        val scaledMelody = snapMelodyNotes(melodyNotes, scale, raga, rootMidi)
 
         val hits = when (instrument) {
             Instrument.DRUMS -> {
@@ -50,49 +49,74 @@ object BeatGenerator {
                 if (scaledMelody.isNotEmpty())
                     generateGuitarMelody(beatMs, eighthMs, patternMs, scaledMelody)
                 else
-                    generateArpeggio("guitar", beatMs, eighthMs, patternMs, scale, rootMidi)
+                    generateArpeggio("guitar", beatMs, eighthMs, patternMs, scale, raga, rootMidi)
             }
             Instrument.PIANO -> {
                 if (scaledMelody.isNotEmpty())
                     generatePianoMelody(beatMs, eighthMs, patternMs, scaledMelody)
                 else
-                    generateArpeggio("piano", beatMs, eighthMs, patternMs, scale, rootMidi)
+                    generateArpeggio("piano", beatMs, eighthMs, patternMs, scale, raga, rootMidi)
             }
             Instrument.FLUTE -> {
                 if (scaledMelody.isNotEmpty())
                     generateFluteMelody(beatMs, eighthMs, patternMs, scaledMelody)
                 else
-                    generateArpeggio("flute", beatMs, eighthMs, patternMs, scale, rootMidi, longNotes = true)
+                    generateArpeggio("flute", beatMs, eighthMs, patternMs, scale, raga, rootMidi, longNotes = true)
             }
         }
 
         return BeatPattern(hits = hits, durationMs = patternMs, bpm = bpm)
     }
 
-    // ---- Scale-aware arpeggio generator ----
+    // ---- Snap melody notes to scale or raga ----
 
-    /**
-     * Generate an arpeggio pattern using chord tones from the scale.
-     * Used as fallback when no melody is detected, or as a creative option.
-     */
+    private fun snapMelodyNotes(
+        notes: List<MelodyNote>, scale: Scale?, raga: Raga?, rootMidi: Int
+    ): List<MelodyNote> {
+        if (notes.isEmpty()) return notes
+        return notes.mapIndexed { index, note ->
+            // Detect direction from neighboring notes
+            val prevMidi = if (index > 0) notes[index - 1].midiNote else note.midiNote
+            val direction = when {
+                note.midiNote > prevMidi -> 1   // ascending
+                note.midiNote < prevMidi -> -1  // descending
+                else -> 0
+            }
+
+            val snapped = when {
+                raga != null -> raga.snapToRaga(note.midiNote, rootMidi, direction)
+                scale != null -> scale.snapToScale(note.midiNote, rootMidi)
+                else -> note.midiNote
+            }
+            note.copy(midiNote = snapped, noteName = midiToNoteName(snapped))
+        }
+    }
+
+    // ---- Arpeggio generator (scale or raga aware) ----
+
     private fun generateArpeggio(
         prefix: String,
         beatMs: Double,
         eighthMs: Double,
         patternMs: Double,
-        scale: Scale,
+        scale: Scale?,
+        raga: Raga?,
         rootMidi: Int,
         longNotes: Boolean = false
     ): List<BeatHit> {
-        val scaleNotes = scale.getNotesInRange(rootMidi, lowMidi = 60, highMidi = 79)
-        if (scaleNotes.isEmpty()) return emptyList()
-
-        // Pick chord tones: root, 3rd, 5th, octave (indices 0, 2, 4, 0+octave)
-        val chordTones = mutableListOf<Int>()
-        chordTones.add(scaleNotes[0])
-        if (scaleNotes.size > 2) chordTones.add(scaleNotes[2])
-        if (scaleNotes.size > 4) chordTones.add(scaleNotes[4])
-        chordTones.add(scaleNotes[0] + 12) // octave
+        // Get chord tones from raga or scale
+        val chordTones = if (raga != null) {
+            raga.getChordTones(rootMidi)
+        } else {
+            val scaleNotes = (scale ?: Scale.MAJOR).getNotesInRange(rootMidi, lowMidi = 60, highMidi = 79)
+            if (scaleNotes.isEmpty()) return emptyList()
+            val tones = mutableListOf<Int>()
+            tones.add(scaleNotes[0])
+            if (scaleNotes.size > 2) tones.add(scaleNotes[2])
+            if (scaleNotes.size > 4) tones.add(scaleNotes[4])
+            tones.add(scaleNotes[0] + 12)
+            tones
+        }
 
         val hits = mutableListOf<BeatHit>()
         val numBeats = (patternMs / eighthMs).toInt()
