@@ -23,18 +23,36 @@ object BeatGenerator {
     ): BeatPattern {
         val beatMs = 60_000.0 / bpm
         val barMs = beatMs * 4
+
+        // Melodic instruments use 2 bars if melody spans 2 bars
+        val hasTwoBarMelody = melodyNotes.any { it.timeMs >= barMs }
+        val patternBars = if (hasTwoBarMelody && instrument in listOf(Instrument.GUITAR, Instrument.PIANO, Instrument.FLUTE)) 2 else 1
+        val patternMs = barMs * patternBars
         val eighthMs = beatMs / 2
         val sixteenthMs = beatMs / 4
 
         val hits = when (instrument) {
-            Instrument.DRUMS -> generateDrumPattern(beatMs, eighthMs)
-            Instrument.TABLA -> generateTablaPattern(beatMs, eighthMs, sixteenthMs)
-            Instrument.GUITAR -> generateGuitarMelody(beatMs, eighthMs, barMs, melodyNotes)
-            Instrument.PIANO -> generatePianoMelody(beatMs, eighthMs, barMs, melodyNotes)
-            Instrument.FLUTE -> generateFluteMelody(beatMs, eighthMs, barMs, melodyNotes)
+            Instrument.DRUMS -> {
+                if (patternBars == 2) {
+                    // Repeat drum pattern for 2 bars
+                    val bar1 = generateDrumPattern(beatMs, eighthMs)
+                    val bar2 = bar1.map { it.copy(timeMs = it.timeMs + barMs) }
+                    bar1 + bar2
+                } else generateDrumPattern(beatMs, eighthMs)
+            }
+            Instrument.TABLA -> {
+                if (patternBars == 2) {
+                    val bar1 = generateTablaPattern(beatMs, eighthMs, sixteenthMs)
+                    val bar2 = bar1.map { it.copy(timeMs = it.timeMs + barMs) }
+                    bar1 + bar2
+                } else generateTablaPattern(beatMs, eighthMs, sixteenthMs)
+            }
+            Instrument.GUITAR -> generateGuitarMelody(beatMs, eighthMs, patternMs, melodyNotes)
+            Instrument.PIANO -> generatePianoMelody(beatMs, eighthMs, patternMs, melodyNotes)
+            Instrument.FLUTE -> generateFluteMelody(beatMs, eighthMs, patternMs, melodyNotes)
         }
 
-        return BeatPattern(hits = hits, durationMs = barMs, bpm = bpm)
+        return BeatPattern(hits = hits, durationMs = patternMs, bpm = bpm)
     }
 
     // ---- Melodic patterns using extracted notes ----
@@ -141,14 +159,14 @@ object BeatGenerator {
     private fun fitNotesToBar(
         melodyNotes: List<MelodyNote>,
         eighthMs: Double,
-        barMs: Double
+        barMs: Double  // This is now patternMs (1 or 2 bars)
     ): List<MelodyNote> {
-        // If melody notes already have timing within one bar, use them directly
-        val withinBar = melodyNotes.filter { it.timeMs < barMs }
-        if (withinBar.isNotEmpty()) return withinBar
+        // Use melody notes that fit within the pattern duration
+        val withinPattern = melodyNotes.filter { it.timeMs < barMs }
+        if (withinPattern.isNotEmpty()) return withinPattern
 
-        // Otherwise, space the notes evenly across the bar on eighth-note positions
-        val numSlots = 8 // eighth notes in a bar
+        // Otherwise, space the notes evenly on eighth-note positions
+        val numSlots = (barMs / eighthMs).toInt().coerceAtMost(16)
         val notesToPlace = melodyNotes.take(numSlots)
 
         return notesToPlace.mapIndexed { index, note ->

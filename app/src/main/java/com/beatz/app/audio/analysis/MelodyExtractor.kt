@@ -2,20 +2,12 @@ package com.beatz.app.audio.analysis
 
 import com.beatz.app.audio.decoder.DecodedAudio
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.log2
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/**
- * A single detected note in the melody.
- * @param timeMs when this note occurs from the start of the song
- * @param midiNote MIDI note number (60 = C4, 69 = A4, etc.)
- * @param noteName human-readable name like "C4", "A#3"
- * @param confidence how strong/clear this note detection is (0.0 to 1.0)
- */
 data class MelodyNote(
     val timeMs: Double,
     val midiNote: Int,
@@ -25,19 +17,15 @@ data class MelodyNote(
 
 /**
  * Extracts the dominant melody (pitch sequence) from decoded audio.
- * Uses autocorrelation-based pitch detection (YIN-like algorithm).
+ * Uses band-pass filtering + YIN pitch detection + beat-grid quantization.
  */
 object MelodyExtractor {
 
     private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
-    /**
-     * Extract melody notes from the audio.
-     * Returns a list of notes detected over time, quantized to the beat grid.
-     * @param bpm detected BPM, used to quantize notes to beat positions
-     * @param maxNotes maximum notes to return (limits to first N bars)
-     */
     fun extract(audio: DecodedAudio, bpm: Float, maxNotes: Int = 64): List<MelodyNote> {
+        val sampleRate = audio.sampleRate
+
         // Mix to mono
         val mono = if (audio.channels > 1) {
             FloatArray(audio.samples.size / audio.channels) { i ->
@@ -49,58 +37,125 @@ object MelodyExtractor {
             audio.samples
         }
 
-        val sampleRate = audio.sampleRate
+        // Skip first 3 seconds (intro), analyze up to 20 seconds of melody content
+        val skipSamples = (sampleRate * 3).coerceAtMost(mono.size / 2)
+        val endSamples = (skipSamples + sampleRate * 20).coerceAtMost(mono.size)
+        val segment = mono.copyOfRange(skipSamples, endSamples)
 
-        // Only analyze the first 15 seconds for speed
-        val maxSamples = sampleRate * 15
-        val analysisMono = if (mono.size > maxSamples) mono.copyOf(maxSamples) else mono
+        // Band-pass filter: keep 200-2000 Hz (vocal/melody range)
+        val filtered = bandPassFilter(segment, sampleRate, 200.0, 2000.0)
 
-        // Analyze pitch in windows — use larger hop for speed
-        val windowSizeSamples = 4096
-        val hopSizeSamples = windowSizeSamples  // No overlap = 2x faster
+        // Pitch detection with smaller windows and overlap
+        val windowSize = 2048  // ~46ms at 44100 Hz
+        val hopSize = windowSize / 2  // 50% overlap
 
         val rawNotes = mutableListOf<MelodyNote>()
-
         var offset = 0
-        while (offset + windowSizeSamples < analysisMono.size && rawNotes.size < maxNotes * 4) {
-            val window = FloatArray(windowSizeSamples) { i ->
-                // Apply Hanning window
-                analysisMono[offset + i] * (0.5f - 0.5f * cos(2.0 * PI * i / windowSizeSamples).toFloat())
+
+        while (offset + windowSize < filtered.size && rawNotes.size < maxNotes * 8) {
+            val window = FloatArray(windowSize) { i ->
+                filtered[offset + i] * (0.5f - 0.5f * cos(2.0 * PI * i / windowSize).toFloat())
             }
 
-            val pitchHz = detectPitchAutocorrelation(window, sampleRate)
+            val rms = sqrt(window.map { it * it }.average().toFloat())
 
-            if (pitchHz > 0) {
-                val timeMs = offset.toDouble() * 1000.0 / sampleRate
-                val midiNote = frequencyToMidi(pitchHz)
-                val noteName = midiToNoteName(midiNote)
-                val rms = sqrt(window.map { it * it }.average().toFloat())
-                val confidence = (rms * 10).coerceIn(0f, 1f)
+            // Only detect pitch if there's enough energy
+            if (rms > 0.01f) {
+                val pitchHz = detectPitchYIN(window, sampleRate)
 
-                if (midiNote in 36..96 && confidence > 0.05f) { // C2 to C7
-                    rawNotes.add(MelodyNote(timeMs, midiNote, noteName, confidence))
+                if (pitchHz > 0) {
+                    val timeMs = (skipSamples + offset).toDouble() * 1000.0 / sampleRate
+                    val midiNote = frequencyToMidi(pitchHz)
+                    val confidence = (rms * 8).coerceIn(0f, 1f)
+
+                    // Vocal/melody range: C3 (48) to C6 (84)
+                    if (midiNote in 48..84 && confidence > 0.08f) {
+                        rawNotes.add(MelodyNote(timeMs, midiNote, midiToNoteName(midiNote), confidence))
+                    }
                 }
             }
 
-            offset += hopSizeSamples
+            offset += hopSize
         }
 
-        // Quantize to beat grid and remove duplicates
-        return quantizeToBeats(rawNotes, bpm, maxNotes)
+        // Smooth: median filter on MIDI notes to remove outlier jumps
+        val smoothed = medianFilterNotes(rawNotes, windowSize = 3)
+
+        // Quantize to beat grid — keep 2 bars worth
+        return quantizeToBeats(smoothed, bpm, maxNotes)
     }
 
     /**
-     * Autocorrelation-based pitch detection (simplified YIN).
-     * @return detected frequency in Hz, or -1 if no clear pitch
+     * Simple band-pass filter using cascaded first-order high-pass and low-pass.
      */
-    private fun detectPitchAutocorrelation(window: FloatArray, sampleRate: Int): Double {
+    private fun bandPassFilter(samples: FloatArray, sampleRate: Int, lowCutHz: Double, highCutHz: Double): FloatArray {
+        val result = FloatArray(samples.size)
+
+        // High-pass filter (remove below lowCutHz)
+        val rcHigh = 1.0 / (2.0 * PI * lowCutHz)
+        val dtHigh = 1.0 / sampleRate
+        val alphaHigh = rcHigh / (rcHigh + dtHigh)
+
+        var prevInput = samples[0].toDouble()
+        var prevOutput = samples[0].toDouble()
+        result[0] = samples[0]
+
+        for (i in 1 until samples.size) {
+            val input = samples[i].toDouble()
+            prevOutput = alphaHigh * (prevOutput + input - prevInput)
+            prevInput = input
+            result[i] = prevOutput.toFloat()
+        }
+
+        // Low-pass filter (remove above highCutHz)
+        val rcLow = 1.0 / (2.0 * PI * highCutHz)
+        val dtLow = 1.0 / sampleRate
+        val alphaLow = dtLow / (rcLow + dtLow)
+
+        val output = FloatArray(samples.size)
+        output[0] = result[0]
+        for (i in 1 until result.size) {
+            output[i] = (output[i - 1] + alphaLow * (result[i] - output[i - 1])).toFloat()
+        }
+
+        return output
+    }
+
+    /**
+     * Median filter on MIDI note values to remove outlier pitch jumps.
+     */
+    private fun medianFilterNotes(notes: List<MelodyNote>, windowSize: Int): List<MelodyNote> {
+        if (notes.size < windowSize) return notes
+
+        val result = mutableListOf<MelodyNote>()
+        val half = windowSize / 2
+
+        for (i in notes.indices) {
+            val start = (i - half).coerceAtLeast(0)
+            val end = (i + half).coerceAtMost(notes.size - 1)
+            val neighbors = (start..end).map { notes[it].midiNote }.sorted()
+            val medianMidi = neighbors[neighbors.size / 2]
+
+            // Only keep notes close to the local median (within 4 semitones)
+            if (kotlin.math.abs(notes[i].midiNote - medianMidi) <= 4) {
+                result.add(notes[i])
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * YIN pitch detection.
+     */
+    private fun detectPitchYIN(window: FloatArray, sampleRate: Int): Double {
         val n = window.size
         val minPeriod = sampleRate / 1000  // 1000 Hz max
-        val maxPeriod = sampleRate / 60    // 60 Hz min
+        val maxPeriod = sampleRate / 100   // 100 Hz min (tighter range for melody)
 
         if (maxPeriod >= n / 2) return -1.0
 
-        // Compute difference function (YIN step 2)
+        // Difference function
         val diff = DoubleArray(maxPeriod + 1)
         for (tau in 1..maxPeriod) {
             var sum = 0.0
@@ -111,7 +166,7 @@ object MelodyExtractor {
             diff[tau] = sum
         }
 
-        // Cumulative mean normalized difference (YIN step 3)
+        // Cumulative mean normalized difference
         val cmndf = DoubleArray(maxPeriod + 1)
         cmndf[0] = 1.0
         var runningSum = 0.0
@@ -120,12 +175,11 @@ object MelodyExtractor {
             cmndf[tau] = if (runningSum > 0) diff[tau] * tau / runningSum else 1.0
         }
 
-        // Find the first dip below threshold (YIN step 4)
-        val threshold = 0.15
+        // Find first dip below threshold
+        val threshold = 0.12  // Stricter threshold for cleaner detection
         var bestTau = -1
         for (tau in minPeriod..maxPeriod) {
             if (cmndf[tau] < threshold) {
-                // Find the local minimum starting from this dip
                 bestTau = tau
                 var searchTau = tau
                 while (searchTau + 1 <= maxPeriod && cmndf[searchTau + 1] < cmndf[searchTau]) {
@@ -137,7 +191,7 @@ object MelodyExtractor {
         }
 
         if (bestTau == -1) {
-            // Fallback: find global minimum in range
+            // Fallback: global minimum with stricter requirement
             var minVal = Double.MAX_VALUE
             for (tau in minPeriod..maxPeriod) {
                 if (cmndf[tau] < minVal) {
@@ -145,8 +199,7 @@ object MelodyExtractor {
                     bestTau = tau
                 }
             }
-            // Only use if it's a clear enough pitch
-            if (minVal > 0.4) return -1.0
+            if (minVal > 0.3) return -1.0
         }
 
         return sampleRate.toDouble() / bestTau
@@ -163,81 +216,61 @@ object MelodyExtractor {
     }
 
     /**
-     * Quantize detected notes to the beat grid, keeping the strongest
-     * note per eighth-note position. Returns one bar's worth of notes.
+     * Quantize notes to the beat grid. Keep 2 bars with 16th-note resolution.
      */
     private fun quantizeToBeats(
         rawNotes: List<MelodyNote>,
         bpm: Float,
         maxNotes: Int
     ): List<MelodyNote> {
-        if (rawNotes.isEmpty()) return defaultMelody()
+        if (rawNotes.isEmpty()) return defaultMelody(bpm)
 
-        val eighthNoteMs = 30_000.0 / bpm // duration of one eighth note
+        val sixteenthMs = 15_000.0 / bpm  // duration of one 16th note
+        val barMs = 4 * 60_000.0 / bpm
+        val slotsPerBar = 16
+        val totalSlots = slotsPerBar * 2  // 2 bars
 
-        // Group notes by eighth-note position
+        // Group notes by 16th-note position across all detected time
         data class GridSlot(val position: Int, var bestNote: MelodyNote)
         val grid = mutableMapOf<Int, GridSlot>()
 
         for (note in rawNotes) {
-            val pos = (note.timeMs / eighthNoteMs).toInt()
-            val existing = grid[pos]
+            val globalPos = (note.timeMs / sixteenthMs).toInt()
+            val posInTwoBars = globalPos % totalSlots
+            val existing = grid[posInTwoBars]
             if (existing == null || note.confidence > existing.bestNote.confidence) {
-                grid[pos] = GridSlot(pos, note)
+                grid[posInTwoBars] = GridSlot(posInTwoBars, note)
             }
         }
 
-        // Take the first maxNotes unique notes, re-timed to positions within bars
-        val barMs = 4 * 60_000.0 / bpm
+        // Build the 2-bar melody
         val result = mutableListOf<MelodyNote>()
-        val sortedSlots = grid.values.sortedBy { it.position }
-
-        // Extract one bar (8 eighth notes) worth of the most common pattern
-        // by folding all bars into one
-        val notesPerBar = 8
-        val foldedGrid = mutableMapOf<Int, MutableList<MelodyNote>>()
-
-        for (slot in sortedSlots) {
-            val posInBar = slot.position % notesPerBar
-            foldedGrid.getOrPut(posInBar) { mutableListOf() }.add(slot.bestNote)
-        }
-
-        // For each position in the bar, pick the most common note (by MIDI number)
-        for (pos in 0 until notesPerBar) {
-            val notesAtPos = foldedGrid[pos] ?: continue
-            // Find the most frequent MIDI note at this position
-            val mostCommonMidi = notesAtPos
-                .groupBy { it.midiNote }
-                .maxByOrNull { it.value.size }
-                ?.key ?: continue
-
-            val representative = notesAtPos.first { it.midiNote == mostCommonMidi }
-            val timeInBarMs = pos * eighthNoteMs
+        for (pos in 0 until totalSlots) {
+            val slot = grid[pos] ?: continue
+            val timeInPatternMs = pos * sixteenthMs
 
             result.add(
                 MelodyNote(
-                    timeMs = timeInBarMs,
-                    midiNote = representative.midiNote,
-                    noteName = representative.noteName,
-                    confidence = representative.confidence
+                    timeMs = timeInPatternMs,
+                    midiNote = slot.bestNote.midiNote,
+                    noteName = slot.bestNote.noteName,
+                    confidence = slot.bestNote.confidence
                 )
             )
 
             if (result.size >= maxNotes) break
         }
 
-        return if (result.isEmpty()) defaultMelody() else result.sortedBy { it.timeMs }
+        return if (result.isEmpty()) defaultMelody(bpm) else result.sortedBy { it.timeMs }
     }
 
-    /**
-     * Fallback melody if detection fails: C major arpeggio.
-     */
-    private fun defaultMelody(): List<MelodyNote> {
+    private fun defaultMelody(bpm: Float): List<MelodyNote> {
+        val beatMs = 60_000.0 / bpm
         return listOf(
             MelodyNote(0.0, 60, "C4", 0.8f),
-            MelodyNote(0.0, 64, "E4", 0.7f),  // will be re-timed by BeatGenerator
-            MelodyNote(0.0, 67, "G4", 0.7f),
-            MelodyNote(0.0, 72, "C5", 0.6f)
+            MelodyNote(beatMs, 64, "E4", 0.7f),
+            MelodyNote(beatMs * 2, 67, "G4", 0.7f),
+            MelodyNote(beatMs * 3, 72, "C5", 0.6f)
         )
     }
 }
