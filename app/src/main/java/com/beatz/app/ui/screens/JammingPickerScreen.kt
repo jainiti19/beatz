@@ -2,6 +2,7 @@ package com.beatz.app.ui.screens
 
 import android.os.Environment
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,8 +36,8 @@ fun JammingPickerScreen(
     onStemDirSelected: (String) -> Unit,
     onBack: () -> Unit
 ) {
-    // Scan for stem directories
-    val stemDirs = remember { findStemDirectories() }
+    val context = LocalContext.current
+    val stemDirs = remember { findStemDirectories(context.filesDir) }
 
     Column(
         modifier = Modifier
@@ -131,11 +132,12 @@ fun JammingPickerScreen(
     }
 }
 
-private fun findStemDirectories(): List<File> {
+private fun findStemDirectories(filesDir: File): List<File> {
     val dirs = mutableListOf<File>()
 
-    // Check common locations for Demucs output
+    // Check app internal storage + external storage
     val searchPaths = listOf(
+        File(filesDir, "stems"),
         File(Environment.getExternalStorageDirectory(), "Music/karaoke/htdemucs"),
         File(Environment.getExternalStorageDirectory(), "Music/karaoke"),
         File(Environment.getExternalStorageDirectory(), "Download/htdemucs"),

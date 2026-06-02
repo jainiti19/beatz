@@ -11,7 +11,8 @@ import java.io.File
 
 class JammingViewModel(application: Application) : AndroidViewModel(application) {
 
-    val stemPlayer = StemPlayer()
+    var stemPlayer = StemPlayer()
+        private set
 
     private val _stemVolumes = MutableStateFlow<Map<String, Float>>(emptyMap())
     val stemVolumes: StateFlow<Map<String, Float>> = _stemVolumes
@@ -22,9 +23,9 @@ class JammingViewModel(application: Application) : AndroidViewModel(application)
     private val _loadState = MutableStateFlow<LoadState>(LoadState.Idle)
     val loadState: StateFlow<LoadState> = _loadState
 
-    val playbackState = stemPlayer.playbackState
-    val progress = stemPlayer.progress
-    val durationSeconds = stemPlayer.durationSeconds
+    val playbackState get() = stemPlayer.playbackState
+    val progress get() = stemPlayer.progress
+    val durationSeconds get() = stemPlayer.durationSeconds
 
     /**
      * Load stems from a directory containing vocals.wav, drums.wav, bass.wav, other.wav
@@ -74,6 +75,10 @@ class JammingViewModel(application: Application) : AndroidViewModel(application)
      * Load stems from a directory path string (for testing via intent).
      */
     fun loadFromPath(path: String) {
+        // Stop and release previous stems
+        stemPlayer.release()
+        stemPlayer = StemPlayer()
+
         val dir = File(path)
         if (dir.isDirectory) {
             loadFromDirectory(dir, dir.name)

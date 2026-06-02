@@ -2,6 +2,7 @@ package com.beatz.app.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,6 +33,7 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
     var selectedSong by remember { mutableStateOf(initialSong) }
     var analysisResult by remember { mutableStateOf<AnalysisResult?>(null) }
     var stemDir by remember { mutableStateOf(jammingStemDir ?: "") }
+    var jammingKey by remember { mutableIntStateOf(0) }
 
     when (currentScreen) {
         Screen.Home -> {
@@ -52,6 +54,7 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
             JammingPickerScreen(
                 onStemDirSelected = { path ->
                     stemDir = path
+                    jammingKey++
                     currentScreen = Screen.Jamming
                 },
                 onBack = {
@@ -61,12 +64,15 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
         }
 
         Screen.Jamming -> {
-            JammingScreen(
-                stemDirPath = stemDir,
-                onBack = {
-                    currentScreen = Screen.Home
-                }
-            )
+            // Unique key forces full recomposition + new ViewModel each time
+            androidx.compose.runtime.key(jammingKey) {
+                JammingScreen(
+                    stemDirPath = stemDir,
+                    onBack = {
+                        currentScreen = Screen.JammingPicker
+                    }
+                )
+            }
         }
 
         Screen.Analysis -> {
