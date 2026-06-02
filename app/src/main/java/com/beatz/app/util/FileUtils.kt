@@ -12,8 +12,8 @@ object FileUtils {
      * reliably without persistent URI permissions.
      * @return the internal file path
      */
-    fun copyToInternal(context: Context, uri: Uri): File {
-        val displayName = getDisplayName(context, uri) ?: "song.mp3"
+    fun copyToInternal(context: Context, uri: Uri, fileName: String? = null): File {
+        val displayName = fileName ?: getDisplayName(context, uri) ?: "song.mp3"
         val destFile = File(context.filesDir, "songs/$displayName")
         destFile.parentFile?.mkdirs()
 

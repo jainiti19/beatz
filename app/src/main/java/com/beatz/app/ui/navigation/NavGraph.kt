@@ -10,16 +10,16 @@ import com.beatz.app.data.model.Song
 import com.beatz.app.ui.screens.AnalysisScreen
 import com.beatz.app.ui.screens.BeatEditorScreen
 import com.beatz.app.ui.screens.HomeScreen
+import com.beatz.app.ui.screens.JammingPickerScreen
+import com.beatz.app.ui.screens.JammingScreen
 
-/**
- * Simple state-based navigation.
- * Using manual navigation instead of Compose Navigation to avoid
- * complexity with passing complex objects between destinations.
- */
 @Composable
-fun BeatzNavGraph(testFilePath: String? = null) {
-    // If test file provided, skip directly to analysis
-    val initialScreen = if (testFilePath != null) Screen.Analysis else Screen.Home
+fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) {
+    val initialScreen = when {
+        jammingStemDir != null -> Screen.Jamming
+        testFilePath != null -> Screen.Analysis
+        else -> Screen.Home
+    }
     val initialSong = if (testFilePath != null) {
         Song(
             uri = android.net.Uri.fromFile(java.io.File(testFilePath)),
@@ -31,6 +31,7 @@ fun BeatzNavGraph(testFilePath: String? = null) {
     var currentScreen by remember { mutableStateOf(initialScreen) }
     var selectedSong by remember { mutableStateOf(initialSong) }
     var analysisResult by remember { mutableStateOf<AnalysisResult?>(null) }
+    var stemDir by remember { mutableStateOf(jammingStemDir ?: "") }
 
     when (currentScreen) {
         Screen.Home -> {
@@ -38,6 +39,32 @@ fun BeatzNavGraph(testFilePath: String? = null) {
                 onSongReady = { song ->
                     selectedSong = song
                     currentScreen = Screen.Analysis
+                },
+                onJammingMode = {
+                    // For now, use a default stems directory
+                    // Later: add a folder picker
+                    currentScreen = Screen.JammingPicker
+                }
+            )
+        }
+
+        Screen.JammingPicker -> {
+            JammingPickerScreen(
+                onStemDirSelected = { path ->
+                    stemDir = path
+                    currentScreen = Screen.Jamming
+                },
+                onBack = {
+                    currentScreen = Screen.Home
+                }
+            )
+        }
+
+        Screen.Jamming -> {
+            JammingScreen(
+                stemDirPath = stemDir,
+                onBack = {
+                    currentScreen = Screen.Home
                 }
             )
         }
@@ -75,5 +102,5 @@ fun BeatzNavGraph(testFilePath: String? = null) {
 }
 
 private enum class Screen {
-    Home, Analysis, Editor
+    Home, JammingPicker, Jamming, Analysis, Editor
 }

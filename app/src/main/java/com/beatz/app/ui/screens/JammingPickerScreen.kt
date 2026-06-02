@@ -1,0 +1,165 @@
+package com.beatz.app.ui.screens
+
+import android.os.Environment
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import java.io.File
+
+/**
+ * Lists available stem directories for jamming mode.
+ * Looks for folders containing vocals.wav, drums.wav, bass.wav, other.wav
+ * in the Music/karaoke/htdemucs directory.
+ */
+@Composable
+fun JammingPickerScreen(
+    onStemDirSelected: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    // Scan for stem directories
+    val stemDirs = remember { findStemDirectories() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Jamming Mode",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        Text(
+            text = "Pick a song to jam with",
+            fontSize = 16.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (stemDirs.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "No stems found",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Process songs with Demucs first:\n" +
+                                "demucs -n htdemucs --out ~/Music/karaoke song.mp3\n\n" +
+                                "Then push stems to the device:\n" +
+                                "adb push ~/Music/karaoke/htdemucs/ /sdcard/Music/karaoke/htdemucs/",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        } else {
+            for (dir in stemDirs) {
+                val stemCount = countStems(dir)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onStemDirSelected(dir.absolutePath) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = dir.name,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "$stemCount stems available",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            text = "▶",
+                            fontSize = 24.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Back to Home")
+        }
+    }
+}
+
+private fun findStemDirectories(): List<File> {
+    val dirs = mutableListOf<File>()
+
+    // Check common locations for Demucs output
+    val searchPaths = listOf(
+        File(Environment.getExternalStorageDirectory(), "Music/karaoke/htdemucs"),
+        File(Environment.getExternalStorageDirectory(), "Music/karaoke"),
+        File(Environment.getExternalStorageDirectory(), "Download/htdemucs"),
+    )
+
+    for (basePath in searchPaths) {
+        if (basePath.isDirectory) {
+            basePath.listFiles()?.forEach { subDir ->
+                if (subDir.isDirectory && hasStemFiles(subDir)) {
+                    dirs.add(subDir)
+                }
+            }
+        }
+    }
+
+    return dirs.sortedBy { it.name }
+}
+
+private fun hasStemFiles(dir: File): Boolean {
+    val stemNames = listOf("vocals.wav", "drums.wav", "bass.wav", "other.wav")
+    return stemNames.any { File(dir, it).exists() }
+}
+
+private fun countStems(dir: File): Int {
+    val stemNames = listOf("vocals.wav", "drums.wav", "bass.wav", "other.wav")
+    return stemNames.count { File(dir, it).exists() }
+}

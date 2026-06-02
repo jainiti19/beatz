@@ -15,13 +15,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Support direct file path via intent extra (for testing)
         val testFilePath = intent.getStringExtra("test_file")
+        val jammingStemDir = intent.getStringExtra("stem_dir")
 
         setContent {
             BeatzTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    BeatzNavGraph(testFilePath = testFilePath)
+                    BeatzNavGraph(
+                        testFilePath = testFilePath,
+                        jammingStemDir = jammingStemDir
+                    )
                 }
             }
         }

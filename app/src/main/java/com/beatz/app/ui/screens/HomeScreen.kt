@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +34,7 @@ import com.beatz.app.viewmodel.HomeViewModel
 @Composable
 fun HomeScreen(
     onSongReady: (Song) -> Unit,
+    onJammingMode: () -> Unit,
     viewModel: HomeViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -43,7 +45,6 @@ fun HomeScreen(
         uri?.let { viewModel.onSongPicked(it) }
     }
 
-    // Navigate when song is ready
     LaunchedEffect(uiState) {
         if (uiState is HomeUiState.SongReady) {
             onSongReady((uiState as HomeUiState.SongReady).song)
@@ -68,7 +69,7 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Extract & remix beats from any song",
+            text = "Jamming tracks for sing-along sessions",
             fontSize = 16.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -78,14 +79,25 @@ fun HomeScreen(
 
         when (uiState) {
             is HomeUiState.Idle, is HomeUiState.SongReady -> {
+                // Jamming Mode - primary action
                 Button(
-                    onClick = { filePicker.launch("audio/*") },
+                    onClick = onJammingMode,
                     modifier = Modifier.size(width = 220.dp, height = 56.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary
                     )
                 ) {
-                    Text("Pick a Song", fontSize = 18.sp)
+                    Text("Jamming Mode", fontSize = 18.sp)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Beat Generator - secondary action
+                OutlinedButton(
+                    onClick = { filePicker.launch("audio/*") },
+                    modifier = Modifier.size(width = 220.dp, height = 48.dp)
+                ) {
+                    Text("Beat Generator", fontSize = 14.sp)
                 }
             }
 
