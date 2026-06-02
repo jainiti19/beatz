@@ -29,6 +29,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -45,9 +49,21 @@ fun JammingScreen(
 ) {
     val stemPlayer = remember(stemDirPath) { StemPlayer() }
     val songName = remember(stemDirPath) { File(stemDirPath).name }
+    val context = LocalContext.current
 
     var loadState by remember(stemDirPath) { mutableStateOf<LoadState>(LoadState.Idle) }
     var stemVolumes by remember(stemDirPath) { mutableStateOf<Map<String, Float>>(emptyMap()) }
+    var showLyrics by remember { mutableStateOf(false) }
+    var lyricsText by remember(stemDirPath) { mutableStateOf("") }
+    var isEditingLyrics by remember { mutableStateOf(false) }
+
+    // Load saved lyrics
+    LaunchedEffect(stemDirPath) {
+        val lyricsFile = File(context.filesDir, "lyrics/${songName}.txt")
+        if (lyricsFile.exists()) {
+            lyricsText = lyricsFile.readText()
+        }
+    }
     val playbackState by stemPlayer.playbackState.collectAsState()
     val progress by stemPlayer.progress.collectAsState()
     val duration by stemPlayer.durationSeconds.collectAsState()
@@ -221,6 +237,75 @@ fun JammingScreen(
                         },
                         modifier = Modifier.weight(1f)
                     ) { Text("Jamming", fontSize = 12.sp) }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Lyrics section
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Lyrics", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Switch(
+                        checked = showLyrics,
+                        onCheckedChange = { showLyrics = it }
+                    )
+                }
+
+                if (showLyrics) {
+                    if (isEditingLyrics || lyricsText.isEmpty()) {
+                        OutlinedTextField(
+                            value = lyricsText,
+                            onValueChange = { lyricsText = it },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
+                            placeholder = { Text("Paste lyrics here...") },
+                            label = { Text("Lyrics") }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    // Save lyrics to file
+                                    val lyricsDir = File(context.filesDir, "lyrics")
+                                    lyricsDir.mkdirs()
+                                    File(lyricsDir, "${songName}.txt").writeText(lyricsText)
+                                    isEditingLyrics = false
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Save") }
+
+                            if (lyricsText.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = { isEditingLyrics = false },
+                                    modifier = Modifier.weight(1f)
+                                ) { Text("Cancel") }
+                            }
+                        }
+                    } else {
+                        // Display mode — scrollable lyrics
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = lyricsText,
+                                    fontSize = 16.sp,
+                                    lineHeight = 28.sp
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { isEditingLyrics = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Edit Lyrics") }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

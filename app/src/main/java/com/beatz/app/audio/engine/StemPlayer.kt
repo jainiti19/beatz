@@ -3,38 +3,36 @@ package com.beatz.app.audio.engine
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
  * Plays multiple audio stems (WAV files) simultaneously with independent volume control.
- * Used for jamming mode: mix bass, drums, other (harmony) stems with adjustable levels.
+ * Streams from disk to avoid loading entire files into memory.
  */
 class StemPlayer {
 
     companion object {
         const val SAMPLE_RATE = 44100
-        private const val BUFFER_SIZE_FRAMES = 2048
+        private const val MIX_CHUNK_FRAMES = 4096
     }
 
     private var audioTrack: AudioTrack? = null
     private var playbackThread: Thread? = null
 
-    // Decoded stem data
-    private var stems: Map<String, FloatArray> = emptyMap()
+    // Stem file info (not loaded into memory)
+    private var stemFiles: Map<String, StemInfo> = emptyMap()
     private var stemVolumes: MutableMap<String, Float> = mutableMapOf()
 
     @Volatile
     private var isPlaying = false
 
     @Volatile
-    private var playbackPosition = 0
+    private var playbackFramePos = 0L
 
     private val _playbackState = MutableStateFlow(PlaybackState.STOPPED)
     val playbackState: StateFlow<PlaybackState> = _playbackState
@@ -47,71 +45,67 @@ class StemPlayer {
 
     enum class PlaybackState { PLAYING, PAUSED, STOPPED }
 
+    private data class StemInfo(
+        val file: File,
+        val dataOffset: Long,     // byte offset where PCM data starts
+        val totalFrames: Long,    // total mono frames
+        val channels: Int,
+        val bitsPerSample: Int,
+        val sampleRate: Int
+    )
+
     /**
-     * Load stem WAV files from a directory.
-     * Expects files named: vocals.wav, drums.wav, bass.wav, other.wav
+     * Load stem WAV files from a directory. Only parses headers, doesn't read audio data.
      */
     fun loadStems(stemDir: File): Boolean {
         val stemNames = listOf("vocals", "drums", "bass", "other")
-        val loaded = mutableMapOf<String, FloatArray>()
+        val loaded = mutableMapOf<String, StemInfo>()
 
         for (name in stemNames) {
             val file = File(stemDir, "$name.wav")
             if (file.exists()) {
-                val samples = decodeWav(file)
-                if (samples != null) {
-                    loaded[name] = samples
-                    // Default: vocals off, everything else on
+                val info = parseWavHeader(file)
+                if (info != null) {
+                    loaded[name] = info
                     stemVolumes[name] = if (name == "vocals") 0f else 0.8f
                 }
             }
         }
 
         if (loaded.isEmpty()) return false
-        stems = loaded
+        stemFiles = loaded
 
-        // Calculate duration from longest stem
-        val maxSamples = loaded.values.maxOf { it.size }
-        _durationSeconds.value = maxSamples.toFloat() / SAMPLE_RATE
+        val maxFrames = loaded.values.maxOf { it.totalFrames }
+        _durationSeconds.value = maxFrames.toFloat() / SAMPLE_RATE
 
         initAudioTrack()
         return true
     }
 
-    /**
-     * Load stems from individual file paths.
-     */
-    fun loadStemFiles(stemFiles: Map<String, File>): Boolean {
-        val loaded = mutableMapOf<String, FloatArray>()
-
-        for ((name, file) in stemFiles) {
+    fun loadStemFiles(files: Map<String, File>): Boolean {
+        val loaded = mutableMapOf<String, StemInfo>()
+        for ((name, file) in files) {
             if (file.exists()) {
-                val samples = decodeWav(file)
-                if (samples != null) {
-                    loaded[name] = samples
+                val info = parseWavHeader(file)
+                if (info != null) {
+                    loaded[name] = info
                     stemVolumes[name] = if (name == "vocals") 0f else 0.8f
                 }
             }
         }
-
         if (loaded.isEmpty()) return false
-        stems = loaded
-
-        val maxSamples = loaded.values.maxOf { it.size }
-        _durationSeconds.value = maxSamples.toFloat() / SAMPLE_RATE
-
+        stemFiles = loaded
+        val maxFrames = loaded.values.maxOf { it.totalFrames }
+        _durationSeconds.value = maxFrames.toFloat() / SAMPLE_RATE
         initAudioTrack()
         return true
     }
 
     private fun initAudioTrack() {
         audioTrack?.release()
-
         val bufferSize = AudioTrack.getMinBufferSize(
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_FLOAT
-        ).coerceAtLeast(BUFFER_SIZE_FRAMES * 4)
+            SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT
+        ).coerceAtLeast(MIX_CHUNK_FRAMES * 4)
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -137,18 +131,15 @@ class StemPlayer {
     }
 
     fun getStemVolume(stemName: String): Float = stemVolumes[stemName] ?: 0f
-
-    fun getAvailableStems(): List<String> = stems.keys.toList()
+    fun getAvailableStems(): List<String> = stemFiles.keys.toList()
 
     fun play() {
-        if (stems.isEmpty() || isPlaying) return
-
+        if (stemFiles.isEmpty() || isPlaying) return
         isPlaying = true
         _playbackState.value = PlaybackState.PLAYING
-
         playbackThread = Thread({
             audioTrack?.play()
-            mixAndPlay()
+            streamAndMix()
         }, "StemPlayerThread").apply {
             priority = Thread.MAX_PRIORITY
             start()
@@ -168,139 +159,153 @@ class StemPlayer {
         playbackThread = null
         audioTrack?.stop()
         audioTrack?.flush()
-        playbackPosition = 0
+        playbackFramePos = 0
         _progress.value = 0f
     }
 
     fun seekTo(fraction: Float) {
-        val maxSamples = stems.values.maxOfOrNull { it.size } ?: return
-        playbackPosition = (fraction * maxSamples).toInt().coerceIn(0, maxSamples)
+        val maxFrames = stemFiles.values.maxOfOrNull { it.totalFrames } ?: return
+        playbackFramePos = (fraction * maxFrames).toLong().coerceIn(0, maxFrames)
     }
 
     fun release() {
         stop()
         audioTrack?.release()
         audioTrack = null
-        stems = emptyMap()
+        stemFiles = emptyMap()
     }
 
-    private fun mixAndPlay() {
+    /**
+     * Stream audio from disk, mix stems in real-time, write to AudioTrack.
+     */
+    private fun streamAndMix() {
         val track = audioTrack ?: return
-        val maxSamples = stems.values.maxOfOrNull { it.size } ?: return
-        val chunkSize = BUFFER_SIZE_FRAMES
-        val mixBuffer = FloatArray(chunkSize)
+        val maxFrames = stemFiles.values.maxOfOrNull { it.totalFrames } ?: return
 
-        while (isPlaying && playbackPosition < maxSamples) {
-            val remaining = (maxSamples - playbackPosition).coerceAtMost(chunkSize)
-
-            // Mix all stems
-            for (i in 0 until remaining) {
-                var sample = 0f
-                for ((name, data) in stems) {
-                    val vol = stemVolumes[name] ?: 0f
-                    if (vol > 0f) {
-                        val idx = playbackPosition + i
-                        if (idx < data.size) {
-                            sample += data[idx] * vol
-                        }
-                    }
-                }
-                mixBuffer[i] = sample.coerceIn(-1f, 1f)
+        // Open RandomAccessFile handles for each stem
+        val readers = mutableMapOf<String, RandomAccessFile>()
+        try {
+            for ((name, info) in stemFiles) {
+                readers[name] = RandomAccessFile(info.file, "r")
             }
 
-            track.write(mixBuffer, 0, remaining, AudioTrack.WRITE_BLOCKING)
-            playbackPosition += remaining
+            val mixBuffer = FloatArray(MIX_CHUNK_FRAMES)
+            // Per-stem read buffer (max: stereo 16-bit = 4 bytes per frame)
+            val readBuf = ByteArray(MIX_CHUNK_FRAMES * 4)
 
-            _progress.value = playbackPosition.toFloat() / maxSamples
+            while (isPlaying && playbackFramePos < maxFrames) {
+                val framesToRead = MIX_CHUNK_FRAMES.toLong().coerceAtMost(maxFrames - playbackFramePos).toInt()
+
+                // Clear mix buffer
+                for (i in 0 until framesToRead) mixBuffer[i] = 0f
+
+                // Read and mix each stem
+                for ((name, info) in stemFiles) {
+                    val vol = stemVolumes[name] ?: 0f
+                    if (vol <= 0f) continue
+
+                    val raf = readers[name] ?: continue
+                    val bytesPerFrame = info.channels * (info.bitsPerSample / 8)
+                    val bytesToRead = framesToRead * bytesPerFrame
+                    val filePos = info.dataOffset + playbackFramePos * bytesPerFrame
+
+                    if (filePos + bytesToRead > raf.length()) continue
+
+                    raf.seek(filePos)
+                    val read = raf.read(readBuf, 0, bytesToRead)
+                    if (read <= 0) continue
+
+                    // Decode and mix into buffer
+                    val bb = ByteBuffer.wrap(readBuf, 0, read).order(ByteOrder.LITTLE_ENDIAN)
+                    for (i in 0 until framesToRead) {
+                        if (bb.remaining() < bytesPerFrame) break
+                        var sample = 0f
+                        for (ch in 0 until info.channels) {
+                            sample += when (info.bitsPerSample) {
+                                16 -> bb.short.toFloat() / Short.MAX_VALUE
+                                24 -> {
+                                    val b0 = bb.get().toInt() and 0xFF
+                                    val b1 = bb.get().toInt() and 0xFF
+                                    val b2 = bb.get().toInt()
+                                    ((b2 shl 16) or (b1 shl 8) or b0).toFloat() / 8388607f
+                                }
+                                else -> { bb.short.toFloat() / Short.MAX_VALUE }
+                            }
+                        }
+                        mixBuffer[i] += (sample / info.channels) * vol
+                    }
+                }
+
+                // Clip
+                for (i in 0 until framesToRead) {
+                    mixBuffer[i] = mixBuffer[i].coerceIn(-1f, 1f)
+                }
+
+                track.write(mixBuffer, 0, framesToRead, AudioTrack.WRITE_BLOCKING)
+                playbackFramePos += framesToRead
+                _progress.value = playbackFramePos.toFloat() / maxFrames
+            }
+        } finally {
+            for (raf in readers.values) {
+                try { raf.close() } catch (_: Exception) {}
+            }
         }
 
-        if (playbackPosition >= maxSamples) {
+        if (playbackFramePos >= maxFrames) {
             _playbackState.value = PlaybackState.STOPPED
-            playbackPosition = 0
+            playbackFramePos = 0
             _progress.value = 0f
         }
     }
 
     /**
-     * Decode a WAV file to mono float samples.
-     * Handles both mono and stereo WAV files.
+     * Parse WAV header only — doesn't read audio data.
      */
-    private fun decodeWav(file: File): FloatArray? {
+    private fun parseWavHeader(file: File): StemInfo? {
         try {
-            val bytes = file.readBytes()
-            if (bytes.size < 44) return null
+            RandomAccessFile(file, "r").use { raf ->
+                if (raf.length() < 44) return null
 
-            val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                val header = ByteArray(44)
+                raf.read(header)
+                val buf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
 
-            // Parse WAV header
-            buf.position(22)
-            val channels = buf.short.toInt()
-            val sampleRate = buf.int
-            buf.position(34)
-            val bitsPerSample = buf.short.toInt()
+                buf.position(22)
+                val channels = buf.short.toInt()
+                val sampleRate = buf.int
+                buf.position(34)
+                val bitsPerSample = buf.short.toInt()
 
-            // Find data chunk
-            buf.position(36)
-            while (buf.remaining() > 8) {
-                val chunkId = ByteArray(4)
-                buf.get(chunkId)
-                val chunkSize = buf.int
-                if (String(chunkId) == "data") {
-                    val numSamples = chunkSize / (bitsPerSample / 8) / channels
+                // Find data chunk
+                raf.seek(36)
+                val chunkHeader = ByteArray(8)
+                while (raf.filePointer + 8 < raf.length()) {
+                    raf.read(chunkHeader)
+                    val chunkBuf = ByteBuffer.wrap(chunkHeader).order(ByteOrder.LITTLE_ENDIAN)
+                    val id = String(chunkHeader, 0, 4)
+                    val size = chunkBuf.getInt(4)
 
-                    // Decode to mono floats
-                    val mono = FloatArray(numSamples)
-                    for (i in 0 until numSamples) {
-                        if (buf.remaining() < channels * (bitsPerSample / 8)) break
-                        var sum = 0f
-                        for (ch in 0 until channels) {
-                            val sample = when (bitsPerSample) {
-                                16 -> buf.short.toFloat() / Short.MAX_VALUE
-                                24 -> {
-                                    val b0 = buf.get().toInt() and 0xFF
-                                    val b1 = buf.get().toInt() and 0xFF
-                                    val b2 = buf.get().toInt()
-                                    ((b2 shl 16) or (b1 shl 8) or b0).toFloat() / 8388607f
-                                }
-                                32 -> buf.float
-                                else -> 0f
-                            }
-                            sum += sample
-                        }
-                        mono[i] = sum / channels
+                    if (id == "data") {
+                        val dataOffset = raf.filePointer
+                        val bytesPerFrame = channels * (bitsPerSample / 8)
+                        val totalFrames = size.toLong() / bytesPerFrame
+
+                        return StemInfo(
+                            file = file,
+                            dataOffset = dataOffset,
+                            totalFrames = totalFrames,
+                            channels = channels,
+                            bitsPerSample = bitsPerSample,
+                            sampleRate = sampleRate
+                        )
+                    } else {
+                        raf.seek(raf.filePointer + size)
                     }
-
-                    // Resample to 44100 if needed
-                    return if (sampleRate != SAMPLE_RATE) {
-                        resample(mono, sampleRate, SAMPLE_RATE)
-                    } else mono
-                } else {
-                    // Skip non-data chunk
-                    if (buf.remaining() >= chunkSize) {
-                        buf.position(buf.position() + chunkSize)
-                    } else break
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
         return null
-    }
-
-    private fun resample(input: FloatArray, fromRate: Int, toRate: Int): FloatArray {
-        val ratio = toRate.toDouble() / fromRate
-        val outputSize = (input.size * ratio).toInt()
-        val output = FloatArray(outputSize)
-        for (i in output.indices) {
-            val srcPos = i / ratio
-            val srcIdx = srcPos.toInt()
-            val frac = (srcPos - srcIdx).toFloat()
-            output[i] = if (srcIdx + 1 < input.size) {
-                input[srcIdx] * (1 - frac) + input[srcIdx + 1] * frac
-            } else if (srcIdx < input.size) {
-                input[srcIdx]
-            } else 0f
-        }
-        return output
     }
 }
