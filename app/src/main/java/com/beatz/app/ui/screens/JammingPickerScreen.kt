@@ -1,7 +1,11 @@
 package com.beatz.app.ui.screens
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Environment
+import android.widget.Toast
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -38,6 +46,7 @@ fun JammingPickerScreen(
 ) {
     val context = LocalContext.current
     val stemDirs = remember { findStemDirectories(context.filesDir) }
+    var youtubeUrl by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -59,6 +68,57 @@ fun JammingPickerScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        // YouTube URL input
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Add from YouTube",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = youtubeUrl,
+                    onValueChange = { youtubeUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Paste YouTube URL...", fontSize = 13.sp) },
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")) {
+                            // Save URL to a file the PC script can watch
+                            val queueDir = File(context.filesDir, "youtube_queue")
+                            queueDir.mkdirs()
+                            val ts = System.currentTimeMillis()
+                            File(queueDir, "request_$ts.txt").writeText(youtubeUrl)
+                            Toast.makeText(context,
+                                "URL queued! Run on PC:\n./scripts/youtube-to-stems.sh '$youtubeUrl'",
+                                Toast.LENGTH_LONG).show()
+                            youtubeUrl = ""
+                        } else {
+                            Toast.makeText(context, "Invalid YouTube URL", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = youtubeUrl.isNotBlank()
+                ) {
+                    Text("Process Song")
+                }
+                Text(
+                    text = "Requires PC processing. Run the script shown in the toast on your computer.",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         if (stemDirs.isEmpty()) {
@@ -70,16 +130,13 @@ fun JammingPickerScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "No stems found",
+                        text = "No songs loaded yet",
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Process songs with Demucs first:\n" +
-                                "demucs -n htdemucs --out ~/Music/karaoke song.mp3\n\n" +
-                                "Then push stems to the device:\n" +
-                                "adb push ~/Music/karaoke/htdemucs/ /sdcard/Music/karaoke/htdemucs/",
+                        text = "Paste a YouTube URL above, then run the processing script on your PC.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
