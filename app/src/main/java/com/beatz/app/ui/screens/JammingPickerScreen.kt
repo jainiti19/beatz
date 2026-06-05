@@ -49,6 +49,7 @@ fun JammingPickerScreen(
     val stemDirs = remember { findStemDirectories(context.filesDir) }
     var youtubeUrl by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
+    var youtubeExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -78,54 +79,55 @@ fun JammingPickerScreen(
             OutlinedButton(onClick = onBack) { Text("Home", fontSize = 12.sp) }
         }
 
-        // YouTube URL input
+        // YouTube URL input (collapsible)
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
             )
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Add from YouTube",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = youtubeUrl,
-                    onValueChange = { youtubeUrl = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Paste YouTube URL...", fontSize = 13.sp) },
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        if (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")) {
-                            // Save URL to a file the PC script can watch
-                            val queueDir = File(context.filesDir, "youtube_queue")
-                            queueDir.mkdirs()
-                            val ts = System.currentTimeMillis()
-                            File(queueDir, "request_$ts.txt").writeText(youtubeUrl)
-                            Toast.makeText(context,
-                                "URL queued! Processing will start automatically...",
-                                Toast.LENGTH_LONG).show()
-                            youtubeUrl = ""
-                        } else {
-                            Toast.makeText(context, "Invalid YouTube URL", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = youtubeUrl.isNotBlank()
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { youtubeExpanded = !youtubeExpanded }
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Process Song")
+                    Text("Add from YouTube", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(if (youtubeExpanded) "▲" else "▼", fontSize = 14.sp)
                 }
-                Text(
-                    text = "Processing happens on your PC automatically (keep it connected via USB).",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (youtubeExpanded) {
+                    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                        OutlinedTextField(
+                            value = youtubeUrl,
+                            onValueChange = { youtubeUrl = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Paste YouTube URL...", fontSize = 13.sp) },
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                if (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")) {
+                                    val queueDir = File(context.filesDir, "youtube_queue")
+                                    queueDir.mkdirs()
+                                    val ts = System.currentTimeMillis()
+                                    File(queueDir, "request_$ts.txt").writeText(youtubeUrl)
+                                    Toast.makeText(context,
+                                        "URL queued! Processing will start automatically...",
+                                        Toast.LENGTH_LONG).show()
+                                    youtubeUrl = ""
+                                } else {
+                                    Toast.makeText(context, "Invalid YouTube URL", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = youtubeUrl.isNotBlank()
+                        ) { Text("Process Song") }
+                    }
+                }
             }
         }
 

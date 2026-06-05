@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Beatz" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#2E7D32</item>
+        <item name="android:statusBarColor">#00897B</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
