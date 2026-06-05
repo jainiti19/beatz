@@ -73,6 +73,9 @@ fun JammingScreen(
     var lyricsExpanded by remember { mutableStateOf(false) }
     var rhythmGenerating by remember { mutableStateOf(false) }
     var detectedBpm by remember(stemDirPath) { mutableStateOf(0f) }
+    var adjustedBpm by remember(stemDirPath) { mutableStateOf(0f) }
+    var activeDholak by remember(stemDirPath) { mutableStateOf(false) }
+    var activeCajon by remember(stemDirPath) { mutableStateOf(false) }
 
     // Load saved lyrics
     LaunchedEffect(stemDirPath) {
@@ -117,6 +120,7 @@ fun JammingScreen(
             val refWav = if (drumsWav.exists()) drumsWav else otherWav
             if (refWav.exists()) {
                 detectedBpm = detectBpmFromWav(refWav)
+                adjustedBpm = detectedBpm
             }
         }
     }
@@ -298,44 +302,140 @@ fun JammingScreen(
 
                 // --- Collapsible: Add Rhythm ---
                 CollapsibleSection(
-                    title = "Add Rhythm" + if (rhythmGenerating) " (generating...)" else if (detectedBpm > 0f) " (${detectedBpm.toInt()} BPM)" else " (detecting BPM...)",
+                    title = "Add Rhythm" + if (rhythmGenerating) " (generating...)" else if (adjustedBpm > 0f) " (${adjustedBpm.toInt()} BPM)" else " (detecting BPM...)",
                     expanded = rhythmExpanded,
                     onToggle = { rhythmExpanded = !rhythmExpanded }
                 ) {
                     val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.Main)
+
+                    // BPM slider
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    generateAndAddRhythm(
-                                        stemDirPath, stemPlayer, "dholak",
-                                        RhythmTrackGenerator.Instrument.DHOLAK, "Keherwa",
-                                        detectedBpm,
-                                        { rhythmGenerating = it }, { updateVolumes() }
-                                    )
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = !rhythmGenerating && detectedBpm > 0f
-                        ) { Text("Dholak", fontSize = 13.sp) }
+                        Text("BPM", fontSize = 13.sp, modifier = Modifier.weight(0.12f))
+                        Slider(
+                            value = adjustedBpm,
+                            onValueChange = { adjustedBpm = it },
+                            valueRange = 60f..200f,
+                            modifier = Modifier.weight(0.6f),
+                            enabled = detectedBpm > 0f
+                        )
+                        Text(
+                            text = "${adjustedBpm.toInt()}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(0.1f)
+                        )
+                        if (adjustedBpm != detectedBpm && detectedBpm > 0f) {
+                            OutlinedButton(
+                                onClick = { adjustedBpm = detectedBpm },
+                                modifier = Modifier.weight(0.18f).height(32.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                            ) { Text("Reset", fontSize = 10.sp) }
+                        } else {
+                            Spacer(modifier = Modifier.weight(0.18f))
+                        }
+                    }
 
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    generateAndAddRhythm(
-                                        stemDirPath, stemPlayer, "cajon",
-                                        RhythmTrackGenerator.Instrument.CAJON, "Pop/Rock",
-                                        detectedBpm,
-                                        { rhythmGenerating = it }, { updateVolumes() }
-                                    )
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = !rhythmGenerating && detectedBpm > 0f
-                        ) { Text("Cajon", fontSize = 13.sp) }
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Dholak row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (!activeDholak) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        generateAndAddRhythm(
+                                            stemDirPath, stemPlayer, "dholak",
+                                            RhythmTrackGenerator.Instrument.DHOLAK, "Keherwa",
+                                            adjustedBpm,
+                                            { rhythmGenerating = it }, { updateVolumes() }
+                                        )
+                                        activeDholak = true
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = !rhythmGenerating && adjustedBpm > 0f
+                            ) { Text("Add Dholak", fontSize = 13.sp) }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        generateAndAddRhythm(
+                                            stemDirPath, stemPlayer, "dholak",
+                                            RhythmTrackGenerator.Instrument.DHOLAK, "Keherwa",
+                                            adjustedBpm,
+                                            { rhythmGenerating = it }, { updateVolumes() }
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = !rhythmGenerating
+                            ) { Text("Resync Dholak", fontSize = 12.sp) }
+                            OutlinedButton(
+                                onClick = {
+                                    stemPlayer.removeStem("dholak")
+                                    updateVolumes()
+                                    activeDholak = false
+                                },
+                                modifier = Modifier.weight(0.5f)
+                            ) { Text("Off", fontSize = 12.sp) }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Cajon row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (!activeCajon) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        generateAndAddRhythm(
+                                            stemDirPath, stemPlayer, "cajon",
+                                            RhythmTrackGenerator.Instrument.CAJON, "Pop/Rock",
+                                            adjustedBpm,
+                                            { rhythmGenerating = it }, { updateVolumes() }
+                                        )
+                                        activeCajon = true
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = !rhythmGenerating && adjustedBpm > 0f
+                            ) { Text("Add Cajon", fontSize = 13.sp) }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        generateAndAddRhythm(
+                                            stemDirPath, stemPlayer, "cajon",
+                                            RhythmTrackGenerator.Instrument.CAJON, "Pop/Rock",
+                                            adjustedBpm,
+                                            { rhythmGenerating = it }, { updateVolumes() }
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = !rhythmGenerating
+                            ) { Text("Resync Cajon", fontSize = 12.sp) }
+                            OutlinedButton(
+                                onClick = {
+                                    stemPlayer.removeStem("cajon")
+                                    updateVolumes()
+                                    activeCajon = false
+                                },
+                                modifier = Modifier.weight(0.5f)
+                            ) { Text("Off", fontSize = 12.sp) }
+                        }
                     }
                 }
 

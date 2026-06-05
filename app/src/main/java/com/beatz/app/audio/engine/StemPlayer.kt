@@ -142,6 +142,11 @@ class StemPlayer {
         return true
     }
 
+    fun removeStem(name: String) {
+        stemFiles = stemFiles - name
+        stemVolumes.remove(name)
+    }
+
     fun setSpeed(newSpeed: Float) {
         speed = newSpeed.coerceIn(0.5f, 1.5f)
         audioTrack?.playbackRate = (SAMPLE_RATE * speed).toInt()

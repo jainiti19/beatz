@@ -46,9 +46,18 @@ object RhythmTrackGenerator {
                 ?: CajonSynthesizer.POP_ROCK).map { RhythmHit(it.beatOffset, it.sound, it.velocity) }
         }
 
-        // Place pattern hits across the full duration, one bar at a time
+        // Place pattern hits with variation across the full duration
         var barStart = 0f
+        var barNumber = 0
+        val random = kotlin.random.Random
+
         while (barStart < totalDurationSeconds) {
+            barNumber++
+            val isAccentBar = barNumber % 4 == 1  // Accent every 4 bars
+            val isFillBar = barNumber % 8 == 0     // Fill every 8 bars
+            // Gradual intensity: softer at start, builds up
+            val intensityCurve = (barStart / totalDurationSeconds * 0.3f + 0.7f).coerceIn(0.7f, 1.0f)
+
             for (hit in pattern) {
                 val hitTime = barStart + hit.beatOffset * beatDuration
                 if (hitTime >= totalDurationSeconds) break
@@ -56,16 +65,19 @@ object RhythmTrackGenerator {
                 val hitSample = (hitTime * SAMPLE_RATE).toInt()
                 if (hitSample >= totalSamples) continue
 
-                // Add slight humanization: ±5ms timing jitter
-                val jitter = ((kotlin.random.Random.nextFloat() - 0.5f) * 0.01f * SAMPLE_RATE).toInt()
+                // Humanization: ±5ms jitter, varies per bar
+                val jitter = ((random.nextFloat() - 0.5f) * 0.01f * SAMPLE_RATE).toInt()
                 val offset = (hitSample + jitter).coerceIn(0, totalSamples - 1)
 
-                // Slight velocity variation for natural feel
-                val velVariation = hit.velocity * (0.9f + kotlin.random.Random.nextFloat() * 0.1f)
+                // Dynamic velocity
+                var vel = hit.velocity * intensityCurve
+                if (isAccentBar && hit.beatOffset == 0f) vel *= 1.2f  // Accent downbeat
+                vel *= (0.85f + random.nextFloat() * 0.15f)           // Human variation
+                vel = vel.coerceIn(0.1f, 1.0f)
 
                 val sound = when (instrument) {
-                    Instrument.DHOLAK -> DholakSynthesizer.generateHit(hit.sound, velVariation)
-                    Instrument.CAJON -> CajonSynthesizer.generateHit(hit.sound, velVariation)
+                    Instrument.DHOLAK -> DholakSynthesizer.generateHit(hit.sound, vel)
+                    Instrument.CAJON -> CajonSynthesizer.generateHit(hit.sound, vel)
                 }
 
                 for (i in sound.indices) {
@@ -75,6 +87,26 @@ object RhythmTrackGenerator {
                     }
                 }
             }
+
+            // Add a fill at the end of every 8 bars
+            if (isFillBar) {
+                val fillStart = barStart + 3f * beatDuration  // Last beat of bar
+                for (fillHit in 0..3) {
+                    val fillTime = fillStart + fillHit * beatDuration * 0.25f
+                    val fillSample = (fillTime * SAMPLE_RATE).toInt()
+                    if (fillSample >= totalSamples) break
+
+                    val fillSound = when (instrument) {
+                        Instrument.DHOLAK -> DholakSynthesizer.na(0.5f + fillHit * 0.1f)
+                        Instrument.CAJON -> CajonSynthesizer.slap(0.5f + fillHit * 0.1f)
+                    }
+                    for (i in fillSound.indices) {
+                        val outIdx = fillSample + i
+                        if (outIdx < totalSamples) output[outIdx] += fillSound[i]
+                    }
+                }
+            }
+
             barStart += barDuration
         }
 
