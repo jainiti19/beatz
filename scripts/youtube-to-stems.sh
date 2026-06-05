@@ -61,18 +61,31 @@ echo ""
 echo "=== Step 4: Pushing to device ==="
 ADB=~/Android/platform-tools/adb
 
-if $ADB devices 2>/dev/null | grep -q "device$"; then
-  $ADB shell "run-as com.beatz.app mkdir -p /data/data/com.beatz.app/files/stems/$NAME"
+# Find a real device (not emulator)
+DEVICE=$($ADB devices | grep -v emulator | grep "device$" | head -1 | awk '{print $1}')
+if [ -z "$DEVICE" ]; then
+  # Fall back to any connected device
+  DEVICE=$($ADB devices | grep "device$" | head -1 | awk '{print $1}')
+fi
+
+if [ -n "$DEVICE" ]; then
+  echo "Pushing to device: $DEVICE"
+  $ADB -s "$DEVICE" shell "run-as com.beatz.app mkdir -p /data/data/com.beatz.app/files/stems/$NAME"
   for stem in vocals drums bass other; do
-    $ADB shell "mkdir -p /sdcard/Music/karaoke/htdemucs/$NAME"
-    $ADB push "$FINAL_DIR/$stem.wav" "/sdcard/Music/karaoke/htdemucs/${NAME}/$stem.wav" 2>/dev/null
-    $ADB shell "cat /sdcard/Music/karaoke/htdemucs/${NAME}/$stem.wav | run-as com.beatz.app tee /data/data/com.beatz.app/files/stems/${NAME}/$stem.wav > /dev/null"
+    if [ -f "$FINAL_DIR/$stem.wav" ]; then
+      echo "  Pushing $stem.wav..."
+      $ADB -s "$DEVICE" push "$FINAL_DIR/$stem.wav" "/data/local/tmp/${stem}.wav" 2>/dev/null
+      $ADB -s "$DEVICE" shell "cat /data/local/tmp/${stem}.wav | run-as com.beatz.app sh -c 'cat > /data/data/com.beatz.app/files/stems/${NAME}/${stem}.wav'"
+      $ADB -s "$DEVICE" shell "rm /data/local/tmp/${stem}.wav"
+    fi
   done
   # Push lyrics
   if [ -f "$FINAL_DIR/lyrics.txt" ]; then
-    $ADB shell "run-as com.beatz.app mkdir -p /data/data/com.beatz.app/files/lyrics"
-    $ADB push "$FINAL_DIR/lyrics.txt" "/sdcard/lyrics_temp.txt" 2>/dev/null
-    $ADB shell "cat /sdcard/lyrics_temp.txt | run-as com.beatz.app tee /data/data/com.beatz.app/files/lyrics/${NAME}.txt > /dev/null"
+    echo "  Pushing lyrics..."
+    $ADB -s "$DEVICE" shell "run-as com.beatz.app mkdir -p /data/data/com.beatz.app/files/lyrics"
+    $ADB -s "$DEVICE" push "$FINAL_DIR/lyrics.txt" "/data/local/tmp/lyrics_temp.txt" 2>/dev/null
+    $ADB -s "$DEVICE" shell "cat /data/local/tmp/lyrics_temp.txt | run-as com.beatz.app sh -c 'cat > /data/data/com.beatz.app/files/lyrics/${NAME}.txt'"
+    $ADB -s "$DEVICE" shell "rm /data/local/tmp/lyrics_temp.txt"
   fi
   echo "Done! Open Beatz → Jamming Mode → $NAME"
 else

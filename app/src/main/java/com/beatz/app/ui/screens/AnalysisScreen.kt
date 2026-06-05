@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.beatz.app.audio.analysis.ChordSegment
 import com.beatz.app.data.model.AnalysisResult
 import com.beatz.app.viewmodel.AnalysisUiState
 import com.beatz.app.viewmodel.AnalysisViewModel
@@ -83,6 +86,10 @@ fun AnalysisScreen(
 
             is AnalysisUiState.Done -> {
                 AnalysisResultCard(result = state.result)
+                if (state.result.chordTimeline.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    ChordTimelineCard(chords = state.result.chordTimeline)
+                }
                 Spacer(modifier = Modifier.height(32.dp))
                 Button(
                     onClick = { onAnalysisDone(state.result) },
@@ -143,6 +150,62 @@ private fun ResultRow(label: String, value: String) {
             color = MaterialTheme.colorScheme.onSurface
         )
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChordTimelineCard(chords: List<ChordSegment>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text(
+                text = "Chords",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                for (seg in chords) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = seg.chord,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "${formatTime(seg.startTime)}-${formatTime(seg.endTime)}",
+                                fontSize = 9.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatTime(seconds: Float): String {
+    val m = (seconds / 60).toInt()
+    val s = (seconds % 60).toInt()
+    return "%d:%02d".format(m, s)
 }
 
 private fun formatDuration(seconds: Float): String {

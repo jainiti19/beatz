@@ -1,5 +1,6 @@
 package com.beatz.app.data.model
 
+import com.beatz.app.audio.analysis.ChordSegment
 import com.beatz.app.audio.analysis.MelodyNote
 
 data class AnalysisResult(
@@ -8,5 +9,6 @@ data class AnalysisResult(
     val durationSeconds: Float,
     val sampleRate: Int,
     val channels: Int,
-    val melodyNotes: List<MelodyNote> = emptyList()
+    val melodyNotes: List<MelodyNote> = emptyList(),
+    val chordTimeline: List<ChordSegment> = emptyList()
 )

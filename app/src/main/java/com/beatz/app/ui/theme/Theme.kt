@@ -1,46 +1,41 @@
 package com.beatz.app.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFFBB86FC),
-    secondary = Color(0xFF03DAC5),
-    tertiary = Color(0xFFCF6679)
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF6200EE),
-    secondary = Color(0xFF03DAC5),
-    tertiary = Color(0xFF3700B3)
+private val BeatzColorScheme = lightColorScheme(
+    primary = Color(0xFF2E7D32),           // Dark green
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFC8E6C9),  // Light green
+    onPrimaryContainer = Color(0xFF1B5E20),
+    secondary = Color(0xFF43A047),          // Medium green
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE8F5E9),
+    onSecondaryContainer = Color(0xFF2E7D32),
+    tertiary = Color(0xFF66BB6A),           // Lighter green
+    background = Color.White,
+    onBackground = Color(0xFF1C1B1F),
+    surface = Color.White,
+    onSurface = Color(0xFF1C1B1F),
+    surfaceVariant = Color(0xFFF1F8E9),    // Very light green tint
+    onSurfaceVariant = Color(0xFF49454F),
+    error = Color(0xFFB3261E),
+    onError = Color.White,
+    errorContainer = Color(0xFFF9DEDC),
+    onErrorContainer = Color(0xFF410E0B),
+    outline = Color(0xFFA5D6A7),           // Green outline
 )
 
 @Composable
 fun BeatzTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    darkTheme: Boolean = false,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context)
-            else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = BeatzColorScheme,
         content = content
     )
 }

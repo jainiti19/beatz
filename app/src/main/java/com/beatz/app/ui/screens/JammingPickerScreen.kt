@@ -47,6 +47,7 @@ fun JammingPickerScreen(
     val context = LocalContext.current
     val stemDirs = remember { findStemDirectories(context.filesDir) }
     var youtubeUrl by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -99,7 +100,7 @@ fun JammingPickerScreen(
                             val ts = System.currentTimeMillis()
                             File(queueDir, "request_$ts.txt").writeText(youtubeUrl)
                             Toast.makeText(context,
-                                "URL queued! Run on PC:\n./scripts/youtube-to-stems.sh '$youtubeUrl'",
+                                "URL queued! Processing will start automatically...",
                                 Toast.LENGTH_LONG).show()
                             youtubeUrl = ""
                         } else {
@@ -112,14 +113,32 @@ fun JammingPickerScreen(
                     Text("Process Song")
                 }
                 Text(
-                    text = "Requires PC processing. Run the script shown in the toast on your computer.",
+                    text = "Processing happens on your PC automatically (keep it connected via USB).",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        // Search filter
+        if (stemDirs.size > 3) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search songs...", fontSize = 13.sp) },
+                singleLine = true
+            )
+        }
+
+        val filteredDirs = if (searchQuery.isBlank()) stemDirs
+            else stemDirs.filter { it.name.contains(searchQuery, ignoreCase = true) }
+
+        Text(
+            text = "${filteredDirs.size} songs",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         if (stemDirs.isEmpty()) {
             Card(
@@ -136,14 +155,14 @@ fun JammingPickerScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Paste a YouTube URL above, then run the processing script on your PC.",
+                        text = "Paste a YouTube URL above — it will be processed automatically.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
                 }
             }
         } else {
-            for (dir in stemDirs) {
+            for (dir in filteredDirs) {
                 val stemCount = countStems(dir)
                 Card(
                     modifier = Modifier
@@ -158,7 +177,7 @@ fun JammingPickerScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = dir.name,
+                                text = dir.name.replace("_", " "),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium
                             )

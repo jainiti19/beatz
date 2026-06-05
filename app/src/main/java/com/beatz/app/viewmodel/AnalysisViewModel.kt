@@ -2,6 +2,7 @@ package com.beatz.app.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.beatz.app.audio.analysis.ChordDetector
 import com.beatz.app.audio.analysis.KeyDetector
 import com.beatz.app.audio.analysis.MelodyExtractor
 import com.beatz.app.audio.analysis.TempoDetector
@@ -39,13 +40,19 @@ class AnalysisViewModel : ViewModel() {
                 _uiState.value = AnalysisUiState.Analyzing("Extracting melody...")
                 val melodyNotes = MelodyExtractor.extract(audio, bpm)
 
+                // Step 5: Detect chords (decode full song for this)
+                _uiState.value = AnalysisUiState.Analyzing("Detecting chords...")
+                val fullAudio = Mp3Decoder.decode(File(filePath))
+                val chordTimeline = ChordDetector.detect(fullAudio)
+
                 val result = AnalysisResult(
                     bpm = bpm,
                     key = key,
                     durationSeconds = audio.durationSeconds,
                     sampleRate = audio.sampleRate,
                     channels = audio.channels,
-                    melodyNotes = melodyNotes
+                    melodyNotes = melodyNotes,
+                    chordTimeline = chordTimeline
                 )
 
                 _uiState.value = AnalysisUiState.Done(result)

@@ -34,6 +34,9 @@ class StemPlayer {
     @Volatile
     private var playbackFramePos = 0L
 
+    @Volatile
+    private var speed = 1.0f
+
     private val _playbackState = MutableStateFlow(PlaybackState.STOPPED)
     val playbackState: StateFlow<PlaybackState> = _playbackState
 
@@ -124,6 +127,23 @@ class StemPlayer {
             .setBufferSizeInBytes(bufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+    }
+
+    /**
+     * Add a stem dynamically (e.g. a generated guitar track).
+     * Can be called after initial loadStems().
+     */
+    fun addStem(name: String, file: File, defaultVolume: Float = 0.7f): Boolean {
+        if (!file.exists()) return false
+        val info = parseWavHeader(file) ?: return false
+        stemFiles = stemFiles + (name to info)
+        stemVolumes[name] = defaultVolume
+        return true
+    }
+
+    fun setSpeed(newSpeed: Float) {
+        speed = newSpeed.coerceIn(0.5f, 1.5f)
+        audioTrack?.playbackRate = (SAMPLE_RATE * speed).toInt()
     }
 
     fun setStemVolume(stemName: String, volume: Float) {

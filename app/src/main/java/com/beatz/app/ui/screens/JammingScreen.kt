@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -56,6 +57,10 @@ fun JammingScreen(
     var showLyrics by remember { mutableStateOf(false) }
     var lyricsText by remember(stemDirPath) { mutableStateOf("") }
     var isEditingLyrics by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableStateOf(1.0f) }
+    var mixerExpanded by remember { mutableStateOf(false) }
+    var speedExpanded by remember { mutableStateOf(false) }
+    var lyricsExpanded by remember { mutableStateOf(false) }
 
     // Load saved lyrics
     LaunchedEffect(stemDirPath) {
@@ -64,6 +69,7 @@ fun JammingScreen(
             lyricsText = lyricsFile.readText()
         }
     }
+
     val playbackState by stemPlayer.playbackState.collectAsState()
     val progress by stemPlayer.progress.collectAsState()
     val duration by stemPlayer.durationSeconds.collectAsState()
@@ -81,15 +87,16 @@ fun JammingScreen(
         updateVolumes()
     }
 
+    // Load stems
     LaunchedEffect(stemDirPath) {
         loadState = LoadState.Loading
         val success = stemPlayer.loadStems(File(stemDirPath))
-        if (success) {
-            updateVolumes()
-            loadState = LoadState.Ready
-        } else {
+        if (!success) {
             loadState = LoadState.Error("No stem files found in directory")
+            return@LaunchedEffect
         }
+        updateVolumes()
+        loadState = LoadState.Ready
     }
 
     DisposableEffect(stemDirPath) {
@@ -103,18 +110,28 @@ fun JammingScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "Jamming Mode",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-
-        Text(
-            text = songName,
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Jamming Mode",
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = songName.replace("_", " "),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            OutlinedButton(
+                onClick = { stemPlayer.stop(); onBack() }
+            ) { Text("Songs", fontSize = 12.sp) }
+        }
 
         when (loadState) {
             is LoadState.Idle, is LoadState.Loading -> {
@@ -160,10 +177,20 @@ fun JammingScreen(
                 ) {
                     FilledIconButton(
                         onClick = { stemPlayer.stop() },
-                        modifier = Modifier.size(48.dp)
-                    ) { Text("■", fontSize = 18.sp) }
+                        modifier = Modifier.size(44.dp)
+                    ) { Text("■", fontSize = 16.sp) }
 
-                    Spacer(modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.size(8.dp))
+
+                    FilledIconButton(
+                        onClick = {
+                            val newFrac = ((progress * duration - 10f) / duration).coerceAtLeast(0f)
+                            stemPlayer.seekTo(newFrac)
+                        },
+                        modifier = Modifier.size(44.dp)
+                    ) { Text("-10", fontSize = 12.sp) }
+
+                    Spacer(modifier = Modifier.size(8.dp))
 
                     FilledIconButton(
                         onClick = {
@@ -180,36 +207,19 @@ fun JammingScreen(
                             fontSize = 24.sp
                         )
                     }
+
+                    Spacer(modifier = Modifier.size(8.dp))
+
+                    FilledIconButton(
+                        onClick = {
+                            val newFrac = ((progress * duration + 10f) / duration).coerceAtMost(1f)
+                            stemPlayer.seekTo(newFrac)
+                        },
+                        modifier = Modifier.size(44.dp)
+                    ) { Text("+10", fontSize = 12.sp) }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Stem Mixer
-                Text("Stem Mixer", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-
-                val stemDisplayNames = mapOf(
-                    "vocals" to "Vocals",
-                    "drums" to "Drums",
-                    "bass" to "Bass",
-                    "other" to "Harmony / Melody"
-                )
-
-                for (stemName in listOf("vocals", "drums", "bass", "other")) {
-                    val volume = stemVolumes[stemName] ?: continue
-                    StemMixerCard(
-                        name = stemDisplayNames[stemName] ?: stemName,
-                        volume = volume,
-                        isVocals = stemName == "vocals",
-                        onVolumeChange = { setStemVolume(stemName, it) }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Presets
-                Text("Presets", fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-
+                // Presets row (always visible — quick access)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -232,29 +242,83 @@ fun JammingScreen(
 
                     OutlinedButton(
                         onClick = {
-                            setStemVolume("vocals", 0f); setStemVolume("drums", 0.3f)
-                            setStemVolume("bass", 0.8f); setStemVolume("other", 0.8f)
+                            setStemVolume("vocals", 0f); setStemVolume("drums", 0.7f)
+                            setStemVolume("bass", 0.8f); setStemVolume("other", 0.4f)
                         },
                         modifier = Modifier.weight(1f)
                     ) { Text("Jamming", fontSize = 12.sp) }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Lyrics section
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // --- Collapsible: Stem Mixer ---
+                CollapsibleSection(
+                    title = "Stem Mixer",
+                    expanded = mixerExpanded,
+                    onToggle = { mixerExpanded = !mixerExpanded }
                 ) {
-                    Text("Lyrics", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Switch(
-                        checked = showLyrics,
-                        onCheckedChange = { showLyrics = it }
+                    val stemDisplayNames = mapOf(
+                        "vocals" to "Vocals",
+                        "drums" to "Drums",
+                        "bass" to "Bass",
+                        "other" to "Harmony / Melody"
                     )
+                    for (stemName in listOf("vocals", "drums", "bass", "other")) {
+                        val volume = stemVolumes[stemName] ?: continue
+                        StemMixerCard(
+                            name = stemDisplayNames[stemName] ?: stemName,
+                            volume = volume,
+                            isVocals = stemName == "vocals",
+                            onVolumeChange = { setStemVolume(stemName, it) }
+                        )
+                    }
                 }
 
-                if (showLyrics) {
+                // --- Collapsible: Speed ---
+                CollapsibleSection(
+                    title = "Speed" + if (playbackSpeed != 1.0f) " (%.1fx)".format(playbackSpeed) else "",
+                    expanded = speedExpanded,
+                    onToggle = { speedExpanded = !speedExpanded }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Slider(
+                            value = playbackSpeed,
+                            onValueChange = {
+                                playbackSpeed = it
+                                stemPlayer.setSpeed(it)
+                            },
+                            valueRange = 0.5f..1.5f,
+                            steps = 4,
+                            modifier = Modifier.weight(0.7f)
+                        )
+                        Text(
+                            text = "%.1fx".format(playbackSpeed),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(0.12f)
+                        )
+                        if (playbackSpeed != 1.0f) {
+                            OutlinedButton(
+                                onClick = {
+                                    playbackSpeed = 1.0f
+                                    stemPlayer.setSpeed(1.0f)
+                                },
+                                modifier = Modifier.weight(0.18f).height(32.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                            ) { Text("1x", fontSize = 11.sp) }
+                        } else {
+                            Spacer(modifier = Modifier.weight(0.18f))
+                        }
+                    }
+                }
+
+                // --- Collapsible: Lyrics ---
+                CollapsibleSection(
+                    title = "Lyrics",
+                    expanded = lyricsExpanded,
+                    onToggle = { lyricsExpanded = !lyricsExpanded }
+                ) {
                     if (isEditingLyrics || lyricsText.isEmpty()) {
                         OutlinedTextField(
                             value = lyricsText,
@@ -269,7 +333,6 @@ fun JammingScreen(
                         ) {
                             OutlinedButton(
                                 onClick = {
-                                    // Save lyrics to file
                                     val lyricsDir = File(context.filesDir, "lyrics")
                                     lyricsDir.mkdirs()
                                     File(lyricsDir, "${songName}.txt").writeText(lyricsText)
@@ -286,7 +349,6 @@ fun JammingScreen(
                             }
                         }
                     } else {
-                        // Display mode — scrollable lyrics
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
@@ -308,15 +370,44 @@ fun JammingScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+}
 
-                OutlinedButton(
-                    onClick = {
-                        stemPlayer.stop()
-                        onBack()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Pick Another Song") }
+@Composable
+private fun CollapsibleSection(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggle() }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (expanded) "▲" else "▼", fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    content()
+                }
             }
         }
     }
