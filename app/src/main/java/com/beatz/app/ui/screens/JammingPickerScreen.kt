@@ -91,28 +91,40 @@ fun JammingPickerScreen(
                             value = youtubeUrl,
                             onValueChange = { youtubeUrl = it },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Paste YouTube URL...", fontSize = 13.sp) },
+                            placeholder = { Text("Song name or YouTube URL...", fontSize = 13.sp) },
                             singleLine = true
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                if (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")) {
-                                    val queueDir = File(context.filesDir, "youtube_queue")
-                                    queueDir.mkdirs()
-                                    val ts = System.currentTimeMillis()
-                                    File(queueDir, "request_$ts.txt").writeText(youtubeUrl)
-                                    Toast.makeText(context,
-                                        "URL queued! Processing will start automatically...",
-                                        Toast.LENGTH_LONG).show()
-                                    youtubeUrl = ""
-                                } else {
-                                    Toast.makeText(context, "Invalid YouTube URL", Toast.LENGTH_SHORT).show()
-                                }
-                            },
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = youtubeUrl.isNotBlank()
-                        ) { Text("Process Song") }
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val input = youtubeUrl.trim()
+                                    if (input.isNotBlank()) {
+                                        val queueDir = File(context.filesDir, "youtube_queue")
+                                        queueDir.mkdirs()
+                                        val ts = System.currentTimeMillis()
+                                        // Prefix with "search:" if not a URL
+                                        val query = if (input.contains("youtube.com") || input.contains("youtu.be"))
+                                            input else "search:$input"
+                                        File(queueDir, "request_$ts.txt").writeText(query)
+                                        Toast.makeText(context,
+                                            "Queued! Processing will start automatically...",
+                                            Toast.LENGTH_LONG).show()
+                                        youtubeUrl = ""
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = youtubeUrl.isNotBlank()
+                            ) { Text("Add Song") }
+                        }
+                        Text(
+                            text = "Type a song name (e.g. \"Tum Hi Ho\") or paste a YouTube URL",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
