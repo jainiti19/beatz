@@ -38,6 +38,13 @@ class StemPlayer {
     @Volatile
     private var speed = 1.0f
 
+    @Volatile
+    private var loopStartFrac = 0f
+    @Volatile
+    private var loopEndFrac = 1f
+    @Volatile
+    private var loopEnabled = false
+
     private val _playbackState = MutableStateFlow(PlaybackState.STOPPED)
     val playbackState: StateFlow<PlaybackState> = _playbackState
 
@@ -141,6 +148,20 @@ class StemPlayer {
         stemVolumes[name] = defaultVolume
         return true
     }
+
+    fun setLoop(startFrac: Float, endFrac: Float) {
+        loopStartFrac = startFrac.coerceIn(0f, 1f)
+        loopEndFrac = endFrac.coerceIn(loopStartFrac, 1f)
+        loopEnabled = true
+    }
+
+    fun clearLoop() {
+        loopEnabled = false
+        loopStartFrac = 0f
+        loopEndFrac = 1f
+    }
+
+    fun isLooping(): Boolean = loopEnabled
 
     fun removeStem(name: String) {
         stemFiles = stemFiles - name
@@ -278,6 +299,14 @@ class StemPlayer {
                 track.write(mixBuffer, 0, framesToRead, AudioTrack.WRITE_BLOCKING)
                 playbackFramePos += framesToRead
                 _progress.value = playbackFramePos.toFloat() / maxFrames
+
+                // Loop: jump back to start when reaching loop end
+                if (loopEnabled) {
+                    val loopEnd = (loopEndFrac * maxFrames).toLong()
+                    if (playbackFramePos >= loopEnd) {
+                        playbackFramePos = (loopStartFrac * maxFrames).toLong()
+                    }
+                }
             }
         } finally {
             for (raf in readers.values) {

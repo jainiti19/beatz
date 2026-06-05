@@ -74,6 +74,10 @@ fun JammingScreen(
     var rhythmGenerating by remember { mutableStateOf(false) }
     var detectedBpm by remember(stemDirPath) { mutableStateOf(0f) }
     var adjustedBpm by remember(stemDirPath) { mutableStateOf(0f) }
+    var loopExpanded by remember { mutableStateOf(false) }
+    var loopActive by remember { mutableStateOf(false) }
+    var loopStart by remember { mutableStateOf(0f) }
+    var loopEnd by remember { mutableStateOf(1f) }
     var activeDholak by remember(stemDirPath) { mutableStateOf(false) }
     var activeCajon by remember(stemDirPath) { mutableStateOf(false) }
 
@@ -435,6 +439,80 @@ fun JammingScreen(
                                 },
                                 modifier = Modifier.weight(0.5f)
                             ) { Text("Off", fontSize = 12.sp) }
+                        }
+                    }
+                }
+
+                // --- Collapsible: Loop ---
+                CollapsibleSection(
+                    title = "Loop" + if (loopActive) " (ON)" else "",
+                    expanded = loopExpanded,
+                    onToggle = { loopExpanded = !loopExpanded }
+                ) {
+                    Text("Set A-B points to loop a section", fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("A", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Slider(
+                            value = loopStart,
+                            onValueChange = { loopStart = it.coerceAtMost(loopEnd - 0.02f) },
+                            valueRange = 0f..1f,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(formatTime((loopStart * duration).toInt()), fontSize = 11.sp)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("B", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Slider(
+                            value = loopEnd,
+                            onValueChange = { loopEnd = it.coerceAtLeast(loopStart + 0.02f) },
+                            valueRange = 0f..1f,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(formatTime((loopEnd * duration).toInt()), fontSize = 11.sp)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                // Set A to current position
+                                loopStart = progress
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("A = Now", fontSize = 11.sp) }
+                        OutlinedButton(
+                            onClick = {
+                                // Set B to current position
+                                loopEnd = progress.coerceAtLeast(loopStart + 0.02f)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("B = Now", fontSize = 11.sp) }
+                        if (!loopActive) {
+                            OutlinedButton(
+                                onClick = {
+                                    stemPlayer.setLoop(loopStart, loopEnd)
+                                    stemPlayer.seekTo(loopStart)
+                                    loopActive = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Loop", fontSize = 11.sp) }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    stemPlayer.clearLoop()
+                                    loopActive = false
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Stop Loop", fontSize = 11.sp) }
                         }
                     }
                 }
