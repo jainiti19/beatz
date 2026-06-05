@@ -1,5 +1,6 @@
 package com.beatz.app.ui.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -43,14 +44,13 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
                     currentScreen = Screen.Analysis
                 },
                 onJammingMode = {
-                    // For now, use a default stems directory
-                    // Later: add a folder picker
                     currentScreen = Screen.JammingPicker
                 }
             )
         }
 
         Screen.JammingPicker -> {
+            BackHandler { currentScreen = Screen.Home }
             JammingPickerScreen(
                 onStemDirSelected = { path ->
                     stemDir = path
@@ -64,7 +64,7 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
         }
 
         Screen.Jamming -> {
-            // Unique key forces full recomposition + new ViewModel each time
+            BackHandler { currentScreen = Screen.JammingPicker }
             androidx.compose.runtime.key(jammingKey) {
                 JammingScreen(
                     stemDirPath = stemDir,
@@ -76,6 +76,7 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
         }
 
         Screen.Analysis -> {
+            BackHandler { currentScreen = Screen.Home }
             val song = selectedSong
             if (song != null) {
                 AnalysisScreen(
@@ -93,6 +94,7 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
         }
 
         Screen.Editor -> {
+            BackHandler { currentScreen = Screen.Home }
             val result = analysisResult
             if (result != null) {
                 BeatEditorScreen(

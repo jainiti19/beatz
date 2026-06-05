@@ -58,26 +58,13 @@ fun JammingPickerScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Jamming Mode",
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = "Pick a song to jam with",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            OutlinedButton(onClick = onBack) { Text("Home", fontSize = 12.sp) }
-        }
+        com.beatz.app.ui.components.TopBar(title = "Jamming Mode", onBack = onBack)
+
+        Text(
+            text = "Pick a song to jam with",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         // YouTube URL input (collapsible)
         Card(

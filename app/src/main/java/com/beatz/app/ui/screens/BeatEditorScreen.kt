@@ -77,13 +77,7 @@ fun BeatEditorScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Header
-        Text(
-            text = "Beat Editor",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
+        com.beatz.app.ui.components.TopBar(title = "Beat Editor", onBack = onBack)
 
         // Key display
         Card(

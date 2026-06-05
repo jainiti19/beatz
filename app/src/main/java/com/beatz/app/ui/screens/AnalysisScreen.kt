@@ -56,14 +56,7 @@ fun AnalysisScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "Analyzing",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
+        com.beatz.app.ui.components.TopBar(title = "Analyzing", onBack = onBack)
 
         Text(
             text = songName,

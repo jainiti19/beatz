@@ -140,28 +140,10 @@ fun JammingScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Jamming Mode",
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = songName.replace("_", " "),
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            OutlinedButton(
-                onClick = { stemPlayer.stop(); onBack() }
-            ) { Text("Songs", fontSize = 12.sp) }
-        }
+        com.beatz.app.ui.components.TopBar(
+            title = songName.replace("_", " "),
+            onBack = { stemPlayer.stop(); onBack() }
+        )
 
         when (loadState) {
             is LoadState.Idle, is LoadState.Loading -> {
