@@ -25,6 +25,7 @@ class StemPlayer {
     private var playbackThread: Thread? = null
 
     // Stem file info (not loaded into memory)
+    @Volatile
     private var stemFiles: Map<String, StemInfo> = emptyMap()
     private var stemVolumes: MutableMap<String, Float> = mutableMapOf()
 
@@ -219,8 +220,16 @@ class StemPlayer {
                 // Clear mix buffer
                 for (i in 0 until framesToRead) mixBuffer[i] = 0f
 
+                // Open readers for any new stems added dynamically
+                val currentStems = stemFiles
+                for ((name, info) in currentStems) {
+                    if (name !in readers) {
+                        try { readers[name] = RandomAccessFile(info.file, "r") } catch (_: Exception) {}
+                    }
+                }
+
                 // Read and mix each stem
-                for ((name, info) in stemFiles) {
+                for ((name, info) in currentStems) {
                     val vol = stemVolumes[name] ?: 0f
                     if (vol <= 0f) continue
 

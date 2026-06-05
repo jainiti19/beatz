@@ -39,9 +39,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.beatz.app.audio.engine.CajonSynthesizer
+import com.beatz.app.audio.engine.DholakSynthesizer
+import com.beatz.app.audio.engine.RhythmTrackGenerator
 import com.beatz.app.audio.engine.StemPlayer
 import com.beatz.app.viewmodel.LoadState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 @Composable
 fun JammingScreen(
@@ -59,8 +68,11 @@ fun JammingScreen(
     var isEditingLyrics by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableStateOf(1.0f) }
     var mixerExpanded by remember { mutableStateOf(false) }
+    var rhythmExpanded by remember { mutableStateOf(false) }
     var speedExpanded by remember { mutableStateOf(false) }
     var lyricsExpanded by remember { mutableStateOf(false) }
+    var rhythmGenerating by remember { mutableStateOf(false) }
+    var detectedBpm by remember(stemDirPath) { mutableStateOf(0f) }
 
     // Load saved lyrics
     LaunchedEffect(stemDirPath) {
@@ -87,7 +99,7 @@ fun JammingScreen(
         updateVolumes()
     }
 
-    // Load stems
+    // Load stems + detect BPM
     LaunchedEffect(stemDirPath) {
         loadState = LoadState.Loading
         val success = stemPlayer.loadStems(File(stemDirPath))
@@ -97,6 +109,16 @@ fun JammingScreen(
         }
         updateVolumes()
         loadState = LoadState.Ready
+
+        // Detect BPM in background (use drums stem for best accuracy)
+        withContext(Dispatchers.Default) {
+            val drumsWav = File(stemDirPath, "drums.wav")
+            val otherWav = File(stemDirPath, "other.wav")
+            val refWav = if (drumsWav.exists()) drumsWav else otherWav
+            if (refWav.exists()) {
+                detectedBpm = detectBpmFromWav(refWav)
+            }
+        }
     }
 
     DisposableEffect(stemDirPath) {
@@ -259,9 +281,11 @@ fun JammingScreen(
                         "vocals" to "Vocals",
                         "drums" to "Drums",
                         "bass" to "Bass",
-                        "other" to "Harmony / Melody"
+                        "other" to "Harmony / Melody",
+                        "dholak" to "Dholak",
+                        "cajon" to "Cajon"
                     )
-                    for (stemName in listOf("vocals", "drums", "bass", "other")) {
+                    for (stemName in listOf("vocals", "drums", "bass", "other", "dholak", "cajon")) {
                         val volume = stemVolumes[stemName] ?: continue
                         StemMixerCard(
                             name = stemDisplayNames[stemName] ?: stemName,
@@ -269,6 +293,49 @@ fun JammingScreen(
                             isVocals = stemName == "vocals",
                             onVolumeChange = { setStemVolume(stemName, it) }
                         )
+                    }
+                }
+
+                // --- Collapsible: Add Rhythm ---
+                CollapsibleSection(
+                    title = "Add Rhythm" + if (rhythmGenerating) " (generating...)" else if (detectedBpm > 0f) " (${detectedBpm.toInt()} BPM)" else " (detecting BPM...)",
+                    expanded = rhythmExpanded,
+                    onToggle = { rhythmExpanded = !rhythmExpanded }
+                ) {
+                    val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.Main)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    generateAndAddRhythm(
+                                        stemDirPath, stemPlayer, "dholak",
+                                        RhythmTrackGenerator.Instrument.DHOLAK, "Keherwa",
+                                        detectedBpm,
+                                        { rhythmGenerating = it }, { updateVolumes() }
+                                    )
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !rhythmGenerating && detectedBpm > 0f
+                        ) { Text("Dholak", fontSize = 13.sp) }
+
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    generateAndAddRhythm(
+                                        stemDirPath, stemPlayer, "cajon",
+                                        RhythmTrackGenerator.Instrument.CAJON, "Pop/Rock",
+                                        detectedBpm,
+                                        { rhythmGenerating = it }, { updateVolumes() }
+                                    )
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !rhythmGenerating && detectedBpm > 0f
+                        ) { Text("Cajon", fontSize = 13.sp) }
                     }
                 }
 
@@ -439,6 +506,119 @@ private fun StemMixerCard(
             )
         }
     }
+}
+
+/**
+ * Detect BPM from a WAV stem (reads first 20s).
+ */
+private fun detectBpmFromWav(wavFile: File): Float {
+    try {
+        RandomAccessFile(wavFile, "r").use { raf ->
+            if (raf.length() < 44) return 120f
+            val header = ByteArray(44)
+            raf.read(header)
+            val buf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+            buf.position(22)
+            val channels = buf.short.toInt()
+            val sampleRate = buf.int
+            buf.position(34)
+            val bitsPerSample = buf.short.toInt()
+
+            raf.seek(36)
+            val chunkHeader = ByteArray(8)
+            while (raf.filePointer + 8 < raf.length()) {
+                raf.read(chunkHeader)
+                val id = String(chunkHeader, 0, 4)
+                val size = ByteBuffer.wrap(chunkHeader).order(ByteOrder.LITTLE_ENDIAN).getInt(4)
+                if (id == "data") {
+                    val bytesPerSample = bitsPerSample / 8
+                    val bytesPerFrame = channels * bytesPerSample
+                    val maxBytes = (20 * sampleRate * bytesPerFrame).coerceAtMost(size)
+                        .coerceAtMost((raf.length() - raf.filePointer).toInt())
+                    val pcm = ByteArray(maxBytes)
+                    raf.readFully(pcm)
+                    val bb = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN)
+                    val samples = FloatArray(maxBytes / bytesPerSample)
+                    for (i in samples.indices) {
+                        samples[i] = if (bitsPerSample == 16) bb.short.toFloat() / Short.MAX_VALUE
+                        else bb.short.toFloat() / Short.MAX_VALUE
+                    }
+                    val audio = com.beatz.app.audio.decoder.DecodedAudio(samples, sampleRate, channels, samples.size.toFloat() / (sampleRate * channels))
+                    return com.beatz.app.audio.analysis.TempoDetector.detectBpm(audio)
+                }
+                raf.seek(raf.filePointer + size)
+            }
+        }
+    } catch (_: Exception) { }
+    return 120f
+}
+
+/**
+ * Get WAV duration from header.
+ */
+private fun getWavDuration(wavFile: File): Float {
+    try {
+        RandomAccessFile(wavFile, "r").use { raf ->
+            if (raf.length() < 44) return 0f
+            val header = ByteArray(44)
+            raf.read(header)
+            val buf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+            buf.position(22)
+            val channels = buf.short.toInt()
+            val sampleRate = buf.int
+            buf.position(34)
+            val bitsPerSample = buf.short.toInt()
+            raf.seek(36)
+            val chunkHeader = ByteArray(8)
+            while (raf.filePointer + 8 < raf.length()) {
+                raf.read(chunkHeader)
+                val id = String(chunkHeader, 0, 4)
+                val size = ByteBuffer.wrap(chunkHeader).order(ByteOrder.LITTLE_ENDIAN).getInt(4)
+                if (id == "data") return size.toFloat() / (channels * (bitsPerSample / 8)) / sampleRate
+                raf.seek(raf.filePointer + size)
+            }
+        }
+    } catch (_: Exception) { }
+    return 0f
+}
+
+private suspend fun generateAndAddRhythm(
+    stemDirPath: String,
+    stemPlayer: StemPlayer,
+    stemName: String,
+    instrument: RhythmTrackGenerator.Instrument,
+    patternName: String,
+    bpm: Float,
+    setGenerating: (Boolean) -> Unit,
+    updateVolumes: () -> Unit
+) {
+    setGenerating(true)
+    withContext(Dispatchers.Default) {
+        val drumsWav = File(stemDirPath, "drums.wav")
+        val otherWav = File(stemDirPath, "other.wav")
+        val refWav = if (drumsWav.exists()) drumsWav else otherWav
+
+        val duration = getWavDuration(refWav)
+
+        // Delete old cached file
+        val outputFile = File(stemDirPath, "$stemName.wav")
+        if (outputFile.exists()) outputFile.delete()
+
+        RhythmTrackGenerator.generate(
+            bpm = bpm,
+            totalDurationSeconds = duration,
+            instrument = instrument,
+            patternName = patternName,
+            outputFile = outputFile
+        )
+    }
+
+    val outputFile = File(stemDirPath, "$stemName.wav")
+    if (outputFile.exists()) {
+        stemPlayer.addStem(stemName, outputFile, 0.9f)
+        updateVolumes()
+    }
+    setGenerating(false)
 }
 
 private fun formatTime(seconds: Int): String {
