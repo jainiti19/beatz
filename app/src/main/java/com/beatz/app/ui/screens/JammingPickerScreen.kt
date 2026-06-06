@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,8 +28,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,10 +49,20 @@ fun JammingPickerScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val stemDirs = remember { findStemDirectories(context.filesDir) }
+    var stemDirs by remember { mutableStateOf(findStemDirectories(context.filesDir)) }
     var youtubeUrl by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var youtubeExpanded by remember { mutableStateOf(false) }
+    var processingStatus by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+
+    // Auto-refresh song list and processing status every 3 seconds
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(3000)
+            stemDirs = findStemDirectories(context.filesDir)
+            processingStatus = readProcessingStatus(context.filesDir)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -124,6 +137,48 @@ fun JammingPickerScreen(
                             text = "Type a song name (e.g. \"Tum Hi Ho\") or paste a YouTube URL",
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Processing status
+        for ((name, status) in processingStatus) {
+            val displayStatus = when {
+                status.startsWith("downloading") -> "Downloading..."
+                status.startsWith("separating") -> "Separating stems..."
+                status.startsWith("pushing") -> "Almost ready..."
+                status.startsWith("error") -> "Failed: ${status.substringAfter(":")}"
+                else -> status
+            }
+            val songLabel = status.substringAfter(":", name).replace("_", " ")
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = songLabel,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = displayStatus,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                    if (!status.startsWith("error")) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
                         )
                     }
                 }
@@ -242,4 +297,16 @@ private fun hasStemFiles(dir: File): Boolean {
 private fun countStems(dir: File): Int {
     val stemNames = listOf("vocals.wav", "drums.wav", "bass.wav", "other.wav")
     return stemNames.count { File(dir, it).exists() }
+}
+
+private fun readProcessingStatus(filesDir: File): List<Pair<String, String>> {
+    val statusDir = File(filesDir, "processing")
+    if (!statusDir.isDirectory) return emptyList()
+    return statusDir.listFiles()
+        ?.filter { it.name.endsWith(".status") }
+        ?.map { file ->
+            val name = file.name.removeSuffix(".status")
+            val status = try { file.readText().trim() } catch (_: Exception) { "processing" }
+            name to status
+        } ?: emptyList()
 }
