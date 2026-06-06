@@ -136,14 +136,22 @@ fun JammingScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp)
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        com.beatz.app.ui.components.TopBar(
-            title = songName.replace("_", " "),
-            onBack = { stemPlayer.stop(); onBack() }
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Song title
+        Text(
+            text = songName.replace("_", " "),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 2
         )
+
+        Spacer(modifier = Modifier.height(4.dp))
 
         when (loadState) {
             is LoadState.Idle, is LoadState.Loading -> {
@@ -166,99 +174,114 @@ fun JammingScreen(
             }
 
             is LoadState.Ready -> {
-                // Progress bar
-                Column {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(8.dp)
+                // Player card: progress + transport + presets
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(formatTime((progress * duration).toInt()), fontSize = 12.sp)
-                        Text(formatTime(duration.toInt()), fontSize = 12.sp)
-                    }
-                }
-
-                // Transport
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FilledIconButton(
-                        onClick = { stemPlayer.stop() },
-                        modifier = Modifier.size(44.dp)
-                    ) { Text("■", fontSize = 16.sp) }
-
-                    Spacer(modifier = Modifier.size(8.dp))
-
-                    FilledIconButton(
-                        onClick = {
-                            val newFrac = ((progress * duration - 10f) / duration).coerceAtLeast(0f)
-                            stemPlayer.seekTo(newFrac)
-                        },
-                        modifier = Modifier.size(44.dp)
-                    ) { Text("-10", fontSize = 12.sp) }
-
-                    Spacer(modifier = Modifier.size(8.dp))
-
-                    FilledIconButton(
-                        onClick = {
-                            if (playbackState == StemPlayer.PlaybackState.PLAYING) stemPlayer.pause()
-                            else stemPlayer.play()
-                        },
-                        modifier = Modifier.size(64.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            if (playbackState == StemPlayer.PlaybackState.PLAYING) "❚❚" else "▶",
-                            fontSize = 24.sp
+                        // Progress bar
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth().height(6.dp)
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(formatTime((progress * duration).toInt()), fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(formatTime(duration.toInt()), fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+
+                        // Transport
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledIconButton(
+                                onClick = { stemPlayer.stop() },
+                                modifier = Modifier.size(40.dp)
+                            ) { Text("■", fontSize = 14.sp) }
+
+                            Spacer(modifier = Modifier.size(6.dp))
+
+                            FilledIconButton(
+                                onClick = {
+                                    val newFrac = ((progress * duration - 10f) / duration).coerceAtLeast(0f)
+                                    stemPlayer.seekTo(newFrac)
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) { Text("-10", fontSize = 11.sp) }
+
+                            Spacer(modifier = Modifier.size(6.dp))
+
+                            FilledIconButton(
+                                onClick = {
+                                    if (playbackState == StemPlayer.PlaybackState.PLAYING) stemPlayer.pause()
+                                    else stemPlayer.play()
+                                },
+                                modifier = Modifier.size(56.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                Text(
+                                    if (playbackState == StemPlayer.PlaybackState.PLAYING) "❚❚" else "▶",
+                                    fontSize = 22.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.size(6.dp))
+
+                            FilledIconButton(
+                                onClick = {
+                                    val newFrac = ((progress * duration + 10f) / duration).coerceAtMost(1f)
+                                    stemPlayer.seekTo(newFrac)
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) { Text("+10", fontSize = 11.sp) }
+                        }
+                        // Presets
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    setStemVolume("vocals", 0f); setStemVolume("drums", 0.8f)
+                                    setStemVolume("bass", 0.8f); setStemVolume("other", 0.8f)
+                                },
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                            ) { Text("Karaoke", fontSize = 12.sp) }
+
+                            OutlinedButton(
+                                onClick = {
+                                    setStemVolume("vocals", 0f); setStemVolume("drums", 0f)
+                                    setStemVolume("bass", 0.8f); setStemVolume("other", 0.8f)
+                                },
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                            ) { Text("Unplugged", fontSize = 12.sp) }
+
+                            OutlinedButton(
+                                onClick = {
+                                    setStemVolume("vocals", 0f); setStemVolume("drums", 0.7f)
+                                    setStemVolume("bass", 0.8f); setStemVolume("other", 0.4f)
+                                },
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                            ) { Text("Jamming", fontSize = 12.sp) }
+                        }
                     }
-
-                    Spacer(modifier = Modifier.size(8.dp))
-
-                    FilledIconButton(
-                        onClick = {
-                            val newFrac = ((progress * duration + 10f) / duration).coerceAtMost(1f)
-                            stemPlayer.seekTo(newFrac)
-                        },
-                        modifier = Modifier.size(44.dp)
-                    ) { Text("+10", fontSize = 12.sp) }
-                }
-
-                // Presets row (always visible — quick access)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            setStemVolume("vocals", 0f); setStemVolume("drums", 0.8f)
-                            setStemVolume("bass", 0.8f); setStemVolume("other", 0.8f)
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Karaoke", fontSize = 12.sp) }
-
-                    OutlinedButton(
-                        onClick = {
-                            setStemVolume("vocals", 0f); setStemVolume("drums", 0f)
-                            setStemVolume("bass", 0.8f); setStemVolume("other", 0.8f)
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Unplugged", fontSize = 12.sp) }
-
-                    OutlinedButton(
-                        onClick = {
-                            setStemVolume("vocals", 0f); setStemVolume("drums", 0.7f)
-                            setStemVolume("bass", 0.8f); setStemVolume("other", 0.4f)
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Jamming", fontSize = 12.sp) }
                 }
 
                 // --- Collapsible: Stem Mixer ---
