@@ -35,6 +35,7 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
     var analysisResult by remember { mutableStateOf<AnalysisResult?>(null) }
     var stemDir by remember { mutableStateOf(jammingStemDir ?: "") }
     var jammingKey by remember { mutableIntStateOf(0) }
+    var selectedPlaylist by remember { mutableStateOf<String?>(null) }
 
     when (currentScreen) {
         Screen.Home -> {
@@ -59,7 +60,9 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
                 },
                 onBack = {
                     currentScreen = Screen.Home
-                }
+                },
+                selectedPlaylist = selectedPlaylist,
+                onPlaylistChanged = { selectedPlaylist = it }
             )
         }
 

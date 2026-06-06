@@ -50,7 +50,9 @@ import java.io.File
 @Composable
 fun JammingPickerScreen(
     onStemDirSelected: (String) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    selectedPlaylist: String? = null,
+    onPlaylistChanged: (String?) -> Unit = {}
 ) {
     val context = LocalContext.current
     var stemDirs by remember { mutableStateOf(findStemDirectories(context.filesDir)) }
@@ -60,7 +62,6 @@ fun JammingPickerScreen(
     var processingStatus by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     val playlistManager = remember { PlaylistManager(context.filesDir) }
     var playlists by remember { mutableStateOf(playlistManager.getPlaylists()) }
-    var selectedPlaylist by remember { mutableStateOf<String?>(null) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
     var addToPlaylistSong by remember { mutableStateOf<String?>(null) }
@@ -81,19 +82,14 @@ fun JammingPickerScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        com.beatz.app.ui.components.TopBar(title = "Jamming Mode", onBack = onBack)
+        com.beatz.app.ui.components.TopBar(title = "BeatznBox", onBack = onBack)
 
-        Text(
-            text = "Pick a song to jam with",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // YouTube URL input (collapsible)
+        // --- Let's Prepare (collapsible: YouTube + processing) ---
+        val prepareCount = processingStatus.size
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
             )
         ) {
             Column {
@@ -105,11 +101,17 @@ fun JammingPickerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Add from YouTube", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Text(if (youtubeExpanded) "▲" else "▼", fontSize = 14.sp)
+                    Text(
+                        "Let's Prepare" + if (prepareCount > 0) " ($prepareCount processing)" else "",
+                        fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(if (youtubeExpanded) "▲" else "▼", fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (youtubeExpanded) {
-                    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = youtubeUrl,
                             onValueChange = { youtubeUrl = it },
@@ -117,83 +119,88 @@ fun JammingPickerScreen(
                             placeholder = { Text("Song name or YouTube URL...", fontSize = 13.sp) },
                             singleLine = true
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
+                        Button(
+                            onClick = {
+                                val input = youtubeUrl.trim()
+                                if (input.isNotBlank()) {
+                                    val queueDir = File(context.filesDir, "youtube_queue")
+                                    queueDir.mkdirs()
+                                    val ts = System.currentTimeMillis()
+                                    val query = if (input.contains("youtube.com") || input.contains("youtu.be"))
+                                        input else "search:$input"
+                                    File(queueDir, "request_$ts.txt").writeText(query)
+                                    Toast.makeText(context, "Queued!", Toast.LENGTH_SHORT).show()
+                                    youtubeUrl = ""
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    val input = youtubeUrl.trim()
-                                    if (input.isNotBlank()) {
-                                        val queueDir = File(context.filesDir, "youtube_queue")
-                                        queueDir.mkdirs()
-                                        val ts = System.currentTimeMillis()
-                                        // Prefix with "search:" if not a URL
-                                        val query = if (input.contains("youtube.com") || input.contains("youtu.be"))
-                                            input else "search:$input"
-                                        File(queueDir, "request_$ts.txt").writeText(query)
-                                        Toast.makeText(context,
-                                            "Queued! Processing will start automatically...",
-                                            Toast.LENGTH_LONG).show()
-                                        youtubeUrl = ""
+                            enabled = youtubeUrl.isNotBlank()
+                        ) { Text("Add Song") }
+
+                        // Processing status inside this section
+                        for ((name, status) in processingStatus) {
+                            val displayStatus = when {
+                                status.startsWith("downloading") -> "Downloading..."
+                                status.startsWith("separating") -> "Separating stems..."
+                                status.startsWith("pushing") -> "Almost ready..."
+                                status.startsWith("error") -> "Failed: ${status.substringAfter(":")}"
+                                else -> status
+                            }
+                            val songLabel = status.substringAfter(":", name).replace("_", " ")
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(songLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                        Text(displayStatus, fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer)
                                     }
-                                },
-                                modifier = Modifier.weight(1f),
-                                enabled = youtubeUrl.isNotBlank()
-                            ) { Text("Add Song") }
+                                    if (!status.startsWith("error")) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    }
+                                }
+                            }
                         }
-                        Text(
-                            text = "Type a song name (e.g. \"Tum Hi Ho\") or paste a YouTube URL",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
         }
 
-        // Processing status
-        for ((name, status) in processingStatus) {
-            val displayStatus = when {
-                status.startsWith("downloading") -> "Downloading..."
-                status.startsWith("separating") -> "Separating stems..."
-                status.startsWith("pushing") -> "Almost ready..."
-                status.startsWith("error") -> "Failed: ${status.substringAfter(":")}"
-                else -> status
-            }
-            val songLabel = status.substringAfter(":", name).replace("_", " ")
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                )
-            ) {
+        // --- Let's Jam (collapsible) ---
+        var jamExpanded by remember { mutableStateOf(true) }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            )
+        ) {
+            Column {
                 Row(
-                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { jamExpanded = !jamExpanded }
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = songLabel,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = displayStatus,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                    if (!status.startsWith("error")) {
-                        androidx.compose.material3.CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    }
+                    Text("Let's Jam", fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary)
+                    Text(if (jamExpanded) "▲" else "▼ (${stemDirs.size} songs)", fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
+
+        if (!jamExpanded) return@Column
 
         // Playlist chips
         if (playlists.isNotEmpty() || stemDirs.isNotEmpty()) {
@@ -205,13 +212,13 @@ fun JammingPickerScreen(
             ) {
                 FilterChip(
                     selected = selectedPlaylist == null,
-                    onClick = { selectedPlaylist = null },
+                    onClick = { onPlaylistChanged(null) },
                     label = { Text("All", fontSize = 12.sp) }
                 )
                 for (name in playlists.keys) {
                     FilterChip(
                         selected = selectedPlaylist == name,
-                        onClick = { selectedPlaylist = if (selectedPlaylist == name) null else name },
+                        onClick = { onPlaylistChanged(if (selectedPlaylist == name) null else name) },
                         label = { Text(name, fontSize = 12.sp) }
                     )
                 }
