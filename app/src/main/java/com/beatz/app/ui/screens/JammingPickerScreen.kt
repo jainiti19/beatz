@@ -36,6 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import com.beatz.app.data.PlaylistManager
 import java.io.File
 
 /**
@@ -54,6 +58,12 @@ fun JammingPickerScreen(
     var searchQuery by remember { mutableStateOf("") }
     var youtubeExpanded by remember { mutableStateOf(false) }
     var processingStatus by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    val playlistManager = remember { PlaylistManager(context.filesDir) }
+    var playlists by remember { mutableStateOf(playlistManager.getPlaylists()) }
+    var selectedPlaylist by remember { mutableStateOf<String?>(null) }
+    var showCreatePlaylist by remember { mutableStateOf(false) }
+    var newPlaylistName by remember { mutableStateOf("") }
+    var addToPlaylistSong by remember { mutableStateOf<String?>(null) }
 
     // Auto-refresh song list and processing status every 3 seconds
     LaunchedEffect(Unit) {
@@ -185,6 +195,34 @@ fun JammingPickerScreen(
             }
         }
 
+        // Playlist chips
+        if (playlists.isNotEmpty() || stemDirs.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = selectedPlaylist == null,
+                    onClick = { selectedPlaylist = null },
+                    label = { Text("All", fontSize = 12.sp) }
+                )
+                for (name in playlists.keys) {
+                    FilterChip(
+                        selected = selectedPlaylist == name,
+                        onClick = { selectedPlaylist = if (selectedPlaylist == name) null else name },
+                        label = { Text(name, fontSize = 12.sp) }
+                    )
+                }
+                OutlinedButton(
+                    onClick = { showCreatePlaylist = true },
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                ) { Text("+", fontSize = 14.sp) }
+            }
+        }
+
         // Search filter
         if (stemDirs.size > 3) {
             OutlinedTextField(
@@ -196,8 +234,13 @@ fun JammingPickerScreen(
             )
         }
 
-        val filteredDirs = if (searchQuery.isBlank()) stemDirs
-            else stemDirs.filter { it.name.contains(searchQuery, ignoreCase = true) }
+        val playlistFiltered = if (selectedPlaylist != null) {
+            val songNames = playlists[selectedPlaylist] ?: emptyList()
+            stemDirs.filter { it.name in songNames }
+        } else stemDirs
+
+        val filteredDirs = if (searchQuery.isBlank()) playlistFiltered
+            else playlistFiltered.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
         Text(
             text = "${filteredDirs.size} songs",
@@ -239,6 +282,7 @@ fun JammingPickerScreen(
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -246,12 +290,23 @@ fun JammingPickerScreen(
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium
                             )
-                            Text(
-                                text = "$stemCount stems available",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            val songPlaylists = playlistManager.getPlaylistsForSong(dir.name)
+                            if (songPlaylists.isNotEmpty()) {
+                                Text(
+                                    text = songPlaylists.joinToString(", "),
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
+                        Text(
+                            text = "+",
+                            modifier = Modifier
+                                .clickable { addToPlaylistSong = dir.name }
+                                .padding(horizontal = 8.dp),
+                            fontSize = 18.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Text(
                             text = "▶",
                             fontSize = 24.sp,
@@ -262,6 +317,79 @@ fun JammingPickerScreen(
             }
         }
 
+    }
+
+    // Create playlist dialog
+    if (showCreatePlaylist) {
+        AlertDialog(
+            onDismissRequest = { showCreatePlaylist = false },
+            title = { Text("New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = newPlaylistName,
+                    onValueChange = { newPlaylistName = it },
+                    placeholder = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (newPlaylistName.isNotBlank()) {
+                        playlistManager.createPlaylist(newPlaylistName.trim())
+                        playlists = playlistManager.getPlaylists()
+                        newPlaylistName = ""
+                        showCreatePlaylist = false
+                    }
+                }) { Text("Create") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showCreatePlaylist = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Add to playlist dialog
+    if (addToPlaylistSong != null) {
+        val songName = addToPlaylistSong!!
+        val songPlaylists = playlistManager.getPlaylistsForSong(songName)
+        AlertDialog(
+            onDismissRequest = { addToPlaylistSong = null },
+            title = { Text("Add to Playlist") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(songName.replace("_", " "), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (playlists.isEmpty()) {
+                        Text("No playlists yet. Create one first.", fontSize = 13.sp)
+                    }
+                    for (name in playlists.keys) {
+                        val isIn = songName in (playlists[name] ?: emptyList())
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (isIn) playlistManager.removeSongFromPlaylist(name, songName)
+                                    else playlistManager.addSongToPlaylist(name, songName)
+                                    playlists = playlistManager.getPlaylists()
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isIn) "✓" else "○",
+                                fontSize = 16.sp,
+                                color = if (isIn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 12.dp)
+                            )
+                            Text(name, fontSize = 15.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { addToPlaylistSong = null }) { Text("Done") }
+            }
+        )
     }
 }
 
