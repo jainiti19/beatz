@@ -29,6 +29,8 @@ class StemPlayer {
     private var stemFiles: Map<String, StemInfo> = emptyMap()
     private var stemVolumes: MutableMap<String, Float> = mutableMapOf()
 
+    var onFirstPlay: (() -> Unit)? = null
+
     @Volatile
     private var isPlaying = false
 
@@ -182,6 +184,9 @@ class StemPlayer {
 
     fun play() {
         if (stemFiles.isEmpty() || isPlaying) return
+        // Stop old player on first play
+        onFirstPlay?.invoke()
+        onFirstPlay = null
         isPlaying = true
         _playbackState.value = PlaybackState.PLAYING
         playbackThread = Thread({
@@ -213,6 +218,7 @@ class StemPlayer {
     fun seekTo(fraction: Float) {
         val maxFrames = stemFiles.values.maxOfOrNull { it.totalFrames } ?: return
         playbackFramePos = (fraction * maxFrames).toLong().coerceIn(0, maxFrames)
+        _progress.value = fraction.coerceIn(0f, 1f)
     }
 
     fun release() {

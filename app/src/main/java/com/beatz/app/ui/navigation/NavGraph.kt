@@ -2,11 +2,13 @@ package com.beatz.app.ui.navigation
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.beatz.app.audio.engine.StemPlayer
 import com.beatz.app.data.model.AnalysisResult
 import com.beatz.app.data.model.Song
 import com.beatz.app.ui.screens.AnalysisScreen
@@ -37,8 +39,22 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
     var jammingKey by remember { mutableIntStateOf(0) }
     var selectedPlaylist by remember { mutableStateOf<String?>(null) }
 
+    // Shared StemPlayer — survives screen changes
+    val sharedPlayer = remember { mutableStateOf<StemPlayer?>(null) }
+    var nowPlayingName by remember { mutableStateOf("") }
+
+    DisposableEffect(Unit) {
+        onDispose { sharedPlayer.value?.release() }
+    }
+
     when (currentScreen) {
         Screen.Home -> {
+            // Stop playback when going home
+            sharedPlayer.value?.stop()
+            sharedPlayer.value?.release()
+            sharedPlayer.value = null
+            nowPlayingName = ""
+
             HomeScreen(
                 onSongReady = { song ->
                     selectedSong = song
@@ -51,18 +67,46 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
         }
 
         Screen.JammingPicker -> {
-            BackHandler { currentScreen = Screen.Home }
+            BackHandler {
+                sharedPlayer.value?.stop()
+                sharedPlayer.value?.release()
+                sharedPlayer.value = null
+                nowPlayingName = ""
+                currentScreen = Screen.Home
+            }
             JammingPickerScreen(
                 onStemDirSelected = { path ->
                     stemDir = path
+                    val newSongName = java.io.File(path).name
+                    // Only create new player if different song — don't stop old one yet
+                    if (newSongName != nowPlayingName) {
+                        val oldPlayer = sharedPlayer.value
+                        val player = StemPlayer()
+                        sharedPlayer.value = player
+                        nowPlayingName = newSongName
+                        // Old player keeps playing — will be released when new song plays
+                        player.onFirstPlay = {
+                            oldPlayer?.stop()
+                            oldPlayer?.release()
+                        }
+                    }
                     jammingKey++
                     currentScreen = Screen.Jamming
                 },
                 onBack = {
+                    sharedPlayer.value?.stop()
+                    sharedPlayer.value?.release()
+                    sharedPlayer.value = null
+                    nowPlayingName = ""
                     currentScreen = Screen.Home
                 },
                 selectedPlaylist = selectedPlaylist,
-                onPlaylistChanged = { selectedPlaylist = it }
+                onPlaylistChanged = { selectedPlaylist = it },
+                nowPlaying = nowPlayingName,
+                stemPlayer = sharedPlayer.value,
+                onResumePlayer = {
+                    currentScreen = Screen.Jamming
+                }
             )
         }
 
@@ -71,7 +115,9 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
             androidx.compose.runtime.key(jammingKey) {
                 JammingScreen(
                     stemDirPath = stemDir,
+                    stemPlayer = sharedPlayer.value ?: StemPlayer().also { sharedPlayer.value = it },
                     onBack = {
+                        // Don't stop — keep playing in background
                         currentScreen = Screen.JammingPicker
                     }
                 )

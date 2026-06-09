@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.delay
@@ -52,7 +53,10 @@ fun JammingPickerScreen(
     onStemDirSelected: (String) -> Unit,
     onBack: () -> Unit,
     selectedPlaylist: String? = null,
-    onPlaylistChanged: (String?) -> Unit = {}
+    onPlaylistChanged: (String?) -> Unit = {},
+    nowPlaying: String = "",
+    stemPlayer: com.beatz.app.audio.engine.StemPlayer? = null,
+    onResumePlayer: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var stemDirs by remember { mutableStateOf(findStemDirectories(context.filesDir)) }
@@ -83,6 +87,51 @@ fun JammingPickerScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         com.beatz.app.ui.components.TopBar(title = "BeatznBox", onBack = onBack)
+
+        // Mini player bar (shows when a song is playing)
+        if (nowPlaying.isNotEmpty() && stemPlayer != null) {
+            val playbackState by stemPlayer.playbackState.collectAsState()
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onResumePlayer() },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            nowPlaying.replace("_", " "),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
+                        Text(
+                            if (playbackState == com.beatz.app.audio.engine.StemPlayer.PlaybackState.PLAYING) "Playing" else "Paused",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        )
+                    }
+                    androidx.compose.material3.FilledIconButton(
+                        onClick = {
+                            if (playbackState == com.beatz.app.audio.engine.StemPlayer.PlaybackState.PLAYING)
+                                stemPlayer.pause()
+                            else stemPlayer.play()
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Text(
+                            if (playbackState == com.beatz.app.audio.engine.StemPlayer.PlaybackState.PLAYING) "❚❚" else "▶",
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
 
         // --- Let's Prepare (collapsible: YouTube + processing) ---
         val prepareCount = processingStatus.size

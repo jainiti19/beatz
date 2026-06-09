@@ -55,9 +55,9 @@ import java.nio.ByteOrder
 @Composable
 fun JammingScreen(
     stemDirPath: String,
+    stemPlayer: StemPlayer,
     onBack: () -> Unit
 ) {
-    val stemPlayer = remember(stemDirPath) { StemPlayer() }
     val songName = remember(stemDirPath) { File(stemDirPath).name }
     val context = LocalContext.current
 
@@ -129,9 +129,6 @@ fun JammingScreen(
         }
     }
 
-    DisposableEffect(stemDirPath) {
-        onDispose { stemPlayer.release() }
-    }
 
     Column(
         modifier = Modifier
