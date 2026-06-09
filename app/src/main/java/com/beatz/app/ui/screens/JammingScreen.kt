@@ -40,9 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.beatz.app.audio.engine.CajonSynthesizer
-import com.beatz.app.audio.engine.DholakSynthesizer
 import com.beatz.app.audio.engine.RhythmTrackGenerator
 import com.beatz.app.audio.engine.StemPlayer
+import com.beatz.app.audio.engine.TaalSystem
 import com.beatz.app.viewmodel.LoadState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -78,7 +78,7 @@ fun JammingScreen(
     var loopActive by remember { mutableStateOf(false) }
     var loopStart by remember { mutableStateOf(0f) }
     var loopEnd by remember { mutableStateOf(1f) }
-    var activeDholak by remember(stemDirPath) { mutableStateOf(false) }
+    var activeTaal by remember(stemDirPath) { mutableStateOf<String?>(null) }
     var activeCajon by remember(stemDirPath) { mutableStateOf(false) }
 
     // Load saved lyrics
@@ -292,10 +292,10 @@ fun JammingScreen(
                         "drums" to "Drums",
                         "bass" to "Bass",
                         "other" to "Harmony / Melody",
-                        "dholak" to "Dholak",
+                        "tabla" to "Tabla",
                         "cajon" to "Cajon"
                     )
-                    for (stemName in listOf("vocals", "drums", "bass", "other", "dholak", "cajon")) {
+                    for (stemName in listOf("vocals", "drums", "bass", "other", "tabla", "cajon")) {
                         val volume = stemVolumes[stemName] ?: continue
                         StemMixerCard(
                             name = stemDisplayNames[stemName] ?: stemName,
@@ -308,7 +308,7 @@ fun JammingScreen(
 
                 // --- Collapsible: Add Rhythm ---
                 CollapsibleSection(
-                    title = "Add Rhythm" + if (rhythmGenerating) " (generating...)" else if (adjustedBpm > 0f) " (${adjustedBpm.toInt()} BPM)" else " (detecting BPM...)",
+                    title = "Taal & Rhythm" + if (rhythmGenerating) " (generating...)" else if (activeTaal != null) " (${activeTaal})" else "",
                     expanded = rhythmExpanded,
                     onToggle = { rhythmExpanded = !rhythmExpanded }
                 ) {
@@ -344,64 +344,63 @@ fun JammingScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    // Tabla taals
+                    Text("Tabla", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(2.dp))
 
-                    // Dholak row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (!activeDholak) {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        generateAndAddRhythm(
-                                            stemDirPath, stemPlayer, "dholak",
-                                            RhythmTrackGenerator.Instrument.DHOLAK, "Keherwa",
-                                            adjustedBpm,
-                                            { rhythmGenerating = it }, { updateVolumes() }
-                                        )
-                                        activeDholak = true
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                enabled = !rhythmGenerating && adjustedBpm > 0f
-                            ) { Text("Add Dholak", fontSize = 13.sp) }
-                        } else {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        generateAndAddRhythm(
-                                            stemDirPath, stemPlayer, "dholak",
-                                            RhythmTrackGenerator.Instrument.DHOLAK, "Keherwa",
-                                            adjustedBpm,
-                                            { rhythmGenerating = it }, { updateVolumes() }
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                enabled = !rhythmGenerating
-                            ) { Text("Resync Dholak", fontSize = 12.sp) }
-                            OutlinedButton(
-                                onClick = {
-                                    stemPlayer.removeStem("dholak")
-                                    updateVolumes()
-                                    activeDholak = false
-                                },
-                                modifier = Modifier.weight(0.5f)
-                            ) { Text("Off", fontSize = 12.sp) }
+                    for (taal in TaalSystem.ALL_TAALS) {
+                        val isActive = activeTaal == taal.name
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(taal.displayName, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(taal.description, fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (!isActive) {
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            generateAndAddTaal(
+                                                stemDirPath, stemPlayer, taal, adjustedBpm,
+                                                { rhythmGenerating = it }, { updateVolumes() }
+                                            )
+                                            activeTaal = taal.name
+                                        }
+                                    },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                                    enabled = !rhythmGenerating && adjustedBpm > 0f
+                                ) { Text("Play", fontSize = 11.sp) }
+                            } else {
+                                OutlinedButton(
+                                    onClick = {
+                                        stemPlayer.removeStem("tabla")
+                                        updateVolumes()
+                                        activeTaal = null
+                                    },
+                                    modifier = Modifier.height(32.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                                ) { Text("Stop", fontSize = 11.sp) }
+                            }
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Cajon row
+                    // Cajon
+                    Text("Cajon", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(2.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text("Pop/Rock beat", fontSize = 13.sp, modifier = Modifier.weight(1f))
                         if (!activeCajon) {
                             OutlinedButton(
                                 onClick = {
@@ -415,32 +414,20 @@ fun JammingScreen(
                                         activeCajon = true
                                     }
                                 },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
                                 enabled = !rhythmGenerating && adjustedBpm > 0f
-                            ) { Text("Add Cajon", fontSize = 13.sp) }
+                            ) { Text("Play", fontSize = 11.sp) }
                         } else {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        generateAndAddRhythm(
-                                            stemDirPath, stemPlayer, "cajon",
-                                            RhythmTrackGenerator.Instrument.CAJON, "Pop/Rock",
-                                            adjustedBpm,
-                                            { rhythmGenerating = it }, { updateVolumes() }
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                enabled = !rhythmGenerating
-                            ) { Text("Resync Cajon", fontSize = 12.sp) }
                             OutlinedButton(
                                 onClick = {
                                     stemPlayer.removeStem("cajon")
                                     updateVolumes()
                                     activeCajon = false
                                 },
-                                modifier = Modifier.weight(0.5f)
-                            ) { Text("Off", fontSize = 12.sp) }
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                            ) { Text("Stop", fontSize = 11.sp) }
                         }
                     }
                 }
@@ -796,6 +783,41 @@ private suspend fun generateAndAddRhythm(
     val outputFile = File(stemDirPath, "$stemName.wav")
     if (outputFile.exists()) {
         stemPlayer.addStem(stemName, outputFile, 0.9f)
+        updateVolumes()
+    }
+    setGenerating(false)
+}
+
+private suspend fun generateAndAddTaal(
+    stemDirPath: String,
+    stemPlayer: StemPlayer,
+    taal: com.beatz.app.audio.engine.Taal,
+    bpm: Float,
+    setGenerating: (Boolean) -> Unit,
+    updateVolumes: () -> Unit
+) {
+    setGenerating(true)
+    withContext(Dispatchers.Default) {
+        val drumsWav = File(stemDirPath, "drums.wav")
+        val otherWav = File(stemDirPath, "other.wav")
+        val refWav = if (drumsWav.exists()) drumsWav else otherWav
+        val duration = getWavDuration(refWav)
+
+        val outputFile = File(stemDirPath, "tabla.wav")
+        if (outputFile.exists()) outputFile.delete()
+
+        TaalSystem.generateTrack(
+            taal = taal,
+            bpm = bpm,
+            totalDurationSeconds = duration,
+            outputFile = outputFile
+        )
+    }
+
+    val outputFile = File(stemDirPath, "tabla.wav")
+    if (outputFile.exists()) {
+        stemPlayer.removeStem("tabla")
+        stemPlayer.addStem("tabla", outputFile, 0.9f)
         updateVolumes()
     }
     setGenerating(false)
