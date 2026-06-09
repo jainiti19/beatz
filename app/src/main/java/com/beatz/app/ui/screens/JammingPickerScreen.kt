@@ -67,6 +67,7 @@ fun JammingPickerScreen(
     val playlistManager = remember { PlaylistManager(context.filesDir) }
     var playlists by remember { mutableStateOf(playlistManager.getPlaylists()) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
+    var deleteSong by remember { mutableStateOf<String?>(null) }
     var newPlaylistName by remember { mutableStateOf("") }
     var addToPlaylistSong by remember { mutableStateOf<String?>(null) }
 
@@ -359,9 +360,17 @@ fun JammingPickerScreen(
                             text = "+",
                             modifier = Modifier
                                 .clickable { addToPlaylistSong = dir.name }
-                                .padding(horizontal = 8.dp),
+                                .padding(horizontal = 6.dp),
                             fontSize = 18.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "x",
+                            modifier = Modifier
+                                .clickable { deleteSong = dir.absolutePath }
+                                .padding(horizontal = 6.dp),
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
                         )
                         Text(
                             text = "▶",
@@ -444,6 +453,37 @@ fun JammingPickerScreen(
             },
             confirmButton = {
                 Button(onClick = { addToPlaylistSong = null }) { Text("Done") }
+            }
+        )
+    }
+
+    // Delete song dialog
+    if (deleteSong != null) {
+        val songPath = deleteSong!!
+        val songDisplayName = File(songPath).name.replace("_", " ")
+        AlertDialog(
+            onDismissRequest = { deleteSong = null },
+            title = { Text("Delete Song") },
+            text = { Text("Remove \"$songDisplayName\" and its stems from this device?") },
+            confirmButton = {
+                Button(onClick = {
+                    // Delete stems directory
+                    File(songPath).deleteRecursively()
+                    // Remove from playlists
+                    val dirName = File(songPath).name
+                    for (playlist in playlists.keys) {
+                        playlistManager.removeSongFromPlaylist(playlist, dirName)
+                    }
+                    playlists = playlistManager.getPlaylists()
+                    // Delete lyrics
+                    File(context.filesDir, "lyrics/${dirName}.txt").delete()
+                    // Refresh list
+                    stemDirs = findStemDirectories(context.filesDir)
+                    deleteSong = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { deleteSong = null }) { Text("Cancel") }
             }
         )
     }

@@ -56,7 +56,10 @@ import java.nio.ByteOrder
 fun JammingScreen(
     stemDirPath: String,
     stemPlayer: StemPlayer,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNextSong: (() -> Unit)? = null,
+    nextSongName: String? = null,
+    autoPlay: Boolean = false
 ) {
     val songName = remember(stemDirPath) { File(stemDirPath).name }
     val context = LocalContext.current
@@ -92,6 +95,15 @@ fun JammingScreen(
     val playbackState by stemPlayer.playbackState.collectAsState()
     val progress by stemPlayer.progress.collectAsState()
     val duration by stemPlayer.durationSeconds.collectAsState()
+    var wasPlaying by remember { mutableStateOf(false) }
+
+    // Auto-next: when song ends naturally (was playing, now stopped, progress at 0)
+    LaunchedEffect(playbackState) {
+        if (wasPlaying && playbackState == StemPlayer.PlaybackState.STOPPED && !stemPlayer.isLooping()) {
+            onNextSong?.invoke()
+        }
+        wasPlaying = playbackState == StemPlayer.PlaybackState.PLAYING
+    }
 
     fun updateVolumes() {
         val vols = mutableMapOf<String, Float>()
@@ -116,6 +128,11 @@ fun JammingScreen(
         }
         updateVolumes()
         loadState = LoadState.Ready
+
+        // Auto-play if requested (e.g. from skip or auto-next)
+        if (autoPlay) {
+            stemPlayer.play()
+        }
 
         // Detect BPM in background (use drums stem for best accuracy)
         withContext(Dispatchers.Default) {
@@ -277,6 +294,31 @@ fun JammingScreen(
                                 modifier = Modifier.weight(1f).height(36.dp),
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
                             ) { Text("Jamming", fontSize = 12.sp) }
+                        }
+                    }
+                }
+
+                // Next song indicator
+                if (nextSongName != null && onNextSong != null) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Up next", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
+                                Text(nextSongName, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = { onNextSong() },
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                            ) { Text("Skip", fontSize = 11.sp) }
                         }
                     }
                 }
