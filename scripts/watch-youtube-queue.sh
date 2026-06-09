@@ -121,6 +121,16 @@ while true; do
             $ADB -s "$DEVICE" shell "rm /data/local/tmp/${stem}.wav" 2>/dev/null
           fi
         done
+        # Fetch lyrics from Genius
+        LYRICS_QUERY=$(echo "$SONG_NAME" | sed 's/_/ /g')
+        python3 "$SCRIPT_DIR/fetch-lyrics.py" "$LYRICS_QUERY" "$FINAL_DIR/lyrics.txt" 2>/dev/null
+        if [ -f "$FINAL_DIR/lyrics.txt" ]; then
+          $ADB -s "$DEVICE" shell "run-as com.beatz.app mkdir -p /data/data/com.beatz.app/files/lyrics" 2>/dev/null
+          $ADB -s "$DEVICE" push "$FINAL_DIR/lyrics.txt" "/data/local/tmp/lyrics_temp.txt" 2>/dev/null
+          $ADB -s "$DEVICE" shell "cat /data/local/tmp/lyrics_temp.txt | run-as com.beatz.app sh -c 'cat > /data/data/com.beatz.app/files/lyrics/${SONG_NAME}.txt'" 2>/dev/null
+          $ADB -s "$DEVICE" shell "rm /data/local/tmp/lyrics_temp.txt" 2>/dev/null
+          echo "  + lyrics from Genius"
+        fi
         echo "Pushed: $SONG_NAME"
       fi
 
