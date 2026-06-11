@@ -730,16 +730,23 @@ fun JammingScreen(
                         }
                     } else {
                         Card(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 350.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceVariant
                             )
                         ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(16.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
                                 Text(
                                     text = lyricsText,
-                                    fontSize = 16.sp,
-                                    lineHeight = 28.sp
+                                    fontSize = 17.sp,
+                                    lineHeight = 30.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
