@@ -159,7 +159,8 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
                         val nextIndex = (currentSongIndex + 1) % songList.size
                         java.io.File(songList[nextIndex]).name.replace("_", " ")
                     } else null,
-                    autoPlay = autoPlayNext.also { autoPlayNext = false }
+                    autoPlay = autoPlayNext.also { autoPlayNext = false },
+                    currentPlaylist = selectedPlaylist
                 )
             }
         }

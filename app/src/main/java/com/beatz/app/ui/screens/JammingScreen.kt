@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -59,10 +60,12 @@ fun JammingScreen(
     onBack: () -> Unit,
     onNextSong: (() -> Unit)? = null,
     nextSongName: String? = null,
-    autoPlay: Boolean = false
+    autoPlay: Boolean = false,
+    currentPlaylist: String? = null
 ) {
     val songName = remember(stemDirPath) { File(stemDirPath).name }
     val context = LocalContext.current
+    val presetManager = remember { com.beatz.app.data.SessionPresetManager(context.filesDir) }
 
     var loadState by remember(stemDirPath) { mutableStateOf<LoadState>(LoadState.Idle) }
     var stemVolumes by remember(stemDirPath) { mutableStateOf<Map<String, Float>>(emptyMap()) }
@@ -128,6 +131,30 @@ fun JammingScreen(
         }
         updateVolumes()
         loadState = LoadState.Ready
+
+        // Restore session preset if available
+        val preset = presetManager.getPreset(currentPlaylist, songName)
+        if (preset != null) {
+            // Restore stem volumes
+            for ((stem, vol) in preset.stemVolumes) {
+                stemPlayer.setStemVolume(stem, vol)
+            }
+            updateVolumes()
+            // Restore speed
+            playbackSpeed = preset.speed
+            stemPlayer.setSpeed(preset.speed)
+            // Restore loop
+            if (preset.loopEnabled) {
+                loopStart = preset.loopStart
+                loopEnd = preset.loopEnd
+                stemPlayer.setLoop(preset.loopStart, preset.loopEnd)
+                loopActive = true
+            }
+            // Restore start position
+            if (preset.startPosition > 0f) {
+                stemPlayer.seekTo(preset.startPosition)
+            }
+        }
 
         // Auto-play if requested (e.g. from skip or auto-next)
         if (autoPlay) {
@@ -296,6 +323,83 @@ fun JammingScreen(
                             ) { Text("Jamming", fontSize = 12.sp) }
                         }
                     }
+                }
+
+                // Save Setup button
+                var showSaveDialog by remember { mutableStateOf(false) }
+                var presetTagName by remember { mutableStateOf("") }
+                val hasPreset = remember(stemDirPath, currentPlaylist) {
+                    presetManager.hasPreset(currentPlaylist, songName)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { showSaveDialog = true },
+                        modifier = Modifier.weight(1f).height(36.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            if (hasPreset) "Update Setup" else "Save Setup",
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (hasPreset) {
+                        OutlinedButton(
+                            onClick = {
+                                presetManager.deletePreset(currentPlaylist, songName)
+                            },
+                            modifier = Modifier.height(36.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                        ) { Text("Clear", fontSize = 12.sp) }
+                    }
+                }
+
+                if (showSaveDialog) {
+                    val existingPreset = presetManager.getPreset(currentPlaylist, songName)
+                    if (presetTagName.isEmpty() && existingPreset != null) {
+                        presetTagName = existingPreset.tagName
+                    }
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showSaveDialog = false },
+                        title = { Text("Save Setup") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "Save current position, volumes, speed and loop for this song" +
+                                    if (currentPlaylist != null) " in playlist \"$currentPlaylist\"" else "",
+                                    fontSize = 13.sp
+                                )
+                                OutlinedTextField(
+                                    value = presetTagName,
+                                    onValueChange = { presetTagName = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("Tag name (e.g. Chorus, Hook)", fontSize = 13.sp) },
+                                    singleLine = true
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                val preset = com.beatz.app.data.SessionPreset(
+                                    startPosition = progress,
+                                    stemVolumes = stemVolumes,
+                                    speed = playbackSpeed,
+                                    loopEnabled = loopActive,
+                                    loopStart = loopStart,
+                                    loopEnd = loopEnd,
+                                    tagName = presetTagName
+                                )
+                                presetManager.savePreset(currentPlaylist, songName, preset)
+                                showSaveDialog = false
+                            }) { Text("Save") }
+                        },
+                        dismissButton = {
+                            OutlinedButton(onClick = { showSaveDialog = false }) { Text("Cancel") }
+                        }
+                    )
                 }
 
                 // Next song indicator
