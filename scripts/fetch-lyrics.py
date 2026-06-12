@@ -45,23 +45,69 @@ class LyricsParser(HTMLParser):
             self.lyrics.append(data)
 
 
+def clean_query(query):
+    """Clean up a song folder name into a proper search query."""
+    # Remove common YouTube title junk
+    junk = [
+        r'Full Song.*', r'Full Video.*', r'Official.*', r'Lyric(al|s)?.*Video',
+        r'HD.*', r'HQ.*', r'Audio.*', r'\(From.*?\)', r'Feat\..*',
+        r'with.*audio.*', r'Song With Lyrics.*', r'Lyrical.*',
+        r'\d{4}', r'Bollywood.*', r'Latest.*', r'New.*Song',
+        r'Male Version.*', r'Female Version.*', r'Tribute.*',
+    ]
+    cleaned = query
+    for pattern in junk:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+    # Remove extra spaces
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # If too short after cleaning, use original
+    if len(cleaned) < 3:
+        cleaned = query
+    return cleaned
+
+
 def search_genius(query):
     """Search Genius for a song, return the URL of the best match."""
-    encoded = urllib.parse.quote(query)
-    url = f"https://api.genius.com/search?q={encoded}"
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {GENIUS_TOKEN}"
-    })
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read())
+    cleaned = clean_query(query)
 
-    hits = data.get("response", {}).get("hits", [])
-    if not hits:
-        return None, None
+    # Search with multiple strategies
+    queries_to_try = [
+        cleaned,                          # Original cleaned
+        cleaned + " lyrics",              # With lyrics hint
+        cleaned + " Romanized",           # Direct romanized search
+    ]
 
-    # Return first result
-    song = hits[0]["result"]
-    return song["url"], song["full_title"]
+    best_url = None
+    best_title = None
+
+    for search_q in queries_to_try:
+        encoded = urllib.parse.quote(search_q)
+        url = f"https://api.genius.com/search?q={encoded}"
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {GENIUS_TOKEN}"
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+        except:
+            continue
+
+        hits = data.get("response", {}).get("hits", [])
+        if not hits:
+            continue
+
+        # Prefer Romanized results (better for sing-along)
+        for hit in hits[:5]:
+            title = hit["result"]["full_title"].lower()
+            if "romanized" in title:
+                return hit["result"]["url"], hit["result"]["full_title"]
+
+        # Save first result as fallback
+        if best_url is None:
+            best_url = hits[0]["result"]["url"]
+            best_title = hits[0]["result"]["full_title"]
+
+    return best_url, best_title
 
 
 def fetch_lyrics_from_url(url):
@@ -79,9 +125,13 @@ def fetch_lyrics_from_url(url):
 
     # Clean up
     lyrics = re.sub(r'\[.*?\]', '', lyrics)  # Remove [Verse], [Chorus] etc.
-    lyrics = re.sub(r'\d+ Contributors.*?Lyrics\n?', '', lyrics)  # Remove header
+    lyrics = re.sub(r'\d+\s*Contributor.*?Lyrics\n?', '', lyrics)  # Remove header
     lyrics = re.sub(r'Translations.*?Lyrics\n?', '', lyrics)  # Remove translations header
     lyrics = re.sub(r'You might also like.*', '', lyrics)  # Remove suggestions
+    lyrics = re.sub(r'See .*? LiveGet tickets.*?\n?', '', lyrics)  # Remove concert ads
+    lyrics = re.sub(r'Embed$', '', lyrics, flags=re.MULTILINE)  # Remove Embed button text
+    lyrics = re.sub(r'\d+Embed$', '', lyrics, flags=re.MULTILINE)
+    lyrics = re.sub(r'Subscribe.*?icon\.', '', lyrics)  # Remove subscribe prompts
     lyrics = re.sub(r'\n{3,}', '\n\n', lyrics)  # Max 2 newlines
     lyrics = lyrics.strip()
 
