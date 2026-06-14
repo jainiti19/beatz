@@ -57,9 +57,9 @@ echo "Song: $NAME"
 echo ""
 echo "=== Step 2: Separating stems ==="
 rm -rf "$WORK_DIR/separated"
-demucs -n htdemucs --out "$WORK_DIR/separated" "$WORK_DIR/download.mp3" 2>&1 | grep -E "100%|Separating"
+demucs -n htdemucs_ft --out "$WORK_DIR/separated" "$WORK_DIR/download.mp3" 2>&1 | grep -E "100%|Separating"
 
-STEM_DIR=$(ls -td "$WORK_DIR/separated/htdemucs/"*/ 2>/dev/null | head -1)
+STEM_DIR=$(ls -td "$WORK_DIR/separated/htdemucs_ft/"*/ 2>/dev/null | head -1)
 
 # Step 3: Organize
 FINAL_DIR=~/Music/karaoke/htdemucs/$NAME

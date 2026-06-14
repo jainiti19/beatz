@@ -25,10 +25,10 @@ process_song() {
 
     # Demucs
     echo "[$NAME] Separating stems..."
-    demucs -n htdemucs --out "$SONG_WORK/separated" "$SONG_WORK/audio.mp3" 2>&1 | grep -E "100%|Separating" || true
+    demucs -n htdemucs_ft --out "$SONG_WORK/separated" "$SONG_WORK/audio.mp3" 2>&1 | grep -E "100%|Separating" || true
 
     # Copy stems
-    STEM_DIR=$(ls -td "$SONG_WORK/separated/htdemucs/"*/ 2>/dev/null | head -1)
+    STEM_DIR=$(ls -td "$SONG_WORK/separated/htdemucs_ft/"*/ 2>/dev/null | head -1)
     if [ -z "$STEM_DIR" ]; then
         echo "[$NAME] ERROR: No stems produced"
         return 1

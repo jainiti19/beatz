@@ -93,9 +93,9 @@ while true; do
       # Step 2: Demucs
       write_status "$DEVICE" "$STATUS_NAME" "separating:$SONG_NAME"
       rm -rf "$WORK_DIR/separated"
-      demucs -n htdemucs --out "$WORK_DIR/separated" "$WORK_DIR/download.mp3" 2>&1 | grep "100%" || true
+      demucs -n htdemucs_ft --out "$WORK_DIR/separated" "$WORK_DIR/download.mp3" 2>&1 | grep "100%" || true
 
-      STEM_DIR=$(ls -td "$WORK_DIR/separated/htdemucs/"*/ 2>/dev/null | head -1)
+      STEM_DIR=$(ls -td "$WORK_DIR/separated/htdemucs_ft/"*/ 2>/dev/null | head -1)
       if [ -z "$STEM_DIR" ]; then
         write_status "$DEVICE" "$STATUS_NAME" "error:Separation failed"
         $ADB -s "$DEVICE" shell "run-as com.beatz.app rm /data/data/com.beatz.app/files/youtube_queue/$request" 2>/dev/null
