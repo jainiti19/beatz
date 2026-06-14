@@ -75,7 +75,15 @@ fun HomeScreen(
             modifier = Modifier.size(160.dp)
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "v2.0 stereo",
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
             text = "BeatznBox",

@@ -117,8 +117,8 @@ class StemPlayer {
     private fun initAudioTrack() {
         audioTrack?.release()
         val bufferSize = AudioTrack.getMinBufferSize(
-            SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT
-        ).coerceAtLeast(MIX_CHUNK_FRAMES * 4)
+            SAMPLE_RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_FLOAT
+        ).coerceAtLeast(MIX_CHUNK_FRAMES * 8)
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -131,7 +131,7 @@ class StemPlayer {
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
                     .setSampleRate(SAMPLE_RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                     .build()
             )
             .setBufferSizeInBytes(bufferSize)
@@ -242,15 +242,16 @@ class StemPlayer {
                 readers[name] = RandomAccessFile(info.file, "r")
             }
 
-            val mixBuffer = FloatArray(MIX_CHUNK_FRAMES)
-            // Per-stem read buffer (max: stereo 16-bit = 4 bytes per frame)
-            val readBuf = ByteArray(MIX_CHUNK_FRAMES * 4)
+            // Stereo mix buffer: [L0, R0, L1, R1, ...]
+            val mixBuffer = FloatArray(MIX_CHUNK_FRAMES * 2)
+            // Per-stem read buffer (max: stereo 24-bit = 6 bytes per frame)
+            val readBuf = ByteArray(MIX_CHUNK_FRAMES * 6)
 
             while (isPlaying && playbackFramePos < maxFrames) {
                 val framesToRead = MIX_CHUNK_FRAMES.toLong().coerceAtMost(maxFrames - playbackFramePos).toInt()
 
-                // Clear mix buffer
-                for (i in 0 until framesToRead) mixBuffer[i] = 0f
+                // Clear mix buffer (stereo)
+                for (i in 0 until framesToRead * 2) mixBuffer[i] = 0f
 
                 // Open readers for any new stems added dynamically
                 val currentStems = stemFiles
@@ -276,33 +277,35 @@ class StemPlayer {
                     val read = raf.read(readBuf, 0, bytesToRead)
                     if (read <= 0) continue
 
-                    // Decode and mix into buffer
+                    // Decode and mix into stereo buffer
                     val bb = ByteBuffer.wrap(readBuf, 0, read).order(ByteOrder.LITTLE_ENDIAN)
                     for (i in 0 until framesToRead) {
                         if (bb.remaining() < bytesPerFrame) break
-                        var sample = 0f
-                        for (ch in 0 until info.channels) {
-                            sample += when (info.bitsPerSample) {
-                                16 -> bb.short.toFloat() / Short.MAX_VALUE
-                                24 -> {
-                                    val b0 = bb.get().toInt() and 0xFF
-                                    val b1 = bb.get().toInt() and 0xFF
-                                    val b2 = bb.get().toInt()
-                                    ((b2 shl 16) or (b1 shl 8) or b0).toFloat() / 8388607f
-                                }
-                                else -> { bb.short.toFloat() / Short.MAX_VALUE }
-                            }
+
+                        if (info.channels == 2) {
+                            // Stereo source — preserve L/R
+                            val left = decodeSample(bb, info.bitsPerSample)
+                            val right = decodeSample(bb, info.bitsPerSample)
+                            mixBuffer[i * 2] += left * vol
+                            mixBuffer[i * 2 + 1] += right * vol
+                        } else {
+                            // Mono source — duplicate to both channels
+                            val sample = decodeSample(bb, info.bitsPerSample)
+                            mixBuffer[i * 2] += sample * vol
+                            mixBuffer[i * 2 + 1] += sample * vol
                         }
-                        mixBuffer[i] += (sample / info.channels) * vol
                     }
                 }
 
-                // Clip
-                for (i in 0 until framesToRead) {
-                    mixBuffer[i] = mixBuffer[i].coerceIn(-1f, 1f)
+                // Soft limiter (better than hard clip for PA)
+                for (i in 0 until framesToRead * 2) {
+                    val x = mixBuffer[i]
+                    mixBuffer[i] = if (x > 1f) 1f - 1f / (x + 1f)
+                        else if (x < -1f) -1f + 1f / (-x + 1f)
+                        else x
                 }
 
-                track.write(mixBuffer, 0, framesToRead, AudioTrack.WRITE_BLOCKING)
+                track.write(mixBuffer, 0, framesToRead * 2, AudioTrack.WRITE_BLOCKING)
                 playbackFramePos += framesToRead
                 _progress.value = playbackFramePos.toFloat() / maxFrames
 
@@ -330,6 +333,19 @@ class StemPlayer {
     /**
      * Parse WAV header only — doesn't read audio data.
      */
+    private fun decodeSample(bb: ByteBuffer, bitsPerSample: Int): Float {
+        return when (bitsPerSample) {
+            16 -> bb.short.toFloat() / Short.MAX_VALUE
+            24 -> {
+                val b0 = bb.get().toInt() and 0xFF
+                val b1 = bb.get().toInt() and 0xFF
+                val b2 = bb.get().toInt()
+                ((b2 shl 16) or (b1 shl 8) or b0).toFloat() / 8388607f
+            }
+            else -> bb.short.toFloat() / Short.MAX_VALUE
+        }
+    }
+
     private fun parseWavHeader(file: File): StemInfo? {
         try {
             RandomAccessFile(file, "r").use { raf ->
