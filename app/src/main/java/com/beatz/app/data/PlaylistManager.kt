@@ -60,6 +60,19 @@ class PlaylistManager(private val filesDir: File) {
         save(playlists)
     }
 
+    fun moveSongInPlaylist(playlist: String, songDir: String, direction: Int) {
+        val playlists = getPlaylists().toMutableMap()
+        val songs = playlists[playlist]?.toMutableList() ?: return
+        val index = songs.indexOf(songDir)
+        if (index < 0) return
+        val newIndex = (index + direction).coerceIn(0, songs.size - 1)
+        if (newIndex == index) return
+        songs.removeAt(index)
+        songs.add(newIndex, songDir)
+        playlists[playlist] = songs
+        save(playlists)
+    }
+
     fun getPlaylistsForSong(songDir: String): List<String> {
         return getPlaylists().filter { songDir in it.value }.keys.toList()
     }

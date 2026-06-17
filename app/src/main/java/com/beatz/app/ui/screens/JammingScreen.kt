@@ -215,7 +215,7 @@ fun JammingScreen(
             }
 
             is LoadState.Ready -> {
-                // Player card: progress + transport + presets
+                // Player card: seek slider + transport + presets
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -224,12 +224,14 @@ fun JammingScreen(
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        // Progress bar
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier.fillMaxWidth().height(6.dp)
+                        // Seek slider
+                        Slider(
+                            value = progress,
+                            onValueChange = { stemPlayer.seekTo(it) },
+                            valueRange = 0f..1f,
+                            modifier = Modifier.fillMaxWidth().height(24.dp)
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -252,17 +254,7 @@ fun JammingScreen(
                                 modifier = Modifier.size(40.dp)
                             ) { Text("■", fontSize = 14.sp) }
 
-                            Spacer(modifier = Modifier.size(6.dp))
-
-                            FilledIconButton(
-                                onClick = {
-                                    val newFrac = ((progress * duration - 10f) / duration).coerceAtLeast(0f)
-                                    stemPlayer.seekTo(newFrac)
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) { Text("-10", fontSize = 11.sp) }
-
-                            Spacer(modifier = Modifier.size(6.dp))
+                            Spacer(modifier = Modifier.size(16.dp))
 
                             FilledIconButton(
                                 onClick = {
@@ -279,16 +271,6 @@ fun JammingScreen(
                                     fontSize = 22.sp
                                 )
                             }
-
-                            Spacer(modifier = Modifier.size(6.dp))
-
-                            FilledIconButton(
-                                onClick = {
-                                    val newFrac = ((progress * duration + 10f) / duration).coerceAtMost(1f)
-                                    stemPlayer.seekTo(newFrac)
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) { Text("+10", fontSize = 11.sp) }
                         }
                         // Presets
                         Row(
@@ -452,9 +434,10 @@ fun JammingScreen(
                     }
                 }
 
-                // --- Collapsible: Add Rhythm ---
+                // --- Taal & Rhythm (hidden for now) ---
+                if (false) {
                 CollapsibleSection(
-                    title = "Taal & Rhythm" + if (rhythmGenerating) " (generating...)" else if (activeTaal != null) " (${activeTaal})" else "",
+                    title = "Taal & Rhythm",
                     expanded = rhythmExpanded,
                     onToggle = { rhythmExpanded = !rhythmExpanded }
                 ) {
@@ -577,6 +560,7 @@ fun JammingScreen(
                         }
                     }
                 }
+                } // end hidden Taal section
 
                 // --- Collapsible: Loop ---
                 CollapsibleSection(
@@ -652,7 +636,8 @@ fun JammingScreen(
                     }
                 }
 
-                // --- Collapsible: Speed ---
+                // --- Speed (hidden for now) ---
+                if (false) {
                 CollapsibleSection(
                     title = "Speed" + if (playbackSpeed != 1.0f) " (%.1fx)".format(playbackSpeed) else "",
                     expanded = speedExpanded,
@@ -692,6 +677,7 @@ fun JammingScreen(
                         }
                     }
                 }
+                } // end hidden Speed section
 
                 // --- Collapsible: Lyrics ---
                 CollapsibleSection(

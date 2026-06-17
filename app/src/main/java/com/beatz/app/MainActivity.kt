@@ -7,10 +7,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.Modifier
+import com.beatz.app.audio.engine.StemPlayer
 import com.beatz.app.ui.navigation.BeatzNavGraph
 import com.beatz.app.ui.theme.BeatzTheme
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        // Global reference so we can stop on destroy
+        var activePlayer: StemPlayer? = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -28,5 +35,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        activePlayer?.stop()
+        activePlayer?.release()
+        activePlayer = null
     }
 }

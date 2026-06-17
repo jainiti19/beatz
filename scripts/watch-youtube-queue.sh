@@ -108,6 +108,9 @@ while true; do
       mkdir -p "$FINAL_DIR"
       cp "$STEM_DIR"/*.wav "$FINAL_DIR/"
 
+      # Step 2b: Normalize volume
+      python3 "$SCRIPT_DIR/normalize-stems.py" "$FINAL_DIR" 2>/dev/null
+
       # Step 3: Push to phone
       write_status "$DEVICE" "$STATUS_NAME" "pushing:$SONG_NAME"
 

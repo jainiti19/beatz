@@ -62,11 +62,16 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
         stemDir = path
         val newSongName = java.io.File(path).name
         if (newSongName != nowPlayingName) {
-            sharedPlayer.value?.stop()
-            sharedPlayer.value?.release()
+            val oldPlayer = sharedPlayer.value
             val player = StemPlayer()
             sharedPlayer.value = player
+            com.beatz.app.MainActivity.activePlayer = player
             nowPlayingName = newSongName
+            // Old song keeps playing until new song's play is pressed
+            player.onFirstPlay = {
+                oldPlayer?.stop()
+                oldPlayer?.release()
+            }
         }
         jammingKey++
         currentScreen = Screen.Jamming
@@ -146,6 +151,7 @@ fun BeatzNavGraph(testFilePath: String? = null, jammingStemDir: String? = null) 
                             sharedPlayer.value?.release()
                             val player = StemPlayer()
                             sharedPlayer.value = player
+                            com.beatz.app.MainActivity.activePlayer = player
                             nowPlayingName = java.io.File(nextPath).name
                             stemDir = nextPath
                             autoPlayNext = true

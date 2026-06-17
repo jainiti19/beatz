@@ -68,7 +68,9 @@ fun JammingPickerScreen(
     var playlists by remember { mutableStateOf(playlistManager.getPlaylists()) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
     var deleteSong by remember { mutableStateOf<String?>(null) }
+    var deleteConfirmStep by remember { mutableStateOf(0) }
     var newPlaylistName by remember { mutableStateOf("") }
+    var editMode by remember { mutableStateOf(false) }
     var addToPlaylistSong by remember { mutableStateOf<String?>(null) }
 
     // Auto-refresh song list and processing status every 3 seconds
@@ -277,6 +279,13 @@ fun JammingPickerScreen(
                     modifier = Modifier.height(32.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
                 ) { Text("+", fontSize = 14.sp) }
+                if (selectedPlaylist != null) {
+                    OutlinedButton(
+                        onClick = { editMode = !editMode },
+                        modifier = Modifier.height(32.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                    ) { Text(if (editMode) "Done" else "Edit", fontSize = 12.sp) }
+                }
             }
         }
 
@@ -293,7 +302,8 @@ fun JammingPickerScreen(
 
         val playlistFiltered = if (selectedPlaylist != null) {
             val songNames = playlists[selectedPlaylist] ?: emptyList()
-            stemDirs.filter { it.name in songNames }
+            val dirMap = stemDirs.associateBy { it.name }
+            songNames.mapNotNull { dirMap[it] }
         } else stemDirs
 
         val filteredDirs = if (searchQuery.isBlank()) playlistFiltered
@@ -328,23 +338,58 @@ fun JammingPickerScreen(
             }
         } else {
             for (dir in filteredDirs) {
-                val stemCount = countStems(dir)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onStemDirSelected(dir.absolutePath) },
+                        .clickable { if (!editMode) onStemDirSelected(dir.absolutePath) },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 ) {
                     Row(
-                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        if (editMode) {
+                            // Edit mode: reorder + remove + delete
+                            Column(
+                                modifier = Modifier.padding(end = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "^",
+                                    modifier = Modifier
+                                        .clickable {
+                                            if (selectedPlaylist != null) {
+                                                playlistManager.moveSongInPlaylist(selectedPlaylist!!, dir.name, -1)
+                                                playlists = playlistManager.getPlaylists()
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "v",
+                                    modifier = Modifier
+                                        .clickable {
+                                            if (selectedPlaylist != null) {
+                                                playlistManager.moveSongInPlaylist(selectedPlaylist!!, dir.name, 1)
+                                                playlists = playlistManager.getPlaylists()
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = dir.name.replace("_", " "),
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium
                             )
                             val songPlaylists = playlistManager.getPlaylistsForSong(dir.name)
@@ -356,27 +401,41 @@ fun JammingPickerScreen(
                                 )
                             }
                         }
-                        Text(
-                            text = "+",
-                            modifier = Modifier
-                                .clickable { addToPlaylistSong = dir.name }
-                                .padding(horizontal = 6.dp),
-                            fontSize = 18.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "x",
-                            modifier = Modifier
-                                .clickable { deleteSong = dir.absolutePath }
-                                .padding(horizontal = 6.dp),
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
-                        )
-                        Text(
-                            text = "▶",
-                            fontSize = 24.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        if (editMode) {
+                            // Remove from playlist
+                            if (selectedPlaylist != null) {
+                                Text(
+                                    text = "Remove",
+                                    modifier = Modifier
+                                        .clickable {
+                                            playlistManager.removeSongFromPlaylist(selectedPlaylist!!, dir.name)
+                                            playlists = playlistManager.getPlaylists()
+                                        }
+                                        .padding(horizontal = 6.dp),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            // Delete from device
+                            Text(
+                                text = "Delete",
+                                modifier = Modifier
+                                    .clickable { deleteSong = dir.absolutePath }
+                                    .padding(horizontal = 6.dp),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                            )
+                        } else {
+                            // Normal mode: add to playlist
+                            Text(
+                                text = "+",
+                                modifier = Modifier
+                                    .clickable { addToPlaylistSong = dir.name }
+                                    .padding(horizontal = 8.dp),
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -457,35 +516,48 @@ fun JammingPickerScreen(
         )
     }
 
-    // Delete song dialog
+    // Delete song dialog — double confirmation
     if (deleteSong != null) {
         val songPath = deleteSong!!
         val songDisplayName = File(songPath).name.replace("_", " ")
-        AlertDialog(
-            onDismissRequest = { deleteSong = null },
-            title = { Text("Delete Song") },
-            text = { Text("Remove \"$songDisplayName\" and its stems from this device?") },
-            confirmButton = {
-                Button(onClick = {
-                    // Delete stems directory
-                    File(songPath).deleteRecursively()
-                    // Remove from playlists
-                    val dirName = File(songPath).name
-                    for (playlist in playlists.keys) {
-                        playlistManager.removeSongFromPlaylist(playlist, dirName)
-                    }
-                    playlists = playlistManager.getPlaylists()
-                    // Delete lyrics
-                    File(context.filesDir, "lyrics/${dirName}.txt").delete()
-                    // Refresh list
-                    stemDirs = findStemDirectories(context.filesDir)
-                    deleteSong = null
-                }) { Text("Delete") }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { deleteSong = null }) { Text("Cancel") }
-            }
-        )
+        if (deleteConfirmStep == 0) deleteConfirmStep = 1
+
+        if (deleteConfirmStep == 1) {
+            AlertDialog(
+                onDismissRequest = { deleteSong = null; deleteConfirmStep = 0 },
+                title = { Text("Delete Song") },
+                text = { Text("Remove \"$songDisplayName\" from this device?\n\nThis will delete all stems and lyrics.") },
+                confirmButton = {
+                    Button(onClick = { deleteConfirmStep = 2 }) { Text("Yes, Delete") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { deleteSong = null; deleteConfirmStep = 0 }) { Text("Cancel") }
+                }
+            )
+        } else if (deleteConfirmStep == 2) {
+            AlertDialog(
+                onDismissRequest = { deleteSong = null; deleteConfirmStep = 0 },
+                title = { Text("Are you sure?") },
+                text = { Text("\"$songDisplayName\" will be permanently deleted.") },
+                confirmButton = {
+                    Button(onClick = {
+                        File(songPath).deleteRecursively()
+                        val dirName = File(songPath).name
+                        for (playlist in playlists.keys) {
+                            playlistManager.removeSongFromPlaylist(playlist, dirName)
+                        }
+                        playlists = playlistManager.getPlaylists()
+                        File(context.filesDir, "lyrics/${dirName}.txt").delete()
+                        stemDirs = findStemDirectories(context.filesDir)
+                        deleteSong = null
+                        deleteConfirmStep = 0
+                    }) { Text("Delete Permanently") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { deleteSong = null; deleteConfirmStep = 0 }) { Text("Cancel") }
+                }
+            )
+        }
     }
 }
 
