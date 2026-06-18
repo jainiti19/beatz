@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeatznBox</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #fff;
+            color: #1c1b1f;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        .header {
+            text-align: center;
+            padding: 20px 0;
+        }
+        .header h1 {
+            color: #00897B;
+            font-size: 32px;
+        }
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        /* Song List */
+        .song-list { margin: 16px 0; }
+        .song-card {
+            background: #E0F2F1;
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin: 8px 0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        .song-card:hover { background: #B2DFDB; }
+        .song-card.active { background: #00897B; color: white; }
+        .song-name { font-weight: 500; font-size: 15px; }
+
+        /* Player */
+        .player {
+            background: #f5f5f5;
+            border-radius: 16px;
+            padding: 20px;
+            margin: 16px 0;
+            display: none;
+        }
+        .player.visible { display: block; }
+        .player-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #00897B;
+            margin-bottom: 12px;
+        }
+        .loading { color: #666; font-size: 14px; }
+
+        /* Seek */
+        .seek-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .seek-row input[type="range"] { flex: 1; accent-color: #00897B; }
+        .time { font-size: 12px; color: #666; min-width: 40px; }
+
+        /* Transport */
+        .transport {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin: 12px 0;
+        }
+        .btn {
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: white;
+        }
+        .btn-play {
+            width: 56px; height: 56px;
+            background: #00897B;
+            font-size: 22px;
+        }
+        .btn-stop {
+            width: 40px; height: 40px;
+            background: #666;
+        }
+        .btn:hover { opacity: 0.9; }
+
+        /* Presets */
+        .presets {
+            display: flex;
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .preset-btn {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #00897B;
+            border-radius: 8px;
+            background: white;
+            color: #00897B;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .preset-btn:hover { background: #E0F2F1; }
+
+        /* Stem Mixer */
+        .mixer { margin: 16px 0; }
+        .mixer-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+        }
+        .stem-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+        }
+        .stem-name {
+            font-size: 14px;
+            font-weight: 500;
+            min-width: 100px;
+        }
+        .stem-row input[type="range"] { flex: 1; accent-color: #00897B; }
+        .stem-vol { font-size: 12px; min-width: 35px; text-align: right; color: #666; }
+
+        /* Lyrics */
+        .lyrics-section { margin: 16px 0; }
+        .lyrics-toggle {
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+        }
+        .lyrics-box {
+            background: #E0F2F1;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 16px;
+            line-height: 28px;
+            white-space: pre-wrap;
+        }
+
+        /* Status */
+        .status {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BeatznBox</h1>
+        <p>Your jamming companion</p>
+    </div>
+
+    <div id="songList" class="song-list">
+        <div class="status">Loading songs...</div>
+    </div>
+
+    <div id="player" class="player">
+        <div class="player-title" id="playerTitle"></div>
+        <div id="loadingStatus" class="loading"></div>
+
+        <div class="seek-row">
+            <span class="time" id="currentTime">0:00</span>
+            <input type="range" id="seekBar" min="0" max="1000" value="0">
+            <span class="time" id="totalTime">0:00</span>
+        </div>
+
+        <div class="transport">
+            <button class="btn btn-stop" onclick="stopPlayback()">&#9632;</button>
+            <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
+        </div>
+
+        <div class="presets">
+            <button class="preset-btn" onclick="applyPreset('karaoke')">Karaoke</button>
+            <button class="preset-btn" onclick="applyPreset('unplugged')">Unplugged</button>
+            <button class="preset-btn" onclick="applyPreset('jamming')">Jamming</button>
+        </div>
+
+        <div class="mixer">
+            <div class="mixer-title" onclick="toggleMixer()">
+                <span>Stem Mixer</span>
+                <span id="mixerArrow">&#9660;</span>
+            </div>
+            <div id="mixerContent" style="display:none">
+                <div class="stem-row">
+                    <span class="stem-name">Vocals</span>
+                    <input type="range" min="0" max="100" value="0" oninput="setStemVol('vocals', this.value)">
+                    <span class="stem-vol" id="vol-vocals">0%</span>
+                </div>
+                <div class="stem-row">
+                    <span class="stem-name">Drums</span>
+                    <input type="range" min="0" max="100" value="80" oninput="setStemVol('drums', this.value)">
+                    <span class="stem-vol" id="vol-drums">80%</span>
+                </div>
+                <div class="stem-row">
+                    <span class="stem-name">Bass</span>
+                    <input type="range" min="0" max="100" value="80" oninput="setStemVol('bass', this.value)">
+                    <span class="stem-vol" id="vol-bass">80%</span>
+                </div>
+                <div class="stem-row">
+                    <span class="stem-name">Harmony</span>
+                    <input type="range" min="0" max="100" value="80" oninput="setStemVol('other', this.value)">
+                    <span class="stem-vol" id="vol-other">80%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="lyrics-section">
+            <div class="lyrics-toggle" onclick="toggleLyrics()">
+                <span>Lyrics</span>
+                <span id="lyricsArrow">&#9660;</span>
+            </div>
+            <div id="lyricsContent" style="display:none">
+                <div class="lyrics-box" id="lyricsBox">No lyrics available</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration — change STEMS_BASE_URL to your R2/cloud storage URL
+        const STEMS_BASE_URL = './stems'; // Local for testing
+
+        let audioCtx = null;
+        let stems = {};
+        let gainNodes = {};
+        let sourceNodes = {};
+        let isPlaying = false;
+        let startTime = 0;
+        let pauseOffset = 0;
+        let songDuration = 0;
+        let currentSong = null;
+        let seekInterval = null;
+        let songs = [];
+
+        const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
+
+        // Load song list
+        async function loadSongList() {
+            try {
+                const resp = await fetch(STEMS_BASE_URL + '/songs.json');
+                songs = await resp.json();
+            } catch (e) {
+                // Fallback: try to detect from URL structure
+                songs = [];
+            }
+            renderSongList();
+        }
+
+        function renderSongList() {
+            const el = document.getElementById('songList');
+            if (songs.length === 0) {
+                el.innerHTML = '<div class="status">No songs found. Add songs.json to stems/</div>';
+                return;
+            }
+            el.innerHTML = songs.map((song, i) => `
+                <div class="song-card" id="song-${i}" onclick="selectSong(${i})">
+                    <span class="song-name">${song.name}</span>
+                </div>
+            `).join('');
+        }
+
+        async function selectSong(index) {
+            const song = songs[index];
+            if (currentSong === index && isPlaying) return;
+
+            // Stop current
+            stopPlayback();
+
+            // Highlight
+            document.querySelectorAll('.song-card').forEach(c => c.classList.remove('active'));
+            document.getElementById('song-' + index).classList.add('active');
+
+            currentSong = index;
+            document.getElementById('playerTitle').textContent = song.name;
+            document.getElementById('player').classList.add('visible');
+            document.getElementById('loadingStatus').textContent = 'Loading stems...';
+
+            // Init audio context
+            if (!audioCtx) audioCtx = new AudioContext();
+
+            // Load all stems
+            const stemDir = song.dir || song.name.replace(/ /g, '_');
+            let loaded = 0;
+
+            for (const stem of STEM_NAMES) {
+                try {
+                    const url = `${STEMS_BASE_URL}/${stemDir}/${stem}.wav`;
+                    document.getElementById('loadingStatus').textContent =
+                        `Loading ${stem}... (${loaded}/${STEM_NAMES.length})`;
+                    const resp = await fetch(url);
+                    const arrayBuf = await resp.arrayBuffer();
+                    stems[stem] = await audioCtx.decodeAudioData(arrayBuf);
+                    loaded++;
+                } catch (e) {
+                    console.warn(`Failed to load ${stem}:`, e);
+                }
+            }
+
+            if (loaded === 0) {
+                document.getElementById('loadingStatus').textContent = 'Failed to load stems';
+                return;
+            }
+
+            // Get duration from longest stem
+            songDuration = Math.max(...Object.values(stems).map(b => b.duration));
+
+            document.getElementById('loadingStatus').textContent = '';
+            document.getElementById('totalTime').textContent = formatTime(songDuration);
+
+            // Create gain nodes
+            for (const stem of STEM_NAMES) {
+                if (!gainNodes[stem]) {
+                    gainNodes[stem] = audioCtx.createGain();
+                    gainNodes[stem].connect(audioCtx.destination);
+                }
+            }
+
+            // Apply default preset (karaoke)
+            applyPreset('karaoke');
+
+            // Load lyrics
+            loadLyrics(stemDir);
+        }
+
+        async function loadLyrics(stemDir) {
+            try {
+                const resp = await fetch(`${STEMS_BASE_URL}/${stemDir}/lyrics.txt`);
+                if (resp.ok) {
+                    const text = await resp.text();
+                    document.getElementById('lyricsBox').textContent = text;
+                } else {
+                    document.getElementById('lyricsBox').textContent = 'No lyrics available';
+                }
+            } catch (e) {
+                document.getElementById('lyricsBox').textContent = 'No lyrics available';
+            }
+        }
+
+        function togglePlay() {
+            if (isPlaying) {
+                pausePlayback();
+            } else {
+                startPlayback();
+            }
+        }
+
+        function startPlayback() {
+            if (!audioCtx || Object.keys(stems).length === 0) return;
+
+            // Resume audio context (needed for browser autoplay policy)
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            // Create and start source nodes
+            for (const stem of STEM_NAMES) {
+                if (!stems[stem]) continue;
+                const source = audioCtx.createBufferSource();
+                source.buffer = stems[stem];
+                source.connect(gainNodes[stem]);
+                source.start(0, pauseOffset);
+                sourceNodes[stem] = source;
+            }
+
+            startTime = audioCtx.currentTime - pauseOffset;
+            isPlaying = true;
+            document.getElementById('playBtn').innerHTML = '&#10074;&#10074;';
+
+            // Update seek bar
+            seekInterval = setInterval(updateSeek, 200);
+
+            // Auto-stop at end
+            sourceNodes[STEM_NAMES[0]]?.addEventListener('ended', () => {
+                if (isPlaying) stopPlayback();
+            });
+        }
+
+        function pausePlayback() {
+            if (!isPlaying) return;
+            pauseOffset = audioCtx.currentTime - startTime;
+
+            for (const stem of STEM_NAMES) {
+                try {
+                    sourceNodes[stem]?.stop();
+                    sourceNodes[stem]?.disconnect();
+                } catch (e) {}
+            }
+            sourceNodes = {};
+
+            isPlaying = false;
+            document.getElementById('playBtn').innerHTML = '&#9654;';
+            clearInterval(seekInterval);
+        }
+
+        function stopPlayback() {
+            if (isPlaying) {
+                for (const stem of STEM_NAMES) {
+                    try {
+                        sourceNodes[stem]?.stop();
+                        sourceNodes[stem]?.disconnect();
+                    } catch (e) {}
+                }
+                sourceNodes = {};
+                isPlaying = false;
+            }
+            clearInterval(seekInterval);
+            pauseOffset = 0;
+            document.getElementById('seekBar').value = 0;
+            document.getElementById('currentTime').textContent = '0:00';
+            document.getElementById('playBtn').innerHTML = '&#9654;';
+        }
+
+        function updateSeek() {
+            if (!isPlaying || !songDuration) return;
+            const current = audioCtx.currentTime - startTime;
+            const progress = (current / songDuration) * 1000;
+            document.getElementById('seekBar').value = Math.min(progress, 1000);
+            document.getElementById('currentTime').textContent = formatTime(current);
+        }
+
+        // Seek bar
+        document.getElementById('seekBar').addEventListener('input', function () {
+            const frac = this.value / 1000;
+            const wasPlaying = isPlaying;
+            if (isPlaying) pausePlayback();
+            pauseOffset = frac * songDuration;
+            document.getElementById('currentTime').textContent = formatTime(pauseOffset);
+            if (wasPlaying) startPlayback();
+        });
+
+        function setStemVol(stem, val) {
+            const v = val / 100;
+            if (gainNodes[stem]) gainNodes[stem].gain.value = v;
+            document.getElementById('vol-' + stem).textContent =
+                v === 0 ? 'OFF' : Math.round(v * 100) + '%';
+        }
+
+        function applyPreset(name) {
+            const presets = {
+                karaoke:   { vocals: 0,  drums: 80, bass: 80, other: 80 },
+                unplugged: { vocals: 0,  drums: 0,  bass: 80, other: 80 },
+                jamming:   { vocals: 0,  drums: 70, bass: 80, other: 40 },
+            };
+            const p = presets[name];
+            if (!p) return;
+            for (const [stem, vol] of Object.entries(p)) {
+                setStemVol(stem, vol);
+                // Update slider
+                const sliders = document.querySelectorAll('.stem-row input');
+                const idx = STEM_NAMES.indexOf(stem);
+                if (idx >= 0 && sliders[idx]) sliders[idx].value = vol;
+            }
+        }
+
+        function toggleMixer() {
+            const el = document.getElementById('mixerContent');
+            const arrow = document.getElementById('mixerArrow');
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+            arrow.innerHTML = el.style.display === 'none' ? '&#9660;' : '&#9650;';
+        }
+
+        function toggleLyrics() {
+            const el = document.getElementById('lyricsContent');
+            const arrow = document.getElementById('lyricsArrow');
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+            arrow.innerHTML = el.style.display === 'none' ? '&#9660;' : '&#9650;';
+        }
+
+        function formatTime(sec) {
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            return m + ':' + (s < 10 ? '0' : '') + s;
+        }
+
+        // Init
+        loadSongList();
+    </script>
+</body>
+</html>
