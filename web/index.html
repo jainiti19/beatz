@@ -8,75 +8,128 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #fff;
+            background: #fafafa;
             color: #1c1b1f;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 16px;
-        }
-        .header {
-            text-align: center;
-            padding: 20px 0;
-        }
-        .header h1 {
-            color: #00897B;
-            font-size: 32px;
-        }
-        .header p {
-            color: #666;
-            font-size: 14px;
+            height: 100vh;
+            overflow: hidden;
         }
 
-        /* Song List */
-        .song-list { margin: 16px 0; }
-        .song-card {
-            background: #E0F2F1;
-            border-radius: 12px;
-            padding: 14px 16px;
-            margin: 8px 0;
-            cursor: pointer;
+        /* Top bar */
+        .topbar {
+            background: linear-gradient(135deg, #00897B, #43A047);
+            color: white;
+            padding: 10px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            transition: background 0.2s;
         }
-        .song-card:hover { background: #B2DFDB; }
-        .song-card.active { background: #00897B; color: white; }
-        .song-name { font-weight: 500; font-size: 15px; }
+        .topbar h1 { font-size: 22px; }
+        .topbar .now-playing { font-size: 13px; opacity: 0.9; }
 
-        /* Player */
-        .player {
-            background: #f5f5f5;
-            border-radius: 16px;
-            padding: 20px;
-            margin: 16px 0;
-            display: none;
+        /* Three-panel layout */
+        .panels {
+            display: flex;
+            height: calc(100vh - 50px);
         }
-        .player.visible { display: block; }
+
+        /* Left panel — Songs & Playlists */
+        .panel-left {
+            flex: 1;
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .search-box {
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+        }
+        .search-box input:focus { border-color: #00897B; }
+
+        .playlist-chips {
+            display: flex;
+            gap: 4px;
+            padding: 8px 10px;
+            overflow-x: auto;
+            border-bottom: 1px solid #eee;
+            flex-shrink: 0;
+        }
+        .chip {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+            border: 1px solid #00897B;
+            color: #00897B;
+            background: white;
+        }
+        .chip.active { background: #00897B; color: white; }
+        .chip:hover { background: #E0F2F1; }
+        .chip.active:hover { background: #00796B; }
+
+        .song-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+        .song-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #f5f5f5;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .song-item:hover { background: #E0F2F1; }
+        .song-item.active { background: #00897B; color: white; }
+        .song-item.active:hover { background: #00796B; }
+        .song-item .song-name { flex: 1; }
+        .song-item .song-playlists { font-size: 10px; color: #00897B; }
+        .song-item.active .song-playlists { color: #B2DFDB; }
+        .song-count { padding: 6px 12px; font-size: 11px; color: #999; }
+
+        /* Middle panel — Player */
+        .panel-center {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            overflow-y: auto;
+        }
         .player-title {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 600;
             color: #00897B;
-            margin-bottom: 12px;
+            margin-bottom: 4px;
         }
-        .loading { color: #666; font-size: 14px; }
+        .loading { font-size: 13px; color: #999; margin-bottom: 8px; }
 
-        /* Seek */
         .seek-row {
             display: flex;
             align-items: center;
             gap: 8px;
-            margin: 12px 0;
+            margin: 8px 0;
         }
         .seek-row input[type="range"] { flex: 1; accent-color: #00897B; }
         .time { font-size: 12px; color: #666; min-width: 40px; }
 
-        /* Transport */
         .transport {
             display: flex;
             justify-content: center;
+            align-items: center;
             gap: 12px;
-            margin: 12px 0;
+            margin: 8px 0;
         }
         .btn {
             border: none;
@@ -85,255 +138,387 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
             color: white;
         }
-        .btn-play {
-            width: 56px; height: 56px;
-            background: #00897B;
-            font-size: 22px;
-        }
-        .btn-stop {
-            width: 40px; height: 40px;
-            background: #666;
-        }
-        .btn:hover { opacity: 0.9; }
+        .btn-play { width: 52px; height: 52px; background: #00897B; font-size: 20px; }
+        .btn-stop { width: 36px; height: 36px; background: #888; font-size: 14px; }
+        .btn:hover { opacity: 0.85; }
 
-        /* Presets */
         .presets {
             display: flex;
-            gap: 8px;
-            margin: 12px 0;
+            gap: 6px;
+            margin: 8px 0;
         }
         .preset-btn {
             flex: 1;
-            padding: 8px;
+            padding: 7px;
             border: 1px solid #00897B;
             border-radius: 8px;
             background: white;
             color: #00897B;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
         }
         .preset-btn:hover { background: #E0F2F1; }
+        .preset-btn.active { background: #00897B; color: white; }
 
-        /* Stem Mixer */
-        .mixer { margin: 16px 0; }
-        .mixer-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 8px;
+        /* Up next */
+        .up-next {
+            background: #E8F5E9;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin: 8px 0;
+            display: flex;
+            align-items: center;
+            font-size: 13px;
+        }
+        .up-next .label { color: #666; font-size: 11px; margin-right: 8px; }
+        .up-next .next-name { flex: 1; font-weight: 500; }
+        .up-next .skip-btn {
+            padding: 4px 10px;
+            border: 1px solid #00897B;
+            border-radius: 6px;
+            background: white;
+            color: #00897B;
             cursor: pointer;
+            font-size: 11px;
+        }
+
+        /* Collapsible sections */
+        .section-header {
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 8px 0;
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            margin-top: 8px;
         }
+        .section-content { padding: 6px 0; }
+
         .stem-row {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 6px 0;
+            padding: 4px 0;
         }
-        .stem-name {
-            font-size: 14px;
-            font-weight: 500;
-            min-width: 100px;
-        }
+        .stem-name { font-size: 13px; font-weight: 500; min-width: 80px; }
         .stem-row input[type="range"] { flex: 1; accent-color: #00897B; }
         .stem-vol { font-size: 12px; min-width: 35px; text-align: right; color: #666; }
 
-        /* Lyrics */
-        .lyrics-section { margin: 16px 0; }
-        .lyrics-toggle {
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
+        /* Save setup */
+        .save-row {
             display: flex;
-            justify-content: space-between;
+            gap: 6px;
+            margin: 8px 0;
         }
-        .lyrics-box {
-            background: #E0F2F1;
-            border-radius: 8px;
-            padding: 16px;
-            margin-top: 8px;
-            max-height: 300px;
+        .save-btn {
+            padding: 6px 12px;
+            border: 1px solid #00897B;
+            border-radius: 6px;
+            background: white;
+            color: #00897B;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .save-btn:hover { background: #E0F2F1; }
+        .preset-indicator {
+            font-size: 11px;
+            color: #00897B;
+            padding: 4px 0;
+        }
+
+        /* Right panel — Lyrics */
+        .panel-right {
+            flex: 1;
+            background: white;
+            border-left: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+        .lyrics-header {
+            padding: 12px 16px;
+            font-weight: 600;
+            font-size: 14px;
+            border-bottom: 1px solid #eee;
+            color: #333;
+        }
+        .lyrics-content {
+            flex: 1;
             overflow-y: auto;
+            padding: 16px;
             font-size: 16px;
             line-height: 28px;
             white-space: pre-wrap;
+            color: #333;
         }
+        .no-lyrics { color: #999; font-style: italic; font-size: 14px; }
 
-        /* Status */
-        .status {
-            text-align: center;
-            padding: 40px;
-            color: #666;
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #999;
+            font-size: 15px;
         }
     </style>
 </head>
 <body>
-    <div class="header">
+    <div class="topbar">
         <h1>BeatznBox</h1>
-        <p>Your jamming companion</p>
+        <span class="now-playing" id="nowPlaying">Select a song to start</span>
     </div>
 
-    <div id="songList" class="song-list">
-        <div class="status">Loading songs...</div>
-    </div>
-
-    <div id="player" class="player">
-        <div class="player-title" id="playerTitle"></div>
-        <div id="loadingStatus" class="loading"></div>
-
-        <div class="seek-row">
-            <span class="time" id="currentTime">0:00</span>
-            <input type="range" id="seekBar" min="0" max="1000" value="0">
-            <span class="time" id="totalTime">0:00</span>
-        </div>
-
-        <div class="transport">
-            <button class="btn btn-stop" onclick="stopPlayback()">&#9632;</button>
-            <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
-        </div>
-
-        <div class="presets">
-            <button class="preset-btn" onclick="applyPreset('karaoke')">Karaoke</button>
-            <button class="preset-btn" onclick="applyPreset('unplugged')">Unplugged</button>
-            <button class="preset-btn" onclick="applyPreset('jamming')">Jamming</button>
-        </div>
-
-        <div class="mixer">
-            <div class="mixer-title" onclick="toggleMixer()">
-                <span>Stem Mixer</span>
-                <span id="mixerArrow">&#9660;</span>
+    <div class="panels">
+        <!-- Left: Songs & Playlists -->
+        <div class="panel-left">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search songs..." oninput="filterSongs()">
             </div>
-            <div id="mixerContent" style="display:none">
-                <div class="stem-row">
-                    <span class="stem-name">Vocals</span>
-                    <input type="range" min="0" max="100" value="0" oninput="setStemVol('vocals', this.value)">
-                    <span class="stem-vol" id="vol-vocals">0%</span>
-                </div>
-                <div class="stem-row">
-                    <span class="stem-name">Drums</span>
-                    <input type="range" min="0" max="100" value="80" oninput="setStemVol('drums', this.value)">
-                    <span class="stem-vol" id="vol-drums">80%</span>
-                </div>
-                <div class="stem-row">
-                    <span class="stem-name">Bass</span>
-                    <input type="range" min="0" max="100" value="80" oninput="setStemVol('bass', this.value)">
-                    <span class="stem-vol" id="vol-bass">80%</span>
-                </div>
-                <div class="stem-row">
-                    <span class="stem-name">Harmony</span>
-                    <input type="range" min="0" max="100" value="80" oninput="setStemVol('other', this.value)">
-                    <span class="stem-vol" id="vol-other">80%</span>
-                </div>
+            <div class="playlist-chips" id="playlistChips"></div>
+            <div class="song-count" id="songCount"></div>
+            <div class="song-list" id="songList"></div>
+        </div>
+
+        <!-- Center: Player -->
+        <div class="panel-center">
+            <div id="playerContent">
+                <div class="empty-state">Select a song from the left</div>
             </div>
         </div>
 
-        <div class="lyrics-section">
-            <div class="lyrics-toggle" onclick="toggleLyrics()">
-                <span>Lyrics</span>
-                <span id="lyricsArrow">&#9660;</span>
-            </div>
-            <div id="lyricsContent" style="display:none">
-                <div class="lyrics-box" id="lyricsBox">No lyrics available</div>
+        <!-- Right: Lyrics -->
+        <div class="panel-right">
+            <div class="lyrics-header">Lyrics</div>
+            <div class="lyrics-content" id="lyricsContent">
+                <span class="no-lyrics">Select a song to view lyrics</span>
             </div>
         </div>
     </div>
 
     <script>
-        // Configuration — change STEMS_BASE_URL to your R2/cloud storage URL
-        const STEMS_BASE_URL = './stems'; // Local for testing
+        const STEMS_BASE_URL = './stems';
+        const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 
         let audioCtx = null;
         let stems = {};
         let gainNodes = {};
         let sourceNodes = {};
         let isPlaying = false;
+        let wasPlayingBeforeSeek = false;
         let startTime = 0;
         let pauseOffset = 0;
         let songDuration = 0;
-        let currentSong = null;
+        let currentSongIndex = -1;
         let seekInterval = null;
+        let isLoading = false;
         let songs = [];
+        let filteredSongs = [];
+        let currentPreset = 'karaoke';
 
-        const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
+        // Playlists (stored in localStorage)
+        let playlists = JSON.parse(localStorage.getItem('beatznbox_playlists') || '{}');
+        let selectedPlaylist = null;
 
-        // Load song list
+        // Session presets (stored in localStorage)
+        let sessionPresets = JSON.parse(localStorage.getItem('beatznbox_presets') || '{}');
+
+        // ===== Song List =====
+
         async function loadSongList() {
             try {
                 const resp = await fetch(STEMS_BASE_URL + '/songs.json');
                 songs = await resp.json();
-            } catch (e) {
-                // Fallback: try to detect from URL structure
-                songs = [];
+            } catch (e) { songs = []; }
+            filteredSongs = [...songs];
+            renderPlaylistChips();
+            renderSongList();
+        }
+
+        function renderPlaylistChips() {
+            const el = document.getElementById('playlistChips');
+            let html = `<span class="chip ${selectedPlaylist === null ? 'active' : ''}" onclick="selectPlaylist(null)">All</span>`;
+            for (const name of Object.keys(playlists)) {
+                html += `<span class="chip ${selectedPlaylist === name ? 'active' : ''}" onclick="selectPlaylist('${name}')">${name}</span>`;
             }
+            html += `<span class="chip" onclick="createPlaylist()">+</span>`;
+            el.innerHTML = html;
+        }
+
+        function selectPlaylist(name) {
+            selectedPlaylist = name;
+            renderPlaylistChips();
+            filterSongs();
+        }
+
+        function createPlaylist() {
+            const name = prompt('New playlist name:');
+            if (name && name.trim()) {
+                playlists[name.trim()] = [];
+                savePlaylists();
+                renderPlaylistChips();
+            }
+        }
+
+        function savePlaylists() {
+            localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
+        }
+
+        function filterSongs() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            let list = songs;
+
+            if (selectedPlaylist) {
+                const playlistSongs = playlists[selectedPlaylist] || [];
+                list = playlistSongs.map(dir => songs.find(s => s.dir === dir)).filter(Boolean);
+            }
+
+            if (query) {
+                list = list.filter(s => s.name.toLowerCase().includes(query));
+            }
+
+            filteredSongs = list;
             renderSongList();
         }
 
         function renderSongList() {
             const el = document.getElementById('songList');
-            if (songs.length === 0) {
-                el.innerHTML = '<div class="status">No songs found. Add songs.json to stems/</div>';
+            document.getElementById('songCount').textContent = `${filteredSongs.length} songs`;
+
+            if (filteredSongs.length === 0) {
+                el.innerHTML = '<div style="padding:20px;color:#999;text-align:center">No songs found</div>';
                 return;
             }
-            el.innerHTML = songs.map((song, i) => `
-                <div class="song-card" id="song-${i}" onclick="selectSong(${i})">
-                    <span class="song-name">${song.name}</span>
-                </div>
-            `).join('');
+
+            el.innerHTML = filteredSongs.map((song, i) => {
+                const globalIdx = songs.indexOf(song);
+                const isActive = globalIdx === currentSongIndex;
+                const songPlaylists = Object.keys(playlists).filter(p => playlists[p].includes(song.dir));
+                return `<div class="song-item ${isActive ? 'active' : ''}" onclick="selectSong(${globalIdx})">
+                    <div style="flex:1">
+                        <div class="song-name">${song.name}</div>
+                        ${songPlaylists.length ? `<div class="song-playlists">${songPlaylists.join(', ')}</div>` : ''}
+                    </div>
+                    <span style="font-size:11px;cursor:pointer;padding:4px" onclick="event.stopPropagation();addToPlaylist(${globalIdx})">+P</span>
+                </div>`;
+            }).join('');
         }
 
-        async function selectSong(index) {
-            const song = songs[index];
-            if (currentSong === index && isPlaying) return;
-
-            // Stop current
-            stopPlayback();
-
-            // Highlight
-            document.querySelectorAll('.song-card').forEach(c => c.classList.remove('active'));
-            document.getElementById('song-' + index).classList.add('active');
-
-            currentSong = index;
-            document.getElementById('playerTitle').textContent = song.name;
-            document.getElementById('player').classList.add('visible');
-            document.getElementById('loadingStatus').textContent = 'Loading stems...';
-
-            // Init audio context
-            if (!audioCtx) audioCtx = new AudioContext();
-
-            // Load all stems
-            const stemDir = song.dir || song.name.replace(/ /g, '_');
-            let loaded = 0;
-
-            for (const stem of STEM_NAMES) {
-                try {
-                    const url = `${STEMS_BASE_URL}/${stemDir}/${stem}.wav`;
-                    document.getElementById('loadingStatus').textContent =
-                        `Loading ${stem}... (${loaded}/${STEM_NAMES.length})`;
-                    const resp = await fetch(url);
-                    const arrayBuf = await resp.arrayBuffer();
-                    stems[stem] = await audioCtx.decodeAudioData(arrayBuf);
-                    loaded++;
-                } catch (e) {
-                    console.warn(`Failed to load ${stem}:`, e);
+        function addToPlaylist(songIdx) {
+            const song = songs[songIdx];
+            const names = Object.keys(playlists);
+            if (names.length === 0) {
+                createPlaylist();
+                return;
+            }
+            const name = prompt('Add to playlist:\n' + names.join(', '));
+            if (name && playlists[name] !== undefined) {
+                if (!playlists[name].includes(song.dir)) {
+                    playlists[name].push(song.dir);
+                    savePlaylists();
+                    renderSongList();
                 }
             }
+        }
+
+        // ===== Player =====
+
+        async function selectSong(index) {
+            if (currentSongIndex === index) return;
+            if (isLoading) return;
+
+            // Fully stop and disconnect everything
+            stopPlayback();
+            for (const stem of STEM_NAMES) {
+                if (gainNodes[stem]) {
+                    gainNodes[stem].disconnect();
+                    gainNodes[stem] = null;
+                }
+            }
+            stems = {};
+            sourceNodes = {};
+
+            currentSongIndex = index;
+            isLoading = true;
+            const song = songs[index];
+
+            document.getElementById('nowPlaying').textContent = song.name;
+            renderSongList();
+
+            document.getElementById('playerContent').innerHTML = `
+                <div class="player-title">${song.name}</div>
+                <div class="loading" id="loadingStatus">Loading stems...</div>
+                <div class="seek-row">
+                    <span class="time" id="currentTime">0:00</span>
+                    <input type="range" id="seekBar" min="0" max="1000" value="0" oninput="seekTo(this.value)">
+                    <span class="time" id="totalTime">0:00</span>
+                </div>
+                <div class="transport">
+                    <button class="btn btn-stop" onclick="stopPlayback()">&#9632;</button>
+                    <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
+                </div>
+                <div class="presets">
+                    <button class="preset-btn" id="pre-karaoke" onclick="applyPreset('karaoke')">Karaoke</button>
+                    <button class="preset-btn" id="pre-unplugged" onclick="applyPreset('unplugged')">Unplugged</button>
+                    <button class="preset-btn" id="pre-jamming" onclick="applyPreset('jamming')">Jamming</button>
+                </div>
+                <div class="up-next" id="upNext" style="display:none">
+                    <span class="label">Up next:</span>
+                    <span class="next-name" id="nextSongName"></span>
+                    <button class="skip-btn" onclick="playNext()">Skip</button>
+                </div>
+                <div class="section-header" onclick="toggleSection('mixer')">
+                    <span>Stem Mixer</span><span id="mixerArrow">&#9650;</span>
+                </div>
+                <div class="section-content" id="mixerSection">
+                    <div class="stem-row"><span class="stem-name">Vocals</span><input type="range" min="0" max="100" value="0" id="sl-vocals" oninput="setStemVol('vocals',this.value)"><span class="stem-vol" id="vol-vocals">0%</span></div>
+                    <div class="stem-row"><span class="stem-name">Drums</span><input type="range" min="0" max="100" value="80" id="sl-drums" oninput="setStemVol('drums',this.value)"><span class="stem-vol" id="vol-drums">80%</span></div>
+                    <div class="stem-row"><span class="stem-name">Bass</span><input type="range" min="0" max="100" value="80" id="sl-bass" oninput="setStemVol('bass',this.value)"><span class="stem-vol" id="vol-bass">80%</span></div>
+                    <div class="stem-row"><span class="stem-name">Harmony</span><input type="range" min="0" max="100" value="80" id="sl-other" oninput="setStemVol('other',this.value)"><span class="stem-vol" id="vol-other">80%</span></div>
+                </div>
+                <div class="save-row">
+                    <button class="save-btn" onclick="saveSetup()">Save Setup</button>
+                    <button class="save-btn" onclick="clearSetup()" style="display:none" id="clearSetupBtn">Clear</button>
+                </div>
+                <div class="preset-indicator" id="presetIndicator"></div>
+            `;
+
+            // Show up next
+            updateUpNext();
+
+            // Init audio
+            if (!audioCtx) audioCtx = new AudioContext();
+
+            // Load stems
+            let loaded = 0;
+            for (const stem of STEM_NAMES) {
+                try {
+                    const url = `${STEMS_BASE_URL}/${song.dir}/${stem}.mp3`;
+                    document.getElementById('loadingStatus').textContent = `Loading ${stem}... (${loaded}/${STEM_NAMES.length})`;
+                    const resp = await fetch(url);
+                    const buf = await resp.arrayBuffer();
+                    stems[stem] = await audioCtx.decodeAudioData(buf);
+                    loaded++;
+                } catch (e) { console.warn(`Failed: ${stem}`, e); }
+            }
+
+            isLoading = false;
 
             if (loaded === 0) {
-                document.getElementById('loadingStatus').textContent = 'Failed to load stems';
+                document.getElementById('loadingStatus').textContent = 'Failed to load';
                 return;
             }
 
-            // Get duration from longest stem
             songDuration = Math.max(...Object.values(stems).map(b => b.duration));
-
             document.getElementById('loadingStatus').textContent = '';
             document.getElementById('totalTime').textContent = formatTime(songDuration);
 
-            // Create gain nodes
             for (const stem of STEM_NAMES) {
                 if (!gainNodes[stem]) {
                     gainNodes[stem] = audioCtx.createGain();
@@ -341,76 +526,80 @@
                 }
             }
 
-            // Apply default preset (karaoke)
-            applyPreset('karaoke');
+            // Restore session preset if available
+            const presetKey = (selectedPlaylist || 'all') + '::' + song.dir;
+            if (sessionPresets[presetKey]) {
+                restoreSetup(sessionPresets[presetKey]);
+            } else {
+                applyPreset('karaoke');
+            }
 
             // Load lyrics
-            loadLyrics(stemDir);
+            loadLyrics(song.dir);
         }
 
-        async function loadLyrics(stemDir) {
+        async function loadLyrics(dir) {
+            const el = document.getElementById('lyricsContent');
             try {
-                const resp = await fetch(`${STEMS_BASE_URL}/${stemDir}/lyrics.txt`);
+                const resp = await fetch(`${STEMS_BASE_URL}/${dir}/lyrics.txt`);
                 if (resp.ok) {
-                    const text = await resp.text();
-                    document.getElementById('lyricsBox').textContent = text;
+                    el.textContent = await resp.text();
+                    el.classList.remove('no-lyrics');
                 } else {
-                    document.getElementById('lyricsBox').textContent = 'No lyrics available';
+                    el.innerHTML = '<span class="no-lyrics">No lyrics available</span>';
                 }
             } catch (e) {
-                document.getElementById('lyricsBox').textContent = 'No lyrics available';
+                el.innerHTML = '<span class="no-lyrics">No lyrics available</span>';
             }
         }
 
         function togglePlay() {
-            if (isPlaying) {
-                pausePlayback();
-            } else {
-                startPlayback();
-            }
+            if (isPlaying) pausePlayback();
+            else startPlayback();
         }
 
         function startPlayback() {
             if (!audioCtx || Object.keys(stems).length === 0) return;
-
-            // Resume audio context (needed for browser autoplay policy)
             if (audioCtx.state === 'suspended') audioCtx.resume();
 
-            // Create and start source nodes
             for (const stem of STEM_NAMES) {
                 if (!stems[stem]) continue;
-                const source = audioCtx.createBufferSource();
-                source.buffer = stems[stem];
-                source.connect(gainNodes[stem]);
-                source.start(0, pauseOffset);
-                sourceNodes[stem] = source;
+                const src = audioCtx.createBufferSource();
+                src.buffer = stems[stem];
+                src.connect(gainNodes[stem]);
+                src.start(0, pauseOffset);
+                sourceNodes[stem] = src;
             }
 
             startTime = audioCtx.currentTime - pauseOffset;
             isPlaying = true;
             document.getElementById('playBtn').innerHTML = '&#10074;&#10074;';
-
-            // Update seek bar
             seekInterval = setInterval(updateSeek, 200);
 
-            // Auto-stop at end
-            sourceNodes[STEM_NAMES[0]]?.addEventListener('ended', () => {
-                if (isPlaying) stopPlayback();
-            });
+            // Auto-next on end — only if song actually finished naturally
+            const firstStem = STEM_NAMES.find(s => sourceNodes[s]);
+            if (firstStem) {
+                const expectedEndSong = currentSongIndex;
+                sourceNodes[firstStem].addEventListener('ended', () => {
+                    if (isPlaying && currentSongIndex === expectedEndSong) {
+                        const cur = audioCtx.currentTime - startTime;
+                        // Only auto-next if we're actually near the end
+                        if (cur >= songDuration - 1) {
+                            stopPlayback();
+                            playNext();
+                        }
+                    }
+                });
+            }
         }
 
         function pausePlayback() {
             if (!isPlaying) return;
             pauseOffset = audioCtx.currentTime - startTime;
-
             for (const stem of STEM_NAMES) {
-                try {
-                    sourceNodes[stem]?.stop();
-                    sourceNodes[stem]?.disconnect();
-                } catch (e) {}
+                try { sourceNodes[stem]?.stop(); sourceNodes[stem]?.disconnect(); } catch (e) {}
             }
             sourceNodes = {};
-
             isPlaying = false;
             document.getElementById('playBtn').innerHTML = '&#9654;';
             clearInterval(seekInterval);
@@ -419,44 +608,52 @@
         function stopPlayback() {
             if (isPlaying) {
                 for (const stem of STEM_NAMES) {
-                    try {
-                        sourceNodes[stem]?.stop();
-                        sourceNodes[stem]?.disconnect();
-                    } catch (e) {}
+                    try { sourceNodes[stem]?.stop(); sourceNodes[stem]?.disconnect(); } catch (e) {}
                 }
                 sourceNodes = {};
                 isPlaying = false;
+                clearInterval(seekInterval);
             }
-            clearInterval(seekInterval);
             pauseOffset = 0;
-            document.getElementById('seekBar').value = 0;
-            document.getElementById('currentTime').textContent = '0:00';
-            document.getElementById('playBtn').innerHTML = '&#9654;';
+            const seekBar = document.getElementById('seekBar');
+            const curTime = document.getElementById('currentTime');
+            const playBtn = document.getElementById('playBtn');
+            if (seekBar) seekBar.value = 0;
+            if (curTime) curTime.textContent = '0:00';
+            if (playBtn) playBtn.innerHTML = '&#9654;';
+        }
+
+        function seekTo(val) {
+            const frac = val / 1000;
+            wasPlayingBeforeSeek = isPlaying;
+            if (isPlaying) {
+                // Stop sources without triggering auto-next
+                for (const stem of STEM_NAMES) {
+                    try { sourceNodes[stem]?.stop(); sourceNodes[stem]?.disconnect(); } catch (e) {}
+                }
+                sourceNodes = {};
+                isPlaying = false;
+                clearInterval(seekInterval);
+            }
+            pauseOffset = frac * songDuration;
+            document.getElementById('currentTime').textContent = formatTime(pauseOffset);
+            if (wasPlayingBeforeSeek) startPlayback();
         }
 
         function updateSeek() {
             if (!isPlaying || !songDuration) return;
-            const current = audioCtx.currentTime - startTime;
-            const progress = (current / songDuration) * 1000;
-            document.getElementById('seekBar').value = Math.min(progress, 1000);
-            document.getElementById('currentTime').textContent = formatTime(current);
+            const cur = audioCtx.currentTime - startTime;
+            document.getElementById('seekBar').value = (cur / songDuration) * 1000;
+            document.getElementById('currentTime').textContent = formatTime(cur);
         }
 
-        // Seek bar
-        document.getElementById('seekBar').addEventListener('input', function () {
-            const frac = this.value / 1000;
-            const wasPlaying = isPlaying;
-            if (isPlaying) pausePlayback();
-            pauseOffset = frac * songDuration;
-            document.getElementById('currentTime').textContent = formatTime(pauseOffset);
-            if (wasPlaying) startPlayback();
-        });
+        // ===== Stem Volume =====
 
         function setStemVol(stem, val) {
             const v = val / 100;
             if (gainNodes[stem]) gainNodes[stem].gain.value = v;
-            document.getElementById('vol-' + stem).textContent =
-                v === 0 ? 'OFF' : Math.round(v * 100) + '%';
+            const volEl = document.getElementById('vol-' + stem);
+            if (volEl) volEl.textContent = v === 0 ? 'OFF' : Math.round(v * 100) + '%';
         }
 
         function applyPreset(name) {
@@ -467,27 +664,115 @@
             };
             const p = presets[name];
             if (!p) return;
+            currentPreset = name;
             for (const [stem, vol] of Object.entries(p)) {
                 setStemVol(stem, vol);
-                // Update slider
-                const sliders = document.querySelectorAll('.stem-row input');
-                const idx = STEM_NAMES.indexOf(stem);
-                if (idx >= 0 && sliders[idx]) sliders[idx].value = vol;
+                const sl = document.getElementById('sl-' + stem);
+                if (sl) sl.value = vol;
+            }
+            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            const btn = document.getElementById('pre-' + name);
+            if (btn) btn.classList.add('active');
+        }
+
+        // ===== Up Next =====
+
+        function updateUpNext() {
+            const el = document.getElementById('upNext');
+            if (!el) return;
+            const nextIdx = getNextSongIndex();
+            if (nextIdx >= 0 && filteredSongs.length > 1) {
+                el.style.display = 'flex';
+                document.getElementById('nextSongName').textContent = songs[nextIdx].name;
+            } else {
+                el.style.display = 'none';
             }
         }
 
-        function toggleMixer() {
-            const el = document.getElementById('mixerContent');
-            const arrow = document.getElementById('mixerArrow');
-            el.style.display = el.style.display === 'none' ? 'block' : 'none';
-            arrow.innerHTML = el.style.display === 'none' ? '&#9660;' : '&#9650;';
+        function getNextSongIndex() {
+            if (currentSongIndex < 0) return -1;
+            const currentInFiltered = filteredSongs.indexOf(songs[currentSongIndex]);
+            if (currentInFiltered < 0) return -1;
+            const nextFiltered = (currentInFiltered + 1) % filteredSongs.length;
+            return songs.indexOf(filteredSongs[nextFiltered]);
         }
 
-        function toggleLyrics() {
-            const el = document.getElementById('lyricsContent');
-            const arrow = document.getElementById('lyricsArrow');
-            el.style.display = el.style.display === 'none' ? 'block' : 'none';
-            arrow.innerHTML = el.style.display === 'none' ? '&#9660;' : '&#9650;';
+        function playNext() {
+            const nextIdx = getNextSongIndex();
+            if (nextIdx >= 0) selectSong(nextIdx);
+        }
+
+        // ===== Session Presets =====
+
+        function saveSetup() {
+            if (currentSongIndex < 0) return;
+            const song = songs[currentSongIndex];
+            const tag = prompt('Tag name (e.g. Chorus, Hook):') || '';
+            const key = (selectedPlaylist || 'all') + '::' + song.dir;
+            const seekBar = document.getElementById('seekBar');
+            sessionPresets[key] = {
+                position: seekBar ? seekBar.value / 1000 : 0,
+                volumes: {},
+                preset: currentPreset,
+                tag: tag
+            };
+            for (const stem of STEM_NAMES) {
+                const sl = document.getElementById('sl-' + stem);
+                sessionPresets[key].volumes[stem] = sl ? parseInt(sl.value) : 80;
+            }
+            localStorage.setItem('beatznbox_presets', JSON.stringify(sessionPresets));
+            showPresetIndicator(tag);
+        }
+
+        function clearSetup() {
+            if (currentSongIndex < 0) return;
+            const song = songs[currentSongIndex];
+            const key = (selectedPlaylist || 'all') + '::' + song.dir;
+            delete sessionPresets[key];
+            localStorage.setItem('beatznbox_presets', JSON.stringify(sessionPresets));
+            document.getElementById('presetIndicator').textContent = '';
+            document.getElementById('clearSetupBtn').style.display = 'none';
+        }
+
+        function restoreSetup(preset) {
+            if (preset.volumes) {
+                for (const [stem, vol] of Object.entries(preset.volumes)) {
+                    setStemVol(stem, vol);
+                    const sl = document.getElementById('sl-' + stem);
+                    if (sl) sl.value = vol;
+                }
+            }
+            if (preset.position > 0) {
+                pauseOffset = preset.position * songDuration;
+                const seekBar = document.getElementById('seekBar');
+                if (seekBar) seekBar.value = preset.position * 1000;
+                document.getElementById('currentTime').textContent = formatTime(pauseOffset);
+            }
+            if (preset.preset) {
+                currentPreset = preset.preset;
+                document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+                const btn = document.getElementById('pre-' + preset.preset);
+                if (btn) btn.classList.add('active');
+            }
+            showPresetIndicator(preset.tag);
+        }
+
+        function showPresetIndicator(tag) {
+            const el = document.getElementById('presetIndicator');
+            if (el) el.textContent = tag ? `Setup saved: "${tag}"` : 'Setup saved';
+            const clearBtn = document.getElementById('clearSetupBtn');
+            if (clearBtn) clearBtn.style.display = 'inline-block';
+        }
+
+        // ===== Helpers =====
+
+        function toggleSection(name) {
+            const el = document.getElementById(name + 'Section');
+            const arrow = document.getElementById(name + 'Arrow');
+            if (el) {
+                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+                if (arrow) arrow.innerHTML = el.style.display === 'none' ? '&#9660;' : '&#9650;';
+            }
         }
 
         function formatTime(sec) {
