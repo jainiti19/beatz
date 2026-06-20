@@ -257,6 +257,26 @@
             color: #333;
         }
         .no-lyrics { color: #999; font-style: italic; font-size: 14px; }
+        .lyrics-line {
+            padding: 6px 8px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            color: #888;
+            font-size: 16px;
+            line-height: 26px;
+        }
+        .lyrics-line.active {
+            color: #00897B;
+            font-weight: 600;
+            font-size: 20px;
+            background: #E0F2F1;
+        }
+        .lyrics-line.past {
+            color: #aaa;
+        }
+        .lyrics-line.upcoming {
+            color: #555;
+        }
 
         /* Empty state */
         .empty-state {
@@ -538,18 +558,80 @@
             loadLyrics(song.dir);
         }
 
+        let timedLyrics = null;
+        let lyricsInterval = null;
+
         async function loadLyrics(dir) {
             const el = document.getElementById('lyricsContent');
+            timedLyrics = null;
+            if (lyricsInterval) clearInterval(lyricsInterval);
+
+            // Try timed lyrics first (JSON with timestamps)
+            try {
+                const resp = await fetch(`${STEMS_BASE_URL}/${dir}/lyrics_timed.json`);
+                if (resp.ok) {
+                    timedLyrics = await resp.json();
+                    renderTimedLyrics(el);
+                    startLyricsSync();
+                    return;
+                }
+            } catch (e) {}
+
+            // Fallback to plain text lyrics
             try {
                 const resp = await fetch(`${STEMS_BASE_URL}/${dir}/lyrics.txt`);
                 if (resp.ok) {
                     el.textContent = await resp.text();
-                    el.classList.remove('no-lyrics');
                 } else {
                     el.innerHTML = '<span class="no-lyrics">No lyrics available</span>';
                 }
             } catch (e) {
                 el.innerHTML = '<span class="no-lyrics">No lyrics available</span>';
+            }
+        }
+
+        function renderTimedLyrics(el) {
+            if (!timedLyrics) return;
+            el.innerHTML = timedLyrics.map((line, i) =>
+                `<div class="lyrics-line upcoming" id="lyric-${i}" data-start="${line.start}" data-end="${line.end}">${line.text}</div>`
+            ).join('');
+        }
+
+        function startLyricsSync() {
+            if (lyricsInterval) clearInterval(lyricsInterval);
+            lyricsInterval = setInterval(updateLyricsHighlight, 200);
+        }
+
+        function updateLyricsHighlight() {
+            if (!timedLyrics || !isPlaying) return;
+            const currentTime = audioCtx.currentTime - startTime;
+
+            let activeIdx = -1;
+            for (let i = 0; i < timedLyrics.length; i++) {
+                if (currentTime >= timedLyrics[i].start && currentTime < timedLyrics[i].end) {
+                    activeIdx = i;
+                    break;
+                }
+                // Between lines — highlight the upcoming one
+                if (currentTime < timedLyrics[i].start) {
+                    break;
+                }
+                activeIdx = i; // Past this line
+            }
+
+            for (let i = 0; i < timedLyrics.length; i++) {
+                const el = document.getElementById('lyric-' + i);
+                if (!el) continue;
+                el.classList.remove('active', 'past', 'upcoming');
+                if (i === activeIdx) {
+                    el.classList.add('active');
+                    // Auto-scroll to keep active line visible
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else if (i < activeIdx) {
+                    el.classList.add('past');
+                } else {
+                    el.classList.add('upcoming');
+                }
             }
         }
 
