@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Music Night — Printables</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --ink:    #1c1210;
+    --gold:   #c9962c;
+    --maroon: #8e1b2e;
+    --paper:  #fffdf7;
+    --muted:  #8a7b6a;
+    --line:   #ded2bd;
+  }
+
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background: #efe7d6;
+    color: var(--ink);
+    padding: 24px 14px 60px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto 30px;
+    background: var(--paper);
+    border-radius: 12px;
+    box-shadow: 0 3px 18px rgba(0,0,0,0.12);
+    padding: 26px 30px 32px;
+  }
+
+  h1 {
+    font-size: 15px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--maroon);
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--gold);
+    margin-bottom: 6px;
+  }
+  .hint {
+    font-size: 13px;
+    color: var(--muted);
+    font-style: italic;
+    margin-bottom: 20px;
+  }
+
+  /* ---------- Nomination cards ---------- */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+  .card {
+    border: 2px dashed var(--gold);
+    border-radius: 10px;
+    padding: 16px 18px 18px;
+    background: #fff;
+  }
+  .card .top {
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--maroon);
+    font-weight: 700;
+    margin-bottom: 3px;
+  }
+  .card .head {
+    font-size: 19px;
+    font-weight: 800;
+    color: var(--ink);
+    margin-bottom: 12px;
+  }
+  .card .fld { margin-bottom: 13px; }
+  .card .lbl {
+    font-size: 10.5px;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 5px;
+  }
+  .card .rule {
+    border-bottom: 1.5px solid var(--ink);
+    height: 26px;
+  }
+  .card .foot {
+    font-size: 11px;
+    color: var(--maroon);
+    border-top: 1px solid var(--line);
+    padding-top: 9px;
+    line-height: 1.45;
+  }
+
+  /* ---------- Table tents ---------- */
+  .tents { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .tent {
+    border: 2px solid var(--gold);
+    border-radius: 10px;
+    text-align: center;
+    padding: 22px 14px;
+    background: #fff;
+  }
+  .tent .team {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .tent .name {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--maroon);
+    line-height: 1.1;
+  }
+  .tent .sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 8px;
+    letter-spacing: 1px;
+  }
+
+  /* ---------- Scoresheet ---------- */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid var(--line); padding: 9px 8px; font-size: 13px; }
+  thead th {
+    background: var(--maroon);
+    color: #fff;
+    font-size: 10.5px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    border-color: var(--maroon);
+  }
+  tbody td:first-child { font-weight: 700; }
+  .r { text-align: center; color: var(--muted); }
+  .tot { background: #faf4e6; font-weight: 800; }
+  .legend { margin-top: 14px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+  .legend b { color: var(--ink); }
+
+  @media (max-width: 640px) {
+    .cards, .tents { grid-template-columns: 1fr; }
+  }
+
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { background: #fff; padding: 0; }
+    .page {
+      box-shadow: none;
+      border-radius: 0;
+      max-width: 100%;
+      margin: 0;
+      padding: 0 0 6mm;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+    .card { padding: 13px 15px 15px; }
+    .card .head { font-size: 17px; }
+    .tent { padding: 18px 12px; }
+    .tent .name { font-size: 23px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ PAGE 1: NOMINATION CARDS ============ -->
+<div class="page">
+  <h1>Nomination Cards</h1>
+  <p class="hint">One per table, face down from the start. Turned over mid-Round&nbsp;4 — while the room is still playing, never at the end. Print one sheet for 6 tables.</p>
+
+  <div class="cards">
+
+    <div class="card">
+      <div class="top">Bollywood Night</div>
+      <div class="head">Our Table's Singer</div>
+      <div class="fld"><div class="lbl">Table name</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Who is singing for us</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Which song</div><div class="rule"></div></div>
+      <div class="foot"><strong>The table decides — not the singer.</strong> Hand this back to the MC.</div>
+    </div>
+
+    <div class="card">
+      <div class="top">Bollywood Night</div>
+      <div class="head">Our Table's Singer</div>
+      <div class="fld"><div class="lbl">Table name</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Who is singing for us</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Which song</div><div class="rule"></div></div>
+      <div class="foot"><strong>The table decides — not the singer.</strong> Hand this back to the MC.</div>
+    </div>
+
+    <div class="card">
+      <div class="top">Bollywood Night</div>
+      <div class="head">Our Table's Singer</div>
+      <div class="fld"><div class="lbl">Table name</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Who is singing for us</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Which song</div><div class="rule"></div></div>
+      <div class="foot"><strong>The table decides — not the singer.</strong> Hand this back to the MC.</div>
+    </div>
+
+    <div class="card">
+      <div class="top">Bollywood Night</div>
+      <div class="head">Our Table's Singer</div>
+      <div class="fld"><div class="lbl">Table name</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Who is singing for us</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Which song</div><div class="rule"></div></div>
+      <div class="foot"><strong>The table decides — not the singer.</strong> Hand this back to the MC.</div>
+    </div>
+
+    <div class="card">
+      <div class="top">Bollywood Night</div>
+      <div class="head">Our Table's Singer</div>
+      <div class="fld"><div class="lbl">Table name</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Who is singing for us</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Which song</div><div class="rule"></div></div>
+      <div class="foot"><strong>The table decides — not the singer.</strong> Hand this back to the MC.</div>
+    </div>
+
+    <div class="card">
+      <div class="top">Bollywood Night</div>
+      <div class="head">Our Table's Singer</div>
+      <div class="fld"><div class="lbl">Table name</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Who is singing for us</div><div class="rule"></div></div>
+      <div class="fld"><div class="lbl">Which song</div><div class="rule"></div></div>
+      <div class="foot"><strong>The table decides — not the singer.</strong> Hand this back to the MC.</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============ PAGE 2: TABLE TENTS ============ -->
+<div class="page">
+  <h1>Table Tents</h1>
+  <p class="hint">Fold in half and stand on each table. Named after songs in the Beatz library, so the names double as a hint that the whole night runs on them.</p>
+
+  <div class="tents">
+    <div class="tent"><div class="team">Team</div><div class="name">Chaiyya&nbsp;Chaiyya</div><div class="sub">Your table is your team</div></div>
+    <div class="tent"><div class="team">Team</div><div class="name">Kala&nbsp;Chashma</div><div class="sub">Your table is your team</div></div>
+    <div class="tent"><div class="team">Team</div><div class="name">London&nbsp;Thumakda</div><div class="sub">Your table is your team</div></div>
+    <div class="tent"><div class="team">Team</div><div class="name">Channa&nbsp;Mereya</div><div class="sub">Your table is your team</div></div>
+    <div class="tent"><div class="team">Team</div><div class="name">Badtameez&nbsp;Dil</div><div class="sub">Your table is your team</div></div>
+    <div class="tent"><div class="team">Team</div><div class="name">Kun&nbsp;Faya&nbsp;Kun</div><div class="sub">Your table is your team</div></div>
+  </div>
+</div>
+
+<!-- ============ PAGE 3: SCORESHEET ============ -->
+<div class="page">
+  <h1>MC Scoresheet</h1>
+  <p class="hint">Rounds 1–4 only. Announce the winner <strong>before</strong> the open mic — the competition must be clearly over so the second half isn't a contest.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:22%">Table</th>
+        <th>R1 · Two Seconds<br><span style="font-weight:400;text-transform:none;letter-spacing:0">1 pt each</span></th>
+        <th>R2 · Name That Stem<br><span style="font-weight:400;text-transform:none;letter-spacing:0">2 / 3 / 5 pts</span></th>
+        <th>R3 · Antakshari<br><span style="font-weight:400;text-transform:none;letter-spacing:0">2 pts per turn</span></th>
+        <th>R4 · Finish the Line<br><span style="font-weight:400;text-transform:none;letter-spacing:0">2 pts each</span></th>
+        <th style="width:12%">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Chaiyya Chaiyya</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="tot"></td></tr>
+      <tr><td>Kala Chashma</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="tot"></td></tr>
+      <tr><td>London Thumakda</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="tot"></td></tr>
+      <tr><td>Channa Mereya</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="tot"></td></tr>
+      <tr><td>Badtameez Dil</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="tot"></td></tr>
+      <tr><td>Kun Faya Kun</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="tot"></td></tr>
+    </tbody>
+  </table>
+
+  <div class="legend">
+    <b>R2 points:</b> instrumental = 2 · bass only = 3 · drums only = 5.<br>
+    <b>R3:</b> two lines minimum, table sings together. Two passes allowed, then a point comes off.<br>
+    <b>R4:</b> spoken answers count. Be generous — the aim is keeping everyone in, not accuracy.<br>
+    <b>Runaway table:</b> freeze their scoring for two songs. Say it laughing — it's a handicap, not a punishment.
+  </div>
+
+  <div class="legend" style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
+    <b>Write these down the same night — this is the point of the whole run:</b><br>
+    1. Did the quietest person sing in Round 3? &nbsp;Who?<br>
+    2. Did anyone sing in Round 5 who wasn't nominated? &nbsp;How many?<br>
+    3. Where did the energy dip? &nbsp;What time, and what was happening?
+  </div>
+</div>
+
+</body>
+</html>
