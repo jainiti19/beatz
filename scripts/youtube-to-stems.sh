@@ -21,14 +21,14 @@ mkdir -p "$WORK_DIR"
 if [[ "$INPUT" == search:* ]]; then
   QUERY="${INPUT#search:}"
   echo "=== Searching YouTube for: $QUERY ==="
-  URL=$(yt-dlp --js-runtimes nodejs "ytsearch:$QUERY" --get-url --no-playlist -f bestaudio 2>/dev/null | head -1)
+  URL=$(yt-dlp "ytsearch:$QUERY" --get-url --no-playlist -f bestaudio 2>/dev/null | head -1)
   if [ -z "$URL" ]; then
     echo "ERROR: No results found for '$QUERY'"
     exit 1
   fi
   # Get title for naming
   if [ -z "$NAME" ]; then
-    NAME=$(yt-dlp --js-runtimes nodejs "ytsearch:$QUERY" --get-title --no-playlist 2>/dev/null | head -1 | \
+    NAME=$(yt-dlp "ytsearch:$QUERY" --get-title --no-playlist 2>/dev/null | head -1 | \
       sed 's/[^a-zA-Z0-9 ]//g' | sed 's/ /_/g' | head -c 40)
     [ -z "$NAME" ] && NAME="$( echo "$QUERY" | sed 's/[^a-zA-Z0-9 ]//g' | sed 's/ /_/g' | head -c 40)"
   fi
@@ -43,11 +43,12 @@ fi
 # Step 1: Download
 echo "=== Step 1: Downloading ==="
 rm -f "$WORK_DIR/download.mp3"
-yt-dlp --js-runtimes nodejs -x --audio-format mp3 --audio-quality 0 --no-playlist \
+rm -f "$WORK_DIR/download.webm"
+yt-dlp -x --audio-format mp3 --audio-quality 0 --no-playlist \
   -o "$WORK_DIR/download.mp3" "$DL_URL" 2>&1 | tail -3
 
 if [ -z "$NAME" ]; then
-  NAME=$(yt-dlp --js-runtimes nodejs --get-title --no-playlist "$URL" 2>/dev/null | \
+  NAME=$(yt-dlp --get-title --no-playlist "$URL" 2>/dev/null | \
     sed 's/[^a-zA-Z0-9 ]//g' | sed 's/ /_/g' | head -c 40)
   [ -z "$NAME" ] && NAME="youtube_song"
 fi

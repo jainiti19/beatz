@@ -47,6 +47,12 @@ for dir in "$SRC"/*/; do
         cp "$dir/lyrics.txt" "$WEB_STEMS/$NAME/lyrics.txt"
     fi
 
+    # Copy forced-aligned timings — without this the player falls back to
+    # spreading lines evenly across the song, which never matches the singing.
+    if [ -f "$dir/lyrics_timed.json" ]; then
+        cp "$dir/lyrics_timed.json" "$WEB_STEMS/$NAME/lyrics_timed.json"
+    fi
+
     if [ "$FIRST" = true ]; then
         FIRST=false
     else
