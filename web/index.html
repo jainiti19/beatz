@@ -250,6 +250,7 @@
         .lyrics-content {
             flex: 1;
             overflow-y: auto;
+            position: relative;   /* offsetTop of lines is measured against this */
             padding: 16px;
             font-size: 16px;
             line-height: 28px;
@@ -260,7 +261,9 @@
         .lyrics-line {
             padding: 6px 8px;
             border-radius: 6px;
-            transition: all 0.3s ease;
+            /* Colour only — animating font-size would move every line below the
+               active one while the scroll animation is still running. */
+            transition: color 0.3s ease, background-color 0.3s ease;
             color: #888;
             font-size: 16px;
             line-height: 26px;
@@ -276,6 +279,17 @@
         }
         .lyrics-line.upcoming {
             color: #555;
+        }
+        /* Word sweep, only meaningful on the active line. Colour-only transition —
+           changing weight or size here would reflow the line mid-sweep. */
+        .lyrics-word { transition: color 0.12s linear; }
+        .lyrics-line.active .lyrics-word          { color: #7aa8a3; }
+        .lyrics-line.active .lyrics-word.sung     { color: #00695C; }
+        .lyrics-line.active .lyrics-word.singing  {
+            color: #00251a;
+            background: #A7E0D8;
+            border-radius: 4px;
+            box-shadow: 0 0 0 2px #A7E0D8;
         }
 
         /* Empty state */
@@ -324,6 +338,8 @@
 
     <script>
         const STEMS_BASE_URL = './stems';
+        const stemUrl = (dir, file) =>
+            `${STEMS_BASE_URL}/${encodeURIComponent(dir)}/${file}`;
         const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 
         let audioCtx = null;
@@ -519,7 +535,7 @@
             let loaded = 0;
             for (const stem of STEM_NAMES) {
                 try {
-                    const url = `${STEMS_BASE_URL}/${song.dir}/${stem}.mp3`;
+                    const url = stemUrl(song.dir, `${stem}.mp3`);
                     document.getElementById('loadingStatus').textContent = `Loading ${stem}... (${loaded}/${STEM_NAMES.length})`;
                     const resp = await fetch(url);
                     const buf = await resp.arrayBuffer();
@@ -560,15 +576,50 @@
 
         let timedLyrics = null;
         let lyricsInterval = null;
+        let lyricsLines = [];
+        let crushedLines = [];
+
+        // Viterbi has to place every lyric line, in order. Audio with no matching
+        // text is absorbed by the aligner's star token, but there is no mechanism
+        // for the reverse — a line the singer never sang at that point still has
+        // to go somewhere, so it collapses to near-zero width between the lines
+        // that did match, and the time it should have held gets dumped into a
+        // neighbour. On screen it flashes past inside a single frame.
+        //
+        // Those lines still render, so nobody loses lyrics they wanted to read.
+        // They simply never take the highlight: the last line that was really
+        // sung holds instead. This is a display rule on purpose — rewriting the
+        // spans themselves is the thing align-lyrics.py measured and rejected,
+        // where evening out placement dropped word-on-voiced-audio 84% -> 72%.
+        //
+        // 5 w/s is above a comfortable sung line and below what the crushed ones
+        // report (6-9 w/s). Genuine rap sections sit closest to it, so raise this
+        // if a fast but real line stops lighting up.
+        const MAX_WORDS_PER_SEC = 5.0;
+
+        function isCrushed(line) {
+            const w = line.words || [];
+            const span = line.end - line.start;
+            return w.length > 1 && span > 0 && (w.length / span) > MAX_WORDS_PER_SEC;
+        }
+        let lastActiveIdx = -2;
+        let lastWordKey = '';
+        let userScrolledAt = 0;
+        const USER_SCROLL_GRACE_MS = 4000;
 
         async function loadLyrics(dir) {
             const el = document.getElementById('lyricsContent');
             timedLyrics = null;
+            lyricsLines = [];
+            crushedLines = [];
             if (lyricsInterval) clearInterval(lyricsInterval);
 
-            // Try timed lyrics first (JSON with timestamps)
+            // Try timed lyrics first (JSON with timestamps).
+            // cache:'no-store' — realignment rewrites this file in place, and a
+            // stale cached copy is indistinguishable from a bad alignment.
             try {
-                const resp = await fetch(`${STEMS_BASE_URL}/${dir}/lyrics_timed.json`);
+                const resp = await fetch(stemUrl(dir, 'lyrics_timed.json'),
+                                         { cache: 'no-store' });
                 if (resp.ok) {
                     timedLyrics = await resp.json();
                     renderTimedLyrics(el);
@@ -577,11 +628,18 @@
                 }
             } catch (e) {}
 
-            // Fallback to plain text lyrics
+            // Fallback to plain text lyrics — render as scrollable lines
             try {
-                const resp = await fetch(`${STEMS_BASE_URL}/${dir}/lyrics.txt`);
+                const resp = await fetch(stemUrl(dir, 'lyrics.txt'));
                 if (resp.ok) {
-                    el.textContent = await resp.text();
+                    const text = await resp.text();
+                    lyricsLines = text.split('\n').filter(l => l.trim());
+                    if (lyricsLines.length > 0) {
+                        renderPlainLyrics(el);
+                        startLyricsSync();
+                    } else {
+                        el.innerHTML = '<span class="no-lyrics">No lyrics available</span>';
+                    }
                 } else {
                     el.innerHTML = '<span class="no-lyrics">No lyrics available</span>';
                 }
@@ -590,49 +648,186 @@
             }
         }
 
+        function escapeHtml(s) {
+            return s.replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // The aligner emits per-word timings. Where they exist, wrap each display word
+        // in its own span so it can be swept individually — a line span is too blunt
+        // in fast passages, where a whole line can go by in under two seconds.
+        //
+        // Display text and aligned words are not 1:1: the aligner strips punctuation
+        // and splits hyphenates ("khud-garzi" -> "khud","garzi"). So walk the display
+        // words and the aligned words together, matching on normalized form, and
+        // leave any display word without a match untimed rather than forcing a pairing.
+        function buildWordSpans(line, lineIdx) {
+            const display = line.text.split(/\s+/).filter(Boolean);
+            const aligned = line.words || [];
+            if (!aligned.length) return escapeHtml(line.text);
+
+            const norm = s => s.toLowerCase().replace(/[^a-z']/g, '');
+            let ai = 0;
+            return display.map((dw, di) => {
+                const key = norm(dw);
+                let timing = null;
+                if (key && ai < aligned.length) {
+                    // Hyphenates collapse to several aligned words; consume them all.
+                    let j = ai, acc = '';
+                    while (j < aligned.length && acc.length < key.length) {
+                        acc += aligned[j].word;
+                        j++;
+                    }
+                    if (acc === key) {
+                        timing = { start: aligned[ai].start, end: aligned[j - 1].end };
+                        ai = j;
+                    }
+                }
+                if (!timing) return escapeHtml(dw);
+                return `<span class="lyrics-word" id="w-${lineIdx}-${di}" ` +
+                       `data-s="${timing.start}" data-e="${timing.end}">${escapeHtml(dw)}</span>`;
+            }).join(' ');
+        }
+
         function renderTimedLyrics(el) {
             if (!timedLyrics) return;
+            crushedLines = timedLyrics.map(isCrushed);
             el.innerHTML = timedLyrics.map((line, i) =>
-                `<div class="lyrics-line upcoming" id="lyric-${i}" data-start="${line.start}" data-end="${line.end}">${line.text}</div>`
+                `<div class="lyrics-line upcoming${crushedLines[i] ? ' crushed' : ''}" ` +
+                `id="lyric-${i}">${buildWordSpans(line, i)}</div>`
+            ).join('');
+        }
+
+        function renderPlainLyrics(el) {
+            el.innerHTML = lyricsLines.map((line, i) =>
+                `<div class="lyrics-line upcoming" id="lyric-${i}">${line}</div>`
             ).join('');
         }
 
         function startLyricsSync() {
             if (lyricsInterval) clearInterval(lyricsInterval);
-            lyricsInterval = setInterval(updateLyricsHighlight, 200);
+            lastActiveIdx = -2;   // -2 = "not yet rendered", forces a first paint
+            lastWordKey = '';
+            userScrolledAt = 0;
+            // 50ms, not 200ms: the median aligned word is ~0.32s, so a 200ms tick
+            // would quantize the sweep into visible steps. Only the active line's
+            // words are touched per tick, so this stays cheap.
+            lyricsInterval = setInterval(updateLyricsHighlight, 50);
+        }
+
+        // Which line should be lit at this playback position, or -1 for none yet.
+        function computeActiveIdx(currentTime) {
+            const totalLines = timedLyrics ? timedLyrics.length : lyricsLines.length;
+            if (totalLines === 0) return -1;
+
+            if (timedLyrics) {
+                let idx = -1;
+                for (let i = 0; i < timedLyrics.length; i++) {
+                    if (currentTime >= timedLyrics[i].start && currentTime < timedLyrics[i].end) {
+                        idx = i;
+                        break;
+                    }
+                    if (currentTime < timedLyrics[i].start) break;
+                    idx = i;   // past this line, hold it until the next one starts
+                }
+                // Walk back off any line too fast to have been sung, so the last
+                // line the singer actually reached keeps the highlight instead of
+                // it flashing through a line that was never there.
+                while (idx >= 0 && crushedLines[idx]) idx--;
+                return idx;
+            }
+
+            // No timestamps — spread lines evenly across the middle of the song.
+            const lyricsStart = songDuration * 0.05;
+            const lyricsEnd = songDuration * 0.92;
+            const timePerLine = (lyricsEnd - lyricsStart) / totalLines;
+            if (currentTime < lyricsStart) return -1;
+            return Math.min(Math.floor((currentTime - lyricsStart) / timePerLine), totalLines - 1);
         }
 
         function updateLyricsHighlight() {
-            if (!timedLyrics || !isPlaying) return;
-            const currentTime = audioCtx.currentTime - startTime;
+            if (!songDuration) return;
+            const totalLines = timedLyrics ? timedLyrics.length : lyricsLines.length;
+            if (totalLines === 0) return;
 
-            let activeIdx = -1;
-            for (let i = 0; i < timedLyrics.length; i++) {
-                if (currentTime >= timedLyrics[i].start && currentTime < timedLyrics[i].end) {
-                    activeIdx = i;
-                    break;
+            // When paused, pauseOffset *is* the position — keeps the highlight
+            // correct after seeking without playing.
+            const currentTime = isPlaying ? (audioCtx.currentTime - startTime) : pauseOffset;
+            const activeIdx = computeActiveIdx(currentTime);
+
+            // Line classes and scrolling only change when the line changes; the word
+            // sweep below runs every tick, so this early-return moved down.
+            if (activeIdx !== lastActiveIdx) {
+                const prevIdx = lastActiveIdx;
+                lastActiveIdx = activeIdx;
+
+                for (let i = 0; i < totalLines; i++) {
+                    const el = document.getElementById('lyric-' + i);
+                    if (!el) continue;
+                    el.classList.remove('active', 'past', 'upcoming');
+                    if (i === activeIdx) el.classList.add('active');
+                    else if (activeIdx >= 0 && i < activeIdx) el.classList.add('past');
+                    else el.classList.add('upcoming');
                 }
-                // Between lines — highlight the upcoming one
-                if (currentTime < timedLyrics[i].start) {
-                    break;
+
+                // Leaving a line: clear its word states so scrubbing back looks clean.
+                if (prevIdx >= 0) clearWordStates(prevIdx);
+                lastWordKey = '';
+
+                if (activeIdx >= 0 && Date.now() - userScrolledAt >= USER_SCROLL_GRACE_MS) {
+                    scrollLyricsTo(activeIdx);
                 }
-                activeIdx = i; // Past this line
             }
 
-            for (let i = 0; i < timedLyrics.length; i++) {
-                const el = document.getElementById('lyric-' + i);
-                if (!el) continue;
-                el.classList.remove('active', 'past', 'upcoming');
-                if (i === activeIdx) {
-                    el.classList.add('active');
-                    // Auto-scroll to keep active line visible
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                } else if (i < activeIdx) {
-                    el.classList.add('past');
-                } else {
-                    el.classList.add('upcoming');
-                }
+            updateWordHighlight(activeIdx, currentTime);
+        }
+
+        function clearWordStates(lineIdx) {
+            const line = document.getElementById('lyric-' + lineIdx);
+            if (!line) return;
+            line.querySelectorAll('.lyrics-word').forEach(w =>
+                w.classList.remove('sung', 'singing'));
+        }
+
+        // Sweep words inside the active line. Words before the playhead read as sung,
+        // the current one is emphasised. Writes to the DOM only when the boundary
+        // actually moves, so a 50ms tick costs almost nothing.
+        function updateWordHighlight(activeIdx, currentTime) {
+            if (activeIdx < 0) return;
+            const line = document.getElementById('lyric-' + activeIdx);
+            if (!line) return;
+            const words = line.querySelectorAll('.lyrics-word');
+            if (!words.length) return;
+
+            let cur = -1;
+            for (let i = 0; i < words.length; i++) {
+                const s = parseFloat(words[i].dataset.s);
+                const e = parseFloat(words[i].dataset.e);
+                if (currentTime >= s && currentTime < e) { cur = i; break; }
+                if (currentTime >= e) cur = i;      // past it; hold until the next starts
+                else break;
             }
+
+            const key = activeIdx + ':' + cur;
+            if (key === lastWordKey) return;
+            lastWordKey = key;
+
+            words.forEach((w, i) => {
+                w.classList.toggle('singing', i === cur);
+                w.classList.toggle('sung', i < cur);
+            });
+        }
+
+        function scrollLyricsTo(idx) {
+            const container = document.getElementById('lyricsContent');
+            const el = document.getElementById('lyric-' + idx);
+            if (!container || !el) return;
+            const target = el.offsetTop - (container.clientHeight / 2) + (el.offsetHeight / 2);
+            const max = container.scrollHeight - container.clientHeight;
+            container.scrollTo({
+                top: Math.max(0, Math.min(target, max)),
+                behavior: 'smooth'
+            });
         }
 
         function togglePlay() {
@@ -719,6 +914,7 @@
             }
             pauseOffset = frac * songDuration;
             document.getElementById('currentTime').textContent = formatTime(pauseOffset);
+            userScrolledAt = 0;   // an explicit seek should snap the lyrics, grace period or not
             if (wasPlayingBeforeSeek) startPlayback();
         }
 
@@ -865,6 +1061,16 @@
 
         // Init
         loadSongList();
+
+        // Track genuine user scrolling only. A 'scroll' listener would also fire
+        // for our own smooth scrolling and permanently suppress auto-scroll.
+        (function trackManualLyricsScroll() {
+            const lc = document.getElementById('lyricsContent');
+            if (!lc) return;
+            const mark = () => { userScrolledAt = Date.now(); };
+            lc.addEventListener('wheel', mark, { passive: true });
+            lc.addEventListener('touchmove', mark, { passive: true });
+        })();
     </script>
 </body>
 </html>
