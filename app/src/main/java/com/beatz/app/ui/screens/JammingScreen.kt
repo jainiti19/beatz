@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +40,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,7 +82,7 @@ fun JammingScreen(
     var mixerExpanded by remember { mutableStateOf(false) }
     var rhythmExpanded by remember { mutableStateOf(false) }
     var speedExpanded by remember { mutableStateOf(false) }
-    var lyricsExpanded by remember { mutableStateOf(false) }
+    var lyricsExpanded by remember { mutableStateOf(true) }
     var rhythmGenerating by remember { mutableStateOf(false) }
     var detectedBpm by remember(stemDirPath) { mutableStateOf(0f) }
     var adjustedBpm by remember(stemDirPath) { mutableStateOf(0f) }
@@ -87,11 +93,54 @@ fun JammingScreen(
     var activeTaal by remember(stemDirPath) { mutableStateOf<String?>(null) }
     var activeCajon by remember(stemDirPath) { mutableStateOf(false) }
 
-    // Load saved lyrics
+    // The aligner emits per-word timings inside each line. Where they exist the
+    // line is swept word by word; where they don't (Whisper-generated files carry
+    // line spans only) it falls back to highlighting the whole line, which is what
+    // this used to do for everything.
+    data class TimedWord(val start: Float, val end: Float, val text: String)
+    data class TimedLine(
+        val start: Float,
+        val end: Float,
+        val text: String,
+        val words: List<TimedWord> = emptyList()
+    )
+    var timedLyrics by remember(stemDirPath) { mutableStateOf<List<TimedLine>>(emptyList()) }
+
+    // Load saved lyrics + timed lyrics
     LaunchedEffect(stemDirPath) {
         val lyricsFile = File(context.filesDir, "lyrics/${songName}.txt")
         if (lyricsFile.exists()) {
             lyricsText = lyricsFile.readText()
+        }
+        // Load timed lyrics from stems dir
+        val timedFile = File(stemDirPath, "lyrics_timed.json")
+        if (timedFile.exists()) {
+            try {
+                val json = org.json.JSONArray(timedFile.readText())
+                val lines = mutableListOf<TimedLine>()
+                for (i in 0 until json.length()) {
+                    val obj = json.getJSONObject(i)
+                    val wordsArr = obj.optJSONArray("words")
+                    val words = mutableListOf<TimedWord>()
+                    if (wordsArr != null) {
+                        for (w in 0 until wordsArr.length()) {
+                            val wo = wordsArr.getJSONObject(w)
+                            words.add(TimedWord(
+                                start = wo.getDouble("start").toFloat(),
+                                end = wo.getDouble("end").toFloat(),
+                                text = wo.optString("word")
+                            ))
+                        }
+                    }
+                    lines.add(TimedLine(
+                        start = obj.getDouble("start").toFloat(),
+                        end = obj.getDouble("end").toFloat(),
+                        text = obj.getString("text"),
+                        words = words
+                    ))
+                }
+                timedLyrics = lines
+            } catch (_: Exception) {}
         }
     }
 
@@ -715,6 +764,55 @@ fun JammingScreen(
                             }
                         }
                     } else {
+                        val useTimed = timedLyrics.isNotEmpty()
+                        val displayLines = remember(lyricsText, timedLyrics) {
+                            if (useTimed) timedLyrics.map { it.text }
+                            else lyricsText.split("\n").filter { it.isNotBlank() }
+                        }
+                        val totalLines = displayLines.size
+                        var activeLineIdx by remember { mutableStateOf(-1) }
+
+                        val scrollState = rememberScrollState()
+
+                        LaunchedEffect(totalLines, useTimed) {
+                            if (totalLines == 0) return@LaunchedEffect
+                            snapshotFlow { progress to duration }
+                                .map { (prog, dur) ->
+                                    if (dur <= 0f) return@map -1
+                                    val currentPos = prog * dur
+                                    if (useTimed) {
+                                        // Use actual Whisper timestamps
+                                        var idx = -1
+                                        for (i in timedLyrics.indices) {
+                                            if (currentPos >= timedLyrics[i].start && currentPos < timedLyrics[i].end) {
+                                                idx = i; break
+                                            }
+                                            if (currentPos < timedLyrics[i].start) break
+                                            idx = i
+                                        }
+                                        idx
+                                    } else {
+                                        // Estimated timing fallback
+                                        val lyricsStart = dur * 0.05f
+                                        val lyricsEnd = dur * 0.92f
+                                        val lyricsDur = lyricsEnd - lyricsStart
+                                        if (currentPos >= lyricsStart) {
+                                            ((currentPos - lyricsStart) / lyricsDur * totalLines)
+                                                .toInt().coerceIn(0, totalLines - 1)
+                                        } else -1
+                                    }
+                                }
+                                .distinctUntilChanged()
+                                .collect { idx ->
+                                    activeLineIdx = idx
+                                    if (idx >= 0) {
+                                        val lineHeight = 100
+                                        val target = (idx - 2).coerceAtLeast(0) * lineHeight
+                                        scrollState.animateScrollTo(target)
+                                    }
+                                }
+                        }
+
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -726,14 +824,83 @@ fun JammingScreen(
                             Column(
                                 modifier = Modifier
                                     .padding(16.dp)
-                                    .verticalScroll(rememberScrollState())
+                                    .verticalScroll(scrollState)
                             ) {
-                                Text(
-                                    text = lyricsText,
-                                    fontSize = 17.sp,
-                                    lineHeight = 30.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                // Playback position drives the word sweep. `progress` and
+                                // `duration` are already collected as state, so this recomposes
+                                // as the song plays without a second subscription.
+                                val posSec = if (duration > 0f) progress * duration else 0f
+                                val sungColor = MaterialTheme.colorScheme.primary
+                                val comingColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                val doneColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+
+                                displayLines.forEachIndexed { idx, line ->
+                                    val isActive = idx == activeLineIdx
+                                    val timed = if (useTimed && idx < timedLyrics.size) timedLyrics[idx] else null
+                                    val lineColor = when {
+                                        isActive -> sungColor
+                                        idx < activeLineIdx -> doneColor
+                                        else -> comingColor
+                                    }
+
+                                    if (isActive && timed != null && timed.words.isNotEmpty()) {
+                                        // Sweep: words already sung take the highlight, the rest of
+                                        // the line stays readable so the singer can see what's next.
+                                        // Display text and aligned words are not 1:1 — the aligner
+                                        // strips punctuation and splits hyphenates — so match on a
+                                        // normalised form and leave unmatched words untimed rather
+                                        // than forcing a pairing.
+                                        val swept = buildAnnotatedString {
+                                            val display = line.split(" ").filter { it.isNotBlank() }
+                                            var ai = 0
+                                            display.forEachIndexed { di, dw ->
+                                                val norm = dw.lowercase().filter { it.isLetter() || it == '\'' }
+                                                var wordStart: Float? = null
+                                                if (ai < timed.words.size) {
+                                                    val cand = timed.words[ai].text.lowercase()
+                                                        .filter { it.isLetter() || it == '\'' }
+                                                    if (norm.isNotEmpty() && cand.isNotEmpty() &&
+                                                        (norm == cand || norm.startsWith(cand))) {
+                                                        wordStart = timed.words[ai].start
+                                                        ai++
+                                                        // Hyphenates collapse to several aligned
+                                                        // words; consume the rest of the run.
+                                                        var consumed = cand
+                                                        while (ai < timed.words.size && consumed != norm &&
+                                                               norm.startsWith(consumed)) {
+                                                            val nxt = timed.words[ai].text.lowercase()
+                                                                .filter { it.isLetter() || it == '\'' }
+                                                            if (nxt.isEmpty() || !norm.startsWith(consumed + nxt)) break
+                                                            consumed += nxt
+                                                            ai++
+                                                        }
+                                                    }
+                                                }
+                                                val sung = wordStart != null && posSec >= wordStart
+                                                withStyle(SpanStyle(
+                                                    color = if (sung) sungColor else comingColor,
+                                                    fontWeight = if (sung) FontWeight.Bold else FontWeight.Normal
+                                                )) { append(dw) }
+                                                if (di < display.size - 1) append(" ")
+                                            }
+                                        }
+                                        Text(
+                                            text = swept,
+                                            fontSize = 20.sp,
+                                            lineHeight = 30.sp,
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = line,
+                                            fontSize = if (isActive) 20.sp else 17.sp,
+                                            lineHeight = 30.sp,
+                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                            color = lineColor,
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                         OutlinedButton(
