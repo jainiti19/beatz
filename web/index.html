@@ -301,6 +301,107 @@
             color: #999;
             font-size: 15px;
         }
+
+        /* ---- Phone layout ----------------------------------------------
+           The three panels are side by side on a desktop, which leaves each
+           one about 120px wide on a phone — unusable. Below 820px they stack
+           into one scrolling column in the order you actually work in:
+           pick a song, drive the controls, set the mix, then read the words.
+
+           The panels are already in that order in the DOM, so this is a
+           direction change rather than a reordering — no `order` juggling,
+           and the tab sequence stays correct for anyone on a keyboard.
+
+           Two heights stay capped on purpose. The song list would otherwise
+           run to 61 entries and push the controls off the bottom of the
+           screen. And #lyricsContent must remain its own bounded scroller:
+           scrollToLyricLine() centres the active line using
+           container.clientHeight and scrolls the container itself, so if it
+           grew to fit the page instead, the word sweep would stop following
+           the singer.                                                      */
+        @media (max-width: 820px) {
+            body {
+                height: auto;
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
+
+            .topbar {
+                position: sticky;
+                top: 0;
+                z-index: 10;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 2px;
+                padding: 8px 14px;
+            }
+            .topbar h1 { font-size: 18px; }
+            .topbar .now-playing {
+                font-size: 12px;
+                /* One long title must not push the bar to three lines. */
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .panels {
+                flex-direction: column;
+                height: auto;
+            }
+
+            /* 1. Songs */
+            .panel-left {
+                flex: none;
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            .song-list {
+                flex: none;
+                max-height: 34vh;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .song-item { padding: 13px 14px; font-size: 15px; }
+
+            /* 2. Controls  +  3. Stem mixer (both live in the centre panel) */
+            .panel-center {
+                flex: none;
+                overflow: visible;
+                padding: 14px;
+            }
+            .player-title { font-size: 18px; }
+
+            /* 4. Lyrics */
+            .panel-right {
+                flex: none;
+                border-left: none;
+                border-top: 1px solid #e0e0e0;
+            }
+            .lyrics-content {
+                flex: none;
+                height: 52vh;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Touch targets. A 4px slider thumb is hard to catch with a
+               thumb mid-song, and the stem faders get used constantly. */
+            input[type="range"] { height: 30px; }
+            .stem-row { padding: 8px 0; }
+            .stem-name { min-width: 70px; font-size: 14px; }
+            .btn {
+                min-width: 56px;
+                min-height: 48px;
+                font-size: 20px;
+            }
+            .preset-btn, .save-btn, .skip-btn {
+                min-height: 42px;
+                padding: 8px 14px;
+                font-size: 14px;
+            }
+            .section-header { padding: 12px 0; font-size: 15px; }
+            .search-box input { padding: 12px; font-size: 15px; }
+        }
     </style>
 </head>
 <body>
@@ -323,7 +424,7 @@
         <!-- Center: Player -->
         <div class="panel-center">
             <div id="playerContent">
-                <div class="empty-state">Select a song from the left</div>
+                <div class="empty-state">Select a song to start</div>
             </div>
         </div>
 
@@ -527,6 +628,15 @@
 
             // Show up next
             updateUpNext();
+
+            // Stacked on a phone, the controls sit below a song list that fills
+            // a third of the screen — so picking a song appears to do nothing.
+            // Bring the player into view. Desktop keeps all three panels
+            // visible at once and needs no scrolling.
+            if (window.matchMedia('(max-width: 820px)').matches) {
+                document.querySelector('.panel-center')
+                        .scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
 
             // Init audio
             if (!audioCtx) audioCtx = new AudioContext();
