@@ -487,7 +487,12 @@
 
         async function loadSongList() {
             try {
-                const resp = await fetch(STEMS_BASE_URL + '/songs.json');
+                // cache:'no-store' — every deploy adds songs to this file, and a
+                // phone holding a cached copy just never sees the new ones. The
+                // Caddy no-cache header only governs responses fetched after it
+                // shipped, so copies cached before that stay stale forever.
+                const resp = await fetch(STEMS_BASE_URL + '/songs.json',
+                                         { cache: 'no-store' });
                 songs = await resp.json();
             } catch (e) { songs = []; }
             filteredSongs = [...songs];
