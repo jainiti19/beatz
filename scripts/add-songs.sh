@@ -28,9 +28,13 @@ total=$(grep -cvE '^\s*(#|$)' "$MANIFEST")
 n=0
 ok=0; failed=0; skipped=0
 
-while IFS='|' read -r NAME YT LYR; do
+while IFS='|' read -r NAME YT LYR <&3; do
   case "$NAME" in ''|\#*) continue;; esac
   NAME=$(echo "$NAME" | xargs); YT=$(echo "$YT" | xargs); LYR=$(echo "$LYR" | xargs)
+  # A blank name would make DIR the library root and scatter stems across it.
+  if [ -z "$NAME" ] || [ -z "$YT" ]; then
+    echo "  SKIP: malformed manifest line (name='$NAME' yt='$YT')"; continue
+  fi
   n=$((n+1))
   DIR="$SRC/$NAME"
 
@@ -80,7 +84,7 @@ while IFS='|' read -r NAME YT LYR; do
     echo "        alignment failed — words present, timing missing"
     ok=$((ok+1))
   fi
-done < "$MANIFEST"
+done 3< "$MANIFEST"
 
 echo ""
 echo "=========================================================="

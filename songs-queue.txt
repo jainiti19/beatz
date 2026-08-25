@@ -1,0 +1,16 @@
+# folder_name | youtube search | lyrics search
+# 14 songs queued for the 25 Sep music night.
+Saiyaara             | Saiyaara title track                | Saiyaara title track
+Sanu_Ek_Pal_Chain    | Sanu Ek Pal Chain Raid Rahat        | Sanu Ek Pal Chain Raid Rahat
+Gerua                | Gerua Dilwale                       | Gerua Dilwale
+Ajeeb_Dastaan_Hai_Ye | Ajeeb Dastaan Hai Ye Lata           | Ajeeb Dastaan Hai Ye Lata
+Gallan_Goodiyaan     | Gallan Goodiyaan Dil Dhadakne Do    | Gallan Goodiyaan Dil Dhadakne Do
+Balam_Pichkari       | Balam Pichkari Yeh Jawaani Hai Deewani | Balam Pichkari Yeh Jawaani Hai Deewani
+Nagada_Sang_Dhol     | Nagada Sang Dhol Ramleela           | Nagada Sang Dhol Ramleela
+Aankh_Marey          | Aankh Marey Simmba                  | Aankh Marey Simmba
+Kesariya             | Kesariya Brahmastra                 | Kesariya Brahmastra
+Pasoori              | Pasoori Ali Sethi Shae Gill         | Pasoori Ali Sethi Shae Gill
+Aaj_Ki_Raat          | Aaj Ki Raat Stree 2                 | Aaj Ki Raat Stree 2
+Dilbar               | Dilbar Satyameva Jayate             | Dilbar Satyameva Jayate
+Chittiyaan_Kalaiyaan | Chittiyaan Kalaiyaan Roy            | Chittiyaan Kalaiyaan Roy
+Zingaat              | Zingaat Dhadak                      | Zingaat Dhadak Ajay Atul
