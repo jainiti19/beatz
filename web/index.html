@@ -302,6 +302,23 @@
             font-size: 15px;
         }
 
+        /* Lyric-quality marker in the song list. Red means the words on screen
+           are wrong or missing — Whisper garbage, or a four-line stub. Amber
+           means the words are right but the timing wanders: crushed lines, or
+           one line stretched over a whole passage. No dot means it is fine.
+           Graded by scripts/check-lyrics-quality.py into songs.json. */
+        .lyric-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 7px;
+            vertical-align: middle;
+            flex: none;
+        }
+        .lyric-dot.bad   { background: #e53935; }
+        .lyric-dot.check { background: #f9a825; }
+
         /* ---- Phone layout ----------------------------------------------
            The three panels are side by side on a desktop, which leaves each
            one about 120px wide on a phone — unusable. Below 820px they stack
@@ -537,9 +554,16 @@
                 const globalIdx = songs.indexOf(song);
                 const isActive = globalIdx === currentSongIndex;
                 const songPlaylists = Object.keys(playlists).filter(p => playlists[p].includes(song.dir));
+                // A dot rather than a word: the list is scanned, not read, and
+                // the point is to stop re-discovering a bad song mid-performance.
+                const dot = song.lyrics === 'bad'
+                    ? `<span class="lyric-dot bad" title="Lyrics unusable — ${song.lyricsNote || ''}"></span>`
+                    : song.lyrics === 'check'
+                    ? `<span class="lyric-dot check" title="Lyrics need checking — ${song.lyricsNote || ''}"></span>`
+                    : '';
                 return `<div class="song-item ${isActive ? 'active' : ''}" onclick="selectSong(${globalIdx})">
                     <div style="flex:1">
-                        <div class="song-name">${song.name}</div>
+                        <div class="song-name">${dot}${song.name}</div>
                         ${songPlaylists.length ? `<div class="song-playlists">${songPlaylists.join(', ')}</div>` : ''}
                     </div>
                     <span style="font-size:11px;cursor:pointer;padding:4px" onclick="event.stopPropagation();addToPlaylist(${globalIdx})">+P</span>

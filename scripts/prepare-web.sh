@@ -71,6 +71,12 @@ echo "]" >> "$WEB_STEMS/songs.json"
 # Cleanup old WAV symlinks
 find "$WEB_STEMS" -name "*.wav" -type l -delete 2>/dev/null
 
+# Grade the lyrics and fold the verdict into songs.json. Without this the
+# player cannot mark a song whose words are wrong, and the only way to find
+# out is to start singing it.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+python3 "$SCRIPT_DIR/check-lyrics-quality.py" "$WEB_STEMS"
+
 TOTAL=$(du -sh "$WEB_STEMS" 2>/dev/null | cut -f1)
 echo ""
 echo "Prepared $COUNT songs in $WEB_STEMS/ (total: $TOTAL)"
