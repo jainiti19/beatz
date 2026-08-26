@@ -1,0 +1,13 @@
+# Group-singalong classics for Music Night, 25 Sep 2026.
+# Chosen because a room of 40-somethings knows the chorus without a screen —
+# which is what the printed sheets and the 65' block need. Added 26 Aug 2026.
+#
+# folder_name | youtube search | lyrics search
+
+Pehla_Nasha             | Pehla Nasha Jo Jeeta Wohi Sikandar Udit Narayan Sadhana Sargam | Pehla Nasha Udit Narayan
+Yeh_Dosti_Hum_Nahin     | Yeh Dosti Hum Nahin Todenge Sholay Kishore Kumar Manna Dey     | Yeh Dosti Hum Nahin Todenge Kishore Kumar
+Chura_Liya_Hai_Tumne    | Chura Liya Hai Tumne Yaadon Ki Baaraat Asha Bhosle Mohammed Rafi | Chura Liya Hai Tumne Asha Bhosle
+Lag_Jaa_Gale            | Lag Jaa Gale Woh Kaun Thi Lata Mangeshkar                      | Lag Jaa Gale Lata Mangeshkar
+Kabhi_Kabhi_Mere_Dil_Mein | Kabhi Kabhie Mere Dil Mein Mukesh Kabhi Kabhie 1976          | Kabhi Kabhie Mere Dil Mein Mukesh
+O_O_Jaane_Jaana         | O O Jaane Jaana Pyaar Kiya To Darna Kya Kamaal Khan Salman     | O O Jaane Jaana Kamaal Khan
+Pehli_Nazar_Mein        | Pehli Nazar Mein Race Atif Aslam                               | Pehli Nazar Mein Atif Aslam

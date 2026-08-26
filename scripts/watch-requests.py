@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Process song requests queued by the web player.
+
+Polls the VPS queue over the SSH access deploy-web.sh already uses, runs the
+normal pipeline for anything new, and publishes the result. Meant to sit
+running on the desktop; requests made while it is off are picked up whenever
+it next starts, which is what makes this work for both a request shouted
+across the room and one Karan files three weeks early.
+
+Completion is recorded by appending an id to a separate done file. The service
+only ever appends to the queue and this only ever appends to done, so the two
+never write the same file and a half-finished run cannot corrupt either.
+
+Usage:
+  watch-requests.py                 # poll forever, 60s apart
+  watch-requests.py --once          # drain the queue and exit
+  watch-requests.py --interval 30   # poll more often
+  watch-requests.py --full          # htdemucs_ft instead of the fast model
+"""
+import argparse, io, json, os, re, shutil, subprocess, sys, time
+
+HOST = "beatznbox@46.224.176.48"
+QUEUE = "/opt/beatznbox/queue/requests.jsonl"
+DONE = "/opt/beatznbox/queue/done.txt"
+DROP = "/opt/beatznbox/queue/lyrics"
+LOCAL = False        # --local reads the queue as plain files, for testing
+NO_PUBLISH = False   # --no-publish stops before prepare-web/deploy
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STEMS = os.path.expanduser("~/Music/karaoke/htdemucs")
+
+
+def log(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def ssh(*args, check=False):
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, *args],
+                          capture_output=True, text=True, timeout=60, check=check)
+
+
+def remote_lines(path):
+    """Missing file is not an error — the queue simply has not been used yet."""
+    if LOCAL:
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            return [l for l in f.read().splitlines() if l.strip()]
+    r = ssh(f"cat {path} 2>/dev/null || true")
+    if r.returncode != 0:
+        raise RuntimeError(f"ssh failed: {r.stderr.strip()[:120]}")
+    return [l for l in r.stdout.splitlines() if l.strip()]
+
+
+def pending():
+    done = set(remote_lines(DONE))
+    out = []
+    for line in remote_lines(QUEUE):
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue                      # a mangled line must not stall the queue
+        if e.get("id") and e["id"] not in done:
+            out.append(e)
+    return out
+
+
+def lyrics_drops():
+    """Words pasted in the player for songs LRCLIB has nothing for.
+
+    Consumed rather than queued: the file is deleted once aligned, so an
+    unprocessed drop is always the whole to-do list."""
+    if LOCAL:
+        if not os.path.isdir(DROP):
+            return []
+        return sorted(os.listdir(DROP))
+    r = ssh(f"ls {DROP} 2>/dev/null || true")
+    return sorted(l for l in r.stdout.splitlines() if l.endswith(".txt"))
+
+
+def take_drop(fname):
+    """Read a pasted file and remove it, so a retry cannot double-apply it."""
+    remote = f"{DROP}/{fname}"
+    if LOCAL:
+        path = os.path.join(DROP, fname)
+        text = io.open(path, encoding="utf-8").read()
+        os.remove(path)
+        return text
+    r = ssh(f"cat {remote}")
+    if r.returncode != 0:
+        raise RuntimeError(f"could not read {fname}")
+    ssh(f"rm -f {remote}")
+    return r.stdout
+
+
+def apply_lyrics(fname):
+    name = fname[:-4]
+    d = os.path.join(STEMS, name)
+    if not os.path.exists(os.path.join(d, "vocals.wav")):
+        log(f"  {name}: no stems here, dropping the paste")
+        take_drop(fname)
+        return False
+    text = take_drop(fname)
+    lines = [l for l in text.splitlines() if l.strip()]
+    log(f"lyrics pasted for {name}: {len(lines)} lines")
+    for ext in ("lyrics.txt", "lyrics_timed.json"):
+        f = os.path.join(d, ext)
+        if os.path.exists(f):
+            shutil.copy(f, f + ".pasted-over.bak")
+    io.open(os.path.join(d, "lyrics.txt"), "w", encoding="utf-8").write(
+        "\n".join(lines) + "\n")
+    r = subprocess.run([os.path.expanduser("~/demucs-env/bin/python"),
+                        os.path.join(REPO, "scripts/align-lyrics.py"), d, "--force"],
+                       capture_output=True, text=True)
+    ok = os.path.exists(os.path.join(d, "lyrics_timed.json"))
+    log(f"  aligned: {r.stdout.strip().splitlines()[-1] if r.stdout.strip() else 'no output'}")
+    return ok
+
+
+def field(text):
+    """Manifest fields are pipe-separated and read line by line, so a pipe or a
+    newline in a request would silently shift every later field."""
+    return re.sub(r"[|\r\n\t]+", " ", (text or "")).strip()
+
+
+def mark_done(entry_id):
+    if LOCAL:
+        with open(DONE, "a", encoding="utf-8") as f:
+            f.write(entry_id + "\n")
+        return
+    ssh(f"printf '%s\\n' {json.dumps(entry_id)} >> {DONE}", check=True)
+
+
+def run(cmd, **kw):
+    log("  $ " + " ".join(os.path.basename(c) for c in cmd[:2]))
+    return subprocess.run(cmd, cwd=REPO, **kw)
+
+
+def process(entry, fast):
+    name = entry["name"]
+    search = " ".join(x for x in (field(entry.get("song")),
+                                  field(entry.get("detail"))) if x)
+    log(f"processing {name!r} (asked by {entry.get('who') or 'someone'}): {search}")
+
+    if os.path.exists(os.path.join(STEMS, name, "vocals.wav")):
+        log("  already in the library — publishing without reprocessing")
+    else:
+        manifest = os.path.join(REPO, ".request-manifest.txt")
+        with open(manifest, "w", encoding="utf-8") as f:
+            f.write(f"{name} | {search} | {search}\n")
+        cmd = ["./scripts/add-songs.sh", manifest]
+        if fast:
+            cmd.append("--fast")
+        r = run(cmd, capture_output=True, text=True)
+        os.remove(manifest)
+        tail = "\n".join(r.stdout.strip().splitlines()[-4:])
+        log(f"  add-songs: {tail}")
+        if not os.path.exists(os.path.join(STEMS, name, "vocals.wav")):
+            # Leave it un-done so a later run can retry — a failed download is
+            # usually the search string, and that is worth a human look.
+            log(f"  FAILED: no stems for {name}, leaving it queued")
+            return False
+
+    if NO_PUBLISH:
+        log("  --no-publish: stems are ready, not publishing")
+        return True
+    if run(["./scripts/prepare-web.sh"], capture_output=True, text=True).returncode != 0:
+        log("  prepare-web failed"); return False
+    if run(["./scripts/deploy-web.sh"], capture_output=True, text=True).returncode != 0:
+        log("  deploy failed"); return False
+    log(f"  published {name}")
+    return True
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--once", action="store_true")
+    ap.add_argument("--interval", type=int, default=60)
+    ap.add_argument("--full", action="store_true",
+                    help="use htdemucs_ft (~4x slower, slightly cleaner stems)")
+    ap.add_argument("--local", metavar="DIR",
+                    help="read the queue from DIR instead of over SSH (testing)")
+    ap.add_argument("--no-publish", action="store_true",
+                    help="process but skip prepare-web/deploy (testing)")
+    a = ap.parse_args()
+
+    global LOCAL, NO_PUBLISH, QUEUE, DONE, DROP
+    NO_PUBLISH = a.no_publish
+    if a.local:
+        LOCAL = True
+        QUEUE = os.path.join(a.local, "requests.jsonl")
+        DONE = os.path.join(a.local, "done.txt")
+        DROP = os.path.join(a.local, "lyrics")
+
+    where = QUEUE if LOCAL else f"{HOST}:{QUEUE}"
+    log(f"watching {where} every {a.interval}s "
+        f"({'htdemucs_ft' if a.full else 'htdemucs --fast'})"
+        + ("  [no-publish]" if NO_PUBLISH else ""))
+    while True:
+        try:
+            drops = lyrics_drops()
+            changed = False
+            for fname in drops:
+                try:
+                    changed = apply_lyrics(fname) or changed
+                except Exception as e:
+                    log(f"  lyrics drop {fname} failed: {e}")
+            if changed and not NO_PUBLISH:
+                run(["./scripts/prepare-web.sh"], capture_output=True, text=True)
+                run(["./scripts/deploy-web.sh"], capture_output=True, text=True)
+                log("  published pasted lyrics")
+
+            queue = pending()
+            if queue:
+                log(f"{len(queue)} request(s) waiting")
+            for entry in queue:
+                try:
+                    if process(entry, fast=not a.full):
+                        mark_done(entry["id"])
+                except Exception as e:
+                    log(f"  error on {entry.get('id')}: {e}")
+        except Exception as e:
+            log(f"poll failed: {e}")
+        if a.once:
+            return
+        time.sleep(a.interval)
+
+
+if __name__ == "__main__":
+    main()

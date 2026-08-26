@@ -74,7 +74,10 @@ for dir in "$STEMS_DIR"/*/; do
   fi
 
   # Create dir on phone
-  $ADB -s "$DEVICE" shell "run-as com.beatz.app mkdir -p /data/data/com.beatz.app/files/stems/$NAME" 2>/dev/null
+  # Quoted for the *phone's* shell, not ours: unquoted, a name with spaces
+  # split into several arguments and one with parentheses was a syntax error,
+  # which is why earlier pushes silently managed only 32 of 37 songs.
+  $ADB -s "$DEVICE" shell "run-as com.beatz.app mkdir -p '/data/data/com.beatz.app/files/stems/$NAME'" 2>/dev/null
 
   # Push stems
   OK=true

@@ -98,6 +98,29 @@
         .song-item .song-playlists { font-size: 10px; color: #00897B; }
         .song-item.active .song-playlists { color: #B2DFDB; }
         .song-count { padding: 6px 12px; font-size: 11px; color: #999; }
+        .request-box { padding: 10px; border-top: 1px solid #e0e0e0; }
+        .request-box summary {
+            font-size: 12px; color: #00897B; cursor: pointer; outline: none;
+        }
+        .request-box input {
+            width: 100%; padding: 8px 12px; margin-top: 8px;
+            border: 1px solid #ccc; border-radius: 8px; font-size: 13px;
+            outline: none;
+        }
+        .request-box input:focus { border-color: #00897B; }
+        .request-box button {
+            width: 100%; margin-top: 8px; padding: 8px;
+            background: #00897B; color: #fff; border: none;
+            border-radius: 8px; font-size: 13px; cursor: pointer;
+        }
+        .request-box button:disabled { background: #9e9e9e; cursor: default; }
+        .request-note { margin-top: 8px; font-size: 11px; color: #666; }
+        .request-box textarea {
+            width: 100%; margin-top: 8px; padding: 8px 12px;
+            border: 1px solid #ccc; border-radius: 8px; font-size: 13px;
+            font-family: inherit; outline: none; resize: vertical;
+        }
+        .request-box textarea:focus { border-color: #00897B; }
 
         /* Middle panel — Player */
         .panel-center {
@@ -436,6 +459,19 @@
             <div class="playlist-chips" id="playlistChips"></div>
             <div class="song-count" id="songCount"></div>
             <div class="song-list" id="songList"></div>
+            <div class="request-box">
+                <details id="requestPanel">
+                    <summary>+ Request a song</summary>
+                    <input type="text" id="reqSong" maxlength="120"
+                           placeholder="Song name">
+                    <input type="text" id="reqDetail" maxlength="120"
+                           placeholder="Film or singer (helps find the lyrics)">
+                    <input type="text" id="reqWho" maxlength="40"
+                           placeholder="Your name (optional)">
+                    <button id="reqBtn" onclick="submitRequest()">Send request</button>
+                    <div class="request-note" id="reqNote"></div>
+                </details>
+            </div>
         </div>
 
         <!-- Center: Player -->
@@ -451,6 +487,15 @@
             <div class="lyrics-content" id="lyricsContent">
                 <span class="no-lyrics">Select a song to view lyrics</span>
             </div>
+            <div class="request-box" id="pasteBox" style="display:none">
+                <details id="pastePanel">
+                    <summary id="pasteSummary">+ Paste lyrics for this song</summary>
+                    <textarea id="pasteText" rows="8"
+                              placeholder="Paste the words, one line per sung line."></textarea>
+                    <button id="pasteBtn" onclick="submitLyrics()">Send lyrics</button>
+                    <div class="request-note" id="pasteNote"></div>
+                </details>
+            </div>
         </div>
     </div>
 
@@ -462,6 +507,9 @@
 
         let audioCtx = null;
         let stems = {};
+        // Compressed bytes for the song most likely to be picked next. Never
+        // decoded here — see prefetchNext().
+        let prefetched = { dir: null, bytes: null, ctrl: null };
         let gainNodes = {};
         let sourceNodes = {};
         let isPlaying = false;
@@ -667,21 +715,48 @@
                         .scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
 
-            // Init audio
-            if (!audioCtx) audioCtx = new AudioContext();
-
-            // Load stems
-            let loaded = 0;
-            for (const stem of STEM_NAMES) {
+            // Init audio. Pin the context to the stems' own 44.1kHz: left to
+            // pick its own rate it opens at 48k and resamples every stem on
+            // decode, which measured 2707ms against 1344ms rate-matched, and
+            // holds 421MB of PCM instead of 386MB. Decode is the floor on
+            // load time, so this is the single biggest win available.
+            if (!audioCtx) {
                 try {
-                    const url = stemUrl(song.dir, `${stem}.mp3`);
-                    document.getElementById('loadingStatus').textContent = `Loading ${stem}... (${loaded}/${STEM_NAMES.length})`;
-                    const resp = await fetch(url);
-                    const buf = await resp.arrayBuffer();
+                    audioCtx = new AudioContext({ sampleRate: 44100 });
+                } catch (e) {
+                    // A browser may refuse a rate its hardware cannot open.
+                    // Correct playback at 48k beats no playback at 44.1k.
+                    console.warn('44.1kHz context unavailable, using default', e);
+                    audioCtx = new AudioContext();
+                }
+            }
+
+            // Load stems, all four at once. Serially this cost four round
+            // trips plus four decodes with no overlap — each decode blocked
+            // the next download — which is where the 10-15s wait came from.
+            let loaded = 0;
+            const pre = (prefetched.dir === song.dir) ? prefetched.bytes : null;
+            // decodeAudioData detaches the buffer it is given, so prefetched
+            // bytes are good for exactly one decode. Drop our handle now.
+            if (pre) prefetched = { dir: null, bytes: null, ctrl: null };
+            const setLoadStatus = () => {
+                document.getElementById('loadingStatus').textContent =
+                    loaded < STEM_NAMES.length
+                        ? `Loading... (${loaded}/${STEM_NAMES.length})` : '';
+            };
+            setLoadStatus();
+            await Promise.all(STEM_NAMES.map(async (stem) => {
+                try {
+                    let buf = pre && pre[stem];
+                    if (!buf || buf.byteLength === 0) {
+                        const resp = await fetch(stemUrl(song.dir, `${stem}.mp3`));
+                        buf = await resp.arrayBuffer();
+                    }
                     stems[stem] = await audioCtx.decodeAudioData(buf);
                     loaded++;
+                    setLoadStatus();
                 } catch (e) { console.warn(`Failed: ${stem}`, e); }
-            }
+            }));
 
             isLoading = false;
 
@@ -711,6 +786,9 @@
 
             // Load lyrics
             loadLyrics(song.dir);
+
+            // Warm the next song while this one plays.
+            prefetchNext();
         }
 
         let timedLyrics = null;
@@ -748,6 +826,17 @@
 
         async function loadLyrics(dir) {
             const el = document.getElementById('lyricsContent');
+            const song = songs[currentSongIndex];
+            const box = document.getElementById('pasteBox');
+            if (box && song) {
+                box.style.display = 'block';
+                document.getElementById('pasteSummary').textContent =
+                    song.lyrics === 'good' ? '+ Replace the lyrics'
+                                           : '+ Paste lyrics for this song';
+                // Open it unprompted only when the words are known to be wrong.
+                document.getElementById('pastePanel').open = (song.lyrics === 'bad');
+                document.getElementById('pasteNote').textContent = '';
+            }
             timedLyrics = null;
             lyricsLines = [];
             crushedLines = [];
@@ -1092,6 +1181,76 @@
             if (btn) btn.classList.add('active');
         }
 
+        // ===== Pasted lyrics =====
+
+        // For the songs LRCLIB simply does not carry. The words go to the
+        // laptop, which aligns them against this song's own audio — so the
+        // paste needs no timings, just the lines in singing order.
+        async function submitLyrics() {
+            const btn = document.getElementById('pasteBtn');
+            const note = document.getElementById('pasteNote');
+            const song = songs[currentSongIndex];
+            if (!song) { note.textContent = 'Pick a song first.'; return; }
+            const text = document.getElementById('pasteText').value.trim();
+            if (text.split('\n').filter(l => l.trim()).length < 4) {
+                note.textContent = 'Needs at least 4 lines.'; return;
+            }
+            btn.disabled = true;
+            note.textContent = 'Sending...';
+            try {
+                const resp = await fetch('/api/lyrics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dir: song.dir, lyrics: text }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+                note.textContent = `Got ${data.lines} lines. They are timed against `
+                    + `the audio on the laptop and appear here after a refresh.`;
+                document.getElementById('pasteText').value = '';
+            } catch (e) {
+                note.textContent = 'Could not send: ' + e.message;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ===== Song requests =====
+
+        // Hands the request to the queue service and stops there. The laptop
+        // picks it up on its own schedule, so the honest thing to tell the
+        // person is that it is queued — not that it is coming.
+        async function submitRequest() {
+            const btn = document.getElementById('reqBtn');
+            const note = document.getElementById('reqNote');
+            const song = document.getElementById('reqSong').value.trim();
+            if (!song) { note.textContent = 'Type a song name first.'; return; }
+            btn.disabled = true;
+            note.textContent = 'Sending...';
+            try {
+                const resp = await fetch('/api/request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        song,
+                        detail: document.getElementById('reqDetail').value.trim(),
+                        who: document.getElementById('reqWho').value.trim(),
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+                note.textContent = `Queued as "${data.name}". It shows up in `
+                    + `the list once processed — usually a few minutes, `
+                    + `longer if the laptop is off.`;
+                document.getElementById('reqSong').value = '';
+                document.getElementById('reqDetail').value = '';
+            } catch (e) {
+                note.textContent = 'Could not send: ' + e.message;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
         // ===== Up Next =====
 
         function updateUpNext() {
@@ -1103,6 +1262,34 @@
                 document.getElementById('nextSongName').textContent = songs[nextIdx].name;
             } else {
                 el.style.display = 'none';
+            }
+        }
+
+        // Pull the next song's mp3s in the background so switching does not
+        // pay for the download a second time. Compressed bytes only: decoded
+        // PCM is ~18x larger (389MB for a 4:36 song, vs 22MB of mp3), so
+        // holding two decoded songs would get a phone tab killed.
+        async function prefetchNext() {
+            const nextIdx = getNextSongIndex();
+            if (nextIdx < 0) return;
+            const dir = songs[nextIdx].dir;
+            if (prefetched.dir === dir) return;
+            if (prefetched.ctrl) prefetched.ctrl.abort();
+            const ctrl = new AbortController();
+            const bytes = {};
+            prefetched = { dir, bytes, ctrl };
+            try {
+                await Promise.all(STEM_NAMES.map(async (stem) => {
+                    const resp = await fetch(stemUrl(dir, `${stem}.mp3`),
+                                            { signal: ctrl.signal });
+                    bytes[stem] = await resp.arrayBuffer();
+                }));
+            } catch (e) {
+                // Superseded by a newer pick, or the network went away. Either
+                // way selectSong just fetches on demand, so drop the partial.
+                if (prefetched.ctrl === ctrl) {
+                    prefetched = { dir: null, bytes: null, ctrl: null };
+                }
             }
         }
 

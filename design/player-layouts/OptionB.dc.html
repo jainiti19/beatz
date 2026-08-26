@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #fafafa; color: #1c1b1f; }
+    a { color: #00897B; } a:hover { color: #00796B; }
+    .lyr { padding: 6px 8px; border-radius: 6px; font-size: 16px; line-height: 26px; }
+    .row { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+           font-size: 13px; border-bottom: 1px solid #f5f5f5; }
+  </style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #fafafa; overflow: hidden; position: relative;">
+
+  <div style="background: linear-gradient(135deg, #00897B, #43A047); color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+    <div style="font-size: 22px; font-weight: 700;">BeatznBox</div>
+    <div style="font-size: 13px; opacity: 0.9;">Kesariya</div>
+  </div>
+
+  <div style="background: white; border-bottom: 1px solid #e0e0e0; padding: 12px 16px; flex-shrink: 0;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+      <div style="font-size: 20px; font-weight: 600; color: #00897B;">Kesariya</div>
+      <div style="font-size: 12px; color: #666;">2:14 / 4:28</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; margin: 10px 0 4px;">
+      <div style="flex: 1; height: 4px; border-radius: 2px; background: #e0e0e0; position: relative;">
+        <div style="position: absolute; left: 0; top: 0; height: 4px; width: 50%; border-radius: 2px; background: #00897B;"></div>
+        <div style="position: absolute; left: calc(50% - 7px); top: -5px; width: 14px; height: 14px; border-radius: 50%; background: #00897B;"></div>
+      </div>
+    </div>
+    <div style="display: flex; justify-content: center; align-items: center; gap: 12px; margin: 8px 0;">
+      <div style="width: 36px; height: 36px; border-radius: 50%; background: #888; display: flex; align-items: center; justify-content: center;">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="1.5" fill="white"/></svg>
+      </div>
+      <div style="width: 52px; height: 52px; border-radius: 50%; background: #00897B; display: flex; align-items: center; justify-content: center;">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5 L16 10 L5 16.5 Z" fill="white"/></svg>
+      </div>
+      <div style="width: 36px; height: 36px; border-radius: 50%; background: #888; display: flex; align-items: center; justify-content: center;">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3 L3 13 M6 8 L13 3 L13 13 Z" stroke="white" stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+    <div style="display: flex; gap: 6px; margin: 8px 0 0;">
+      <div style="flex: 1; padding: 7px; border: 1px solid #00897B; border-radius: 8px; background: #00897B; color: white; font-size: 12px; font-weight: 500; text-align: center;">Karaoke</div>
+      <div style="flex: 1; padding: 7px; border: 1px solid #00897B; border-radius: 8px; background: white; color: #00897B; font-size: 12px; font-weight: 500; text-align: center;">Unplugged</div>
+      <div style="flex: 1; padding: 7px; border: 1px solid #00897B; border-radius: 8px; background: white; color: #00897B; font-size: 12px; font-weight: 500; text-align: center;">Jamming</div>
+    </div>
+  </div>
+
+  <div style="flex: 1; background: white; overflow: hidden; display: flex; flex-direction: column;">
+    <div style="padding: 10px 16px 4px; font-weight: 600; font-size: 14px; color: #333; border-bottom: 1px solid #eee;">Lyrics</div>
+    <div style="flex: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; opacity: 0.25;">
+      <div class="lyr" style="color: #aaa;">पंक्ति एक</div>
+      <div class="lyr" style="color: #00897B; font-weight: 600; font-size: 20px; line-height: 30px; background: #E0F2F1;">पंक्ति दो</div>
+      <div class="lyr" style="color: #555;">पंक्ति तीन</div>
+      <div class="lyr" style="color: #888;">पंक्ति चार</div>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; background: white; border-top: 1px solid #e0e0e0; border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgba(0,0,0,0.14); padding-bottom: 4px;">
+    <div style="display: flex; justify-content: center; padding: 8px 0 4px;">
+      <div style="width: 36px; height: 4px; border-radius: 2px; background: #e0e0e0;"></div>
+    </div>
+    <div style="padding: 4px 12px 6px; font-size: 11px; color: #999;">3 matches for &ldquo;kesar&rdquo;</div>
+    <div class="row" style="background: #E0F2F1;"><span style="flex: 1;">Kesariya</span><span style="font-size: 10px; color: #00897B;">+P</span></div>
+    <div class="row"><span style="width: 6px; height: 6px; border-radius: 50%; background: #FB8C00;"></span><span style="flex: 1;">Kesariya Lofi</span><span style="font-size: 10px; color: #00897B;">+P</span></div>
+    <div class="row"><span style="flex: 1;">Kesariya Unplugged</span><span style="font-size: 10px; color: #00897B;">+P</span></div>
+    <div class="row"><span style="flex: 1;">Kesariya Instrumental</span><span style="font-size: 10px; color: #00897B;">+P</span></div>
+    <div style="padding: 12px; border-top: 1px solid #eee; background: #fafafa;">
+      <div style="font-size: 12px; color: #666; margin-bottom: 8px;">Not the one you wanted?</div>
+      <div style="width: 100%; padding: 10px; background: #00897B; color: white; border-radius: 8px; font-size: 13px; text-align: center; font-weight: 500;">Request &ldquo;kesar&rdquo;</div>
+    </div>
+    <div style="padding: 10px 12px 12px;">
+      <div style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; border: 1px solid #00897B; border-radius: 8px; font-size: 13px;">
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6" cy="6" r="4.5" stroke="#00897B" stroke-width="1.6" fill="none"/><path d="M9.5 9.5 L13 13" stroke="#00897B" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span style="flex: 1;">kesar</span>
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2 L10 10 M10 2 L2 10" stroke="#999" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

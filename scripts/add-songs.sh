@@ -35,6 +35,19 @@ while IFS='|' read -r NAME YT LYR <&3; do
   if [ -z "$NAME" ] || [ -z "$YT" ]; then
     echo "  SKIP: malformed manifest line (name='$NAME' yt='$YT')"; continue
   fi
+  # Force the name to [A-Za-z0-9_]. Three separate things depend on this:
+  # prepare-web.sh silently drops any other name from the player's manifest,
+  # setup-phone.sh feeds it to a remote shell where spaces split the path, and
+  # a name is about to become untrusted input once requests arrive from the
+  # web. Runs of rejected characters collapse to one underscore.
+  CLEAN=$(printf '%s' "$NAME" | tr -cs 'A-Za-z0-9_' '_' | sed 's/_*$//')
+  if [ "$CLEAN" != "$NAME" ]; then
+    echo "  name '$NAME' -> '$CLEAN'"
+    NAME="$CLEAN"
+  fi
+  if [ -z "$NAME" ]; then
+    echo "  SKIP: name had no usable characters"; continue
+  fi
   n=$((n+1))
   DIR="$SRC/$NAME"
 
@@ -77,7 +90,7 @@ while IFS='|' read -r NAME YT LYR <&3; do
 
   echo "  [4/4] aligning"
   if "$VENV/python" "$SCRIPT_DIR/align-lyrics.py" "$DIR" --force >/dev/null 2>&1; then
-    LINES=$("$VENV/python" -c "import json;print(len(json.load(open('$DIR/lyrics_timed.json'))))" 2>/dev/null)
+    LINES=$("$VENV/python" -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$DIR/lyrics_timed.json" 2>/dev/null)
     echo "        aligned ${LINES} lines"
     ok=$((ok+1))
   else

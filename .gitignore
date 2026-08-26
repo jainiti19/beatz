@@ -21,3 +21,7 @@ exports/
 web/stems/
 *.pyc
 __pycache__/
+
+# Seeded design canvases are generated (2MB editor payload); the
+# .dc.html sources beside them are the real artefacts.
+design/**/beatznbox-*.html

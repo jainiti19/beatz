@@ -1,0 +1,13 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",    "x": 0,    "y": 0, "w": 390, "h": 844, "title": "Option A — Fixed search" },
+    { "file": "OptionB.dc.html", "x": 530,  "y": 0, "w": 390, "h": 844, "title": "Option B — Search sheet" },
+    { "file": "OptionC.dc.html", "x": 1060, "y": 0, "w": 390, "h": 844, "title": "Option C — Lyrics first" }
+  ],
+  "annotations": [
+    { "id": "note-a", "x": 0,    "y": -150, "w": 390, "text": "Your layout, literally.\nPlayer 25% / lyrics 50% / search 25%.\n\nTradeoff: the results list is capped at ~3 songs, and the mixer has to collapse to fit the player into 25%." },
+    { "id": "note-b", "x": 530,  "y": -150, "w": 390, "text": "Search opens a sheet over the lyrics.\n\nLyrics keep the full 50% while you are singing; searching gets the whole list plus the Request button. Costs one tap to dismiss." },
+    { "id": "note-c", "x": 1060, "y": -150, "w": 390, "text": "Lyrics take everything; player is a slim bar, search is a floating button.\n\nMost lyric space, closest to a TV view. Shows the romanised line under the active one." }
+  ],
+  "launch": { "view": "canvas" }
+}
