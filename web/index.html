@@ -264,6 +264,9 @@
             flex-direction: column;
         }
         .lyrics-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             padding: 12px 16px;
             font-weight: 600;
             font-size: 14px;
@@ -280,6 +283,19 @@
             white-space: pre-wrap;
             color: #333;
         }
+        .script-toggle {
+            border: 1px solid #00897B;
+            border-radius: 6px;
+            background: white;
+            color: #00897B;
+            cursor: pointer;
+            font-size: 11px;
+            padding: 3px 8px;
+            font-weight: 500;
+        }
+        .script-toggle:hover { background: #E0F2F1; }
+        .script-toggle.on { background: #00897B; color: white; }
+        .lyric-roman { display: none; }
         .no-lyrics { color: #999; font-style: italic; font-size: 14px; }
         .lyrics-line {
             padding: 6px 8px;
@@ -359,6 +375,191 @@
            container.clientHeight and scrolls the container itself, so if it
            grew to fit the page instead, the word sweep would stop following
            the singer.                                                      */
+        /* ===== Big screen =====
+           A projector in a dim room washes out white, and the normal 16px
+           lyric pane is unreadable past about a metre. This is the same three
+           panels rearranged by grid — lyrics as the stage, the player panel as
+           a rail beneath it, the song list as the room's panel on the right —
+           so the lyric sync code underneath is untouched. */
+        .screen-btn {
+            border: 1px solid rgba(255,255,255,0.55);
+            border-radius: 6px; background: transparent; color: white;
+            font-size: 12px; padding: 4px 10px; cursor: pointer; margin-left: 12px;
+        }
+        .screen-btn:hover { background: rgba(255,255,255,0.15); }
+        .screen-btn.dark {
+            border-color: #2C3E3B; color: #6E8B87; margin: 14px 0 0; width: 100%;
+            padding: 8px; font-size: 14px;
+        }
+        .screen-btn.dark:hover { background: #1B2624; }
+        .bs-head, .bs-foot { display: none; }
+
+        /* Only above the phone breakpoint. A phone is never the projected
+           display, and the grid this sets up collapses into nonsense at
+           390px — these rules outrank the phone block on specificity, so
+           they have to be switched off here rather than overridden. */
+        @media (min-width: 821px) {
+            body.big-screen { background: #0E1413; color: #E6EDEC; overflow: hidden; }
+            body.big-screen .topbar { display: none; }
+            body.big-screen .panels {
+                display: grid;
+                /* minmax(0,1fr), not 1fr: a bare 1fr will not shrink below the
+                   lyrics' min-content, and an 80px line pushes the panel off the
+                   side of the screen. */
+                grid-template-columns: minmax(0, 1fr) 420px;
+                grid-template-rows: minmax(0, 1fr) auto;
+                height: 100vh;
+                overflow: hidden;
+            }
+            /* Grid items default to min-height:auto, which lets 39 lines of 80px
+               type push the row past the viewport. */
+            body.big-screen .panel-right {
+                grid-column: 1; grid-row: 1; min-height: 0; overflow: hidden;
+            }
+            body.big-screen .panel-center { grid-column: 1; grid-row: 2; }
+            body.big-screen .panel-left { grid-column: 2; grid-row: 1 / span 2; }
+
+            body.big-screen .panel-right,
+            body.big-screen .panel-left,
+            body.big-screen .panel-center {
+                background: #0E1413; border-color: #223230;
+            }
+            body.big-screen .panel-left { background: #141D1C; border-left: 1px solid #223230; }
+            /* The rail is a two-row grid: seek and transport on top, faders and
+               the mode buttons beneath. Everything the operator touches mid-song
+               stays reachable without leaving the view. */
+            body.big-screen .panel-center {
+                background: #141D1C; border-top: 1px solid #223230; padding: 18px 44px 22px;
+                overflow: hidden; min-width: 0;
+            }
+            /* The grid goes on #playerContent, not .panel-center: selectSong
+               rebuilds the controls inside that single wrapper, so the panel has
+               exactly one child and a grid there would have nothing to place. */
+            body.big-screen #playerContent {
+                display: grid;
+                /* minmax(0,1fr) again — the seek row's min-content otherwise keeps
+                   column 1 too wide and column 2 spills over the room's panel. */
+                grid-template-columns: minmax(0, 1fr) auto;
+                gap: 14px 36px;
+                align-items: center;
+            }
+            body.big-screen #playerContent .seek-row     { grid-column: 1; grid-row: 1; margin: 0; }
+            body.big-screen #playerContent .transport    { grid-column: 2; grid-row: 1; margin: 0; }
+            body.big-screen #playerContent #mixerSection {
+                grid-column: 1; grid-row: 2; min-width: 0;
+            }
+            /* Flex children default to min-width:auto, so four faders plus their
+               labels keep a width the column cannot honour and slide under the
+               mode buttons. */
+            body.big-screen .stem-row { min-width: 0; }
+            body.big-screen .stem-row input[type="range"] { min-width: 0; }
+            body.big-screen #playerContent .presets      { grid-column: 2; grid-row: 2; margin: 0; }
+
+            /* The stage */
+            body.big-screen .lyrics-header { display: none; }
+            body.big-screen .lyrics-content {
+                /* Half-viewport padding rather than justify-content:center — a
+                   centred flex column with overflow cannot be scrolled back to its
+                   start, so the sung line ends up above the top of the pane. The
+                   padding lets the existing scroll-to-active centre any line,
+                   including the first and last. */
+                padding: 42vh 80px;
+                display: flex; flex-direction: column;
+                align-items: center; justify-content: flex-start;
+                font-size: 42px; line-height: 1.2;
+                /* Without this the flex child grows to its content instead of
+                   becoming a scroller, clientHeight equals scrollHeight, and
+                   scrollLyricsTo() has nothing to scroll. */
+                min-height: 0;
+            }
+            body.big-screen .lyrics-line {
+                font-size: 42px; line-height: 1.2; color: #333D3C;
+                text-align: center; padding: 14px 8px; max-width: 100%;
+                overflow-wrap: break-word;
+            }
+            body.big-screen .lyrics-line.past { color: #2B3534; }
+            body.big-screen .lyrics-line.upcoming { color: #4A5453; }
+            body.big-screen .lyrics-line.active {
+                font-size: 80px; line-height: 1.15; color: #4DB6AC;
+                background: transparent; font-weight: 600;
+            }
+            body.big-screen .lyrics-word.sung { color: #80CBC4; }
+            body.big-screen .lyrics-word.singing { color: #B2DFDB; }
+            /* Romanised echo, only under the line being sung, and only on the big
+               screen — the normal view has the A/अ toggle instead. Hidden by
+               default everywhere, or it renders under every line. */
+            body.big-screen .lyric-roman { display: none; }
+            body.big-screen .lyrics-line.active .lyric-roman {
+                display: block; font-size: 36px; line-height: 1.4; font-weight: 400;
+                color: #6E8B87; margin-top: 12px; letter-spacing: 0.6px;
+            }
+
+            /* The rail */
+            /* Up next lives in the room's panel instead, and the rest is chrome
+               the room does not need to watch. */
+            body.big-screen .player-title,
+            body.big-screen .save-row,
+            body.big-screen .preset-indicator,
+            body.big-screen .section-header,
+            body.big-screen .loading { display: none; }
+            /* updateUpNext() sets style="display:flex" inline, which beats any
+               stylesheet rule — hence !important. Left in the grid it becomes a
+               stray auto-placed item and collapses the second column. */
+            body.big-screen .up-next { display: none !important; }
+            body.big-screen .seek-row input[type="range"] { height: 22px; }
+            body.big-screen .time { font-size: 20px; color: #6E8B87; min-width: 62px; }
+            body.big-screen .transport { display: flex; gap: 18px; }
+            body.big-screen .btn-play { width: 62px; height: 62px; font-size: 24px; }
+            body.big-screen .btn-stop { width: 46px; height: 46px; font-size: 17px; background: #37474F; }
+            body.big-screen .presets { display: flex; gap: 10px; }
+            body.big-screen .preset-btn {
+                border-color: #2C3E3B; background: transparent; color: #6E8B87;
+                font-size: 17px; padding: 10px 20px; flex: none;
+            }
+            body.big-screen .preset-btn:hover { background: #1B2624; }
+            body.big-screen .preset-btn.active {
+                background: #00897B; color: white; border-color: #00897B;
+            }
+            /* Forced open, and forced into a row: the mixer is a collapsible
+               section whose .section-content rule would otherwise stack the
+               faders and win on specificity. */
+            body.big-screen #mixerSection {
+                display: flex !important; gap: 34px; padding: 0;
+            }
+            body.big-screen .stem-row { flex: 1; padding: 0; }
+            body.big-screen .stem-name { font-size: 18px; color: #6E8B87; min-width: 84px; }
+            body.big-screen .stem-vol { font-size: 17px; color: #55605F; }
+
+            /* The room's panel */
+            body.big-screen .search-box,
+            body.big-screen .playlist-chips,
+            body.big-screen .song-count,
+            body.big-screen .request-box { display: none; }
+            body.big-screen .bs-head, body.big-screen .bs-foot { display: block; }
+            body.big-screen .bs-head {
+                padding: 34px 32px 22px; border-bottom: 1px solid #223230;
+            }
+            body.big-screen .bs-foot {
+                padding: 22px 32px 30px; border-top: 1px solid #223230;
+            }
+            .bs-label {
+                font-size: 16px; color: #55605F; letter-spacing: 1.4px; text-transform: uppercase;
+            }
+            .bs-song { font-size: 36px; font-weight: 600; margin-top: 10px; line-height: 1.2; }
+            .bs-url { font-size: 22px; color: #4DB6AC; margin-top: 10px; word-break: break-all; }
+            body.big-screen .song-list { padding: 22px 0; }
+            body.big-screen .song-item {
+                font-size: 26px; padding: 12px 32px; border-bottom: none; color: #6E8B87;
+            }
+            /* Long titles must not widen the panel — they ellipse. */
+            body.big-screen .song-item .song-name {
+                min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            }
+            body.big-screen .song-item:hover { background: #1B2624; }
+            body.big-screen .song-item.active { background: transparent; color: #E6EDEC; font-weight: 600; }
+            body.big-screen .song-item .song-playlists { display: none; }
+        }
+
         @media (max-width: 820px) {
             body {
                 height: auto;
@@ -441,6 +642,7 @@
             }
             .section-header { padding: 12px 0; font-size: 15px; }
             .search-box input { padding: 12px; font-size: 15px; }
+            .screen-btn { display: none; }
         }
     </style>
 </head>
@@ -448,6 +650,7 @@
     <div class="topbar">
         <h1>BeatznBox</h1>
         <span class="now-playing" id="nowPlaying">Select a song to start</span>
+        <button class="screen-btn" onclick="toggleBigScreen()" title="Big screen (Esc to leave)">Big screen</button>
     </div>
 
     <div class="panels">
@@ -456,9 +659,18 @@
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="Search songs..." oninput="filterSongs()">
             </div>
+            <div class="bs-head">
+                <div class="bs-label">Now singing</div>
+                <div class="bs-song" id="bsSong">—</div>
+            </div>
             <div class="playlist-chips" id="playlistChips"></div>
             <div class="song-count" id="songCount"></div>
             <div class="song-list" id="songList"></div>
+            <div class="bs-foot">
+                <div class="bs-label">Request a song</div>
+                <div class="bs-url" id="bsUrl"></div>
+                <button class="screen-btn dark" onclick="toggleBigScreen()">Leave big screen</button>
+            </div>
             <div class="request-box">
                 <details id="requestPanel">
                     <summary>+ Request a song</summary>
@@ -483,7 +695,11 @@
 
         <!-- Right: Lyrics -->
         <div class="panel-right">
-            <div class="lyrics-header">Lyrics</div>
+            <div class="lyrics-header">
+                <span>Lyrics</span>
+                <button class="script-toggle" id="scriptToggle" style="display:none"
+                        onclick="toggleRoman()"></button>
+            </div>
             <div class="lyrics-content" id="lyricsContent">
                 <span class="no-lyrics">Select a song to view lyrics</span>
             </div>
@@ -510,6 +726,12 @@
         // Compressed bytes for the song most likely to be picked next. Never
         // decoded here — see prefetchNext().
         let prefetched = { dir: null, bytes: null, ctrl: null };
+        // Devanagari at singing tempo is unreadable for most of the room, and
+        // the aligner already romanised every word to match the audio — so the
+        // readable version costs nothing but a re-render.
+        let pinnedRate = false;   // did we force the context to 44.1kHz?
+        let romanMode = false;
+        try { romanMode = localStorage.getItem('romanLyrics') === '1'; } catch (e) {}
         let gainNodes = {};
         let sourceNodes = {};
         let isPlaying = false;
@@ -663,6 +885,7 @@
             const song = songs[index];
 
             document.getElementById('nowPlaying').textContent = song.name;
+            document.getElementById('bsSong').textContent = song.name;
             renderSongList();
 
             document.getElementById('playerContent').innerHTML = `
@@ -723,6 +946,7 @@
             if (!audioCtx) {
                 try {
                     audioCtx = new AudioContext({ sampleRate: 44100 });
+                    pinnedRate = true;
                 } catch (e) {
                     // A browser may refuse a rate its hardware cannot open.
                     // Correct playback at 48k beats no playback at 44.1k.
@@ -745,23 +969,77 @@
                         ? `Loading... (${loaded}/${STEM_NAMES.length})` : '';
             };
             setLoadStatus();
-            await Promise.all(STEM_NAMES.map(async (stem) => {
+            let firstError = null;
+            const fetchStem = async (stem) => {
+                let buf = pre && pre[stem];
+                if (!buf || buf.byteLength === 0) {
+                    const resp = await fetch(stemUrl(song.dir, `${stem}.mp3`));
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    buf = await resp.arrayBuffer();
+                }
+                return buf;
+            };
+            // Fetch all four at once, decode them one at a time. The network
+            // is where the parallel win is; decoding in parallel as well put
+            // four ~100MB buffers under allocation at the same moment, which a
+            // phone does not have — it showed up as a stuck load on an iPhone
+            // and as "failed to load" on Android.
+            const pending = {};
+            STEM_NAMES.forEach((stem) => {
+                pending[stem] = fetchStem(stem).catch((e) => {
+                    if (!firstError) firstError = e;
+                    console.warn(`Fetch failed: ${stem}`, e);
+                    return null;
+                });
+            });
+            for (const stem of STEM_NAMES) {
                 try {
-                    let buf = pre && pre[stem];
-                    if (!buf || buf.byteLength === 0) {
-                        const resp = await fetch(stemUrl(song.dir, `${stem}.mp3`));
-                        buf = await resp.arrayBuffer();
-                    }
+                    const buf = await pending[stem];
+                    if (!buf) continue;
                     stems[stem] = await audioCtx.decodeAudioData(buf);
                     loaded++;
                     setLoadStatus();
-                } catch (e) { console.warn(`Failed: ${stem}`, e); }
-            }));
+                } catch (e) {
+                    if (!firstError) firstError = e;
+                    console.warn(`Decode failed: ${stem}`, e);
+                }
+            }
+
+            // A context pinned to 44.1kHz decodes faster and holds less, but
+            // some browsers accept the rate and then refuse to decode at it.
+            // Losing playback is worse than losing the saving, so fall back to
+            // whatever rate the device wants and try once more.
+            if (loaded === 0 && audioCtx.sampleRate === 44100 && pinnedRate) {
+                console.warn('44.1kHz decode failed everywhere; retrying at the device rate');
+                pinnedRate = false;
+                try { audioCtx.close(); } catch (e) {}
+                audioCtx = new AudioContext();
+                gainNodes = {};
+                firstError = null;
+                for (const stem of STEM_NAMES) {
+                    try {
+                        // The first attempt detached these buffers, so refetch.
+                        const buf = await fetchStem(stem);
+                        stems[stem] = await audioCtx.decodeAudioData(buf);
+                        loaded++;
+                        setLoadStatus();
+                    } catch (e) {
+                        if (!firstError) firstError = e;
+                        console.warn(`Retry failed: ${stem}`, e);
+                    }
+                }
+            }
 
             isLoading = false;
 
             if (loaded === 0) {
-                document.getElementById('loadingStatus').textContent = 'Failed to load';
+                // Say what actually went wrong — "Failed to load" alone left
+                // nobody anything to act on.
+                const why = firstError
+                    ? `${firstError.name || 'Error'}: ${firstError.message || firstError}`
+                    : 'no reason given';
+                document.getElementById('loadingStatus').textContent =
+                    `Failed to load — ${why}`;
                 return;
             }
 
@@ -841,6 +1119,9 @@
             lyricsLines = [];
             crushedLines = [];
             if (lyricsInterval) clearInterval(lyricsInterval);
+            // Hide the toggle until we know this song has something to toggle;
+            // otherwise it lingers from the previous song.
+            syncScriptToggle();
 
             // Try timed lyrics first (JSON with timestamps).
             // cache:'no-store' — realignment rewrites this file in place, and a
@@ -850,6 +1131,7 @@
                                          { cache: 'no-store' });
                 if (resp.ok) {
                     timedLyrics = await resp.json();
+                    syncScriptToggle();
                     renderTimedLyrics(el);
                     startLyricsSync();
                     return;
@@ -889,9 +1171,22 @@
         // and splits hyphenates ("khud-garzi" -> "khud","garzi"). So walk the display
         // words and the aligned words together, matching on normalized form, and
         // leave any display word without a match untimed rather than forcing a pairing.
+        const DEVANAGARI = /[\u0900-\u097F]/;
+
         function buildWordSpans(line, lineIdx) {
-            const display = line.text.split(/\s+/).filter(Boolean);
             const aligned = line.words || [];
+            // Romanised view: the aligned tokens ARE the display text, so every
+            // word carries its own timing and the sweep is exact. This is the
+            // only way word highlighting works on a Devanagari song at all —
+            // norm() below strips Devanagari to nothing, so no display word
+            // ever matches a token and the whole line falls back to plain text.
+            if (romanMode && aligned.length) {
+                return aligned.map((w, di) =>
+                    `<span class="lyrics-word" id="w-${lineIdx}-${di}" ` +
+                    `data-s="${w.start}" data-e="${w.end}">${escapeHtml(w.word)}</span>`
+                ).join(' ');
+            }
+            const display = line.text.split(/\s+/).filter(Boolean);
             if (!aligned.length) return escapeHtml(line.text);
 
             const norm = s => s.toLowerCase().replace(/[^a-z']/g, '');
@@ -920,10 +1215,64 @@
         function renderTimedLyrics(el) {
             if (!timedLyrics) return;
             crushedLines = timedLyrics.map(isCrushed);
-            el.innerHTML = timedLyrics.map((line, i) =>
-                `<div class="lyrics-line upcoming${crushedLines[i] ? ' crushed' : ''}" ` +
-                `id="lyric-${i}">${buildWordSpans(line, i)}</div>`
-            ).join('');
+            el.innerHTML = timedLyrics.map((line, i) => {
+                // The romanised echo only earns its space under the line being
+                // sung, so it is rendered for every line and revealed by CSS.
+                const echo = (!romanMode && line.words && line.words.length
+                              && DEVANAGARI.test(line.text || ''))
+                    ? `<div class="lyric-roman">${escapeHtml(
+                          line.words.map(w => w.word).join(' '))}</div>`
+                    : '';
+                return `<div class="lyrics-line upcoming${crushedLines[i] ? ' crushed' : ''}" ` +
+                       `id="lyric-${i}">${buildWordSpans(line, i)}${echo}</div>`;
+            }).join('');
+        }
+
+        function toggleBigScreen() {
+            const on = document.body.classList.toggle('big-screen');
+            document.getElementById('bsUrl').textContent = location.host;
+            const song = songs[currentSongIndex];
+            document.getElementById('bsSong').textContent = song ? song.name : '—';
+            // The active line has to be re-centred against a pane that just
+            // changed size, and its type is now twice as tall.
+            lastActiveIdx = -2;
+            lastWordKey = '';
+            if (timedLyrics) updateLyricsHighlight();
+            try { localStorage.setItem('bigScreen', on ? '1' : '0'); } catch (e) {}
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.body.classList.contains('big-screen')) {
+                toggleBigScreen();
+            }
+        });
+
+        function toggleRoman() {
+            romanMode = !romanMode;
+            try { localStorage.setItem('romanLyrics', romanMode ? '1' : '0'); } catch (e) {}
+            syncScriptToggle();
+            const el = document.getElementById('lyricsContent');
+            if (timedLyrics) {
+                renderTimedLyrics(el);
+                // Repaint immediately rather than waiting for the next tick, or
+                // the line under the singer goes grey for up to 50ms.
+                lastActiveIdx = -2;
+                lastWordKey = '';
+                updateLyricsHighlight();
+            }
+        }
+
+        // Only worth offering when the words are actually in Devanagari AND the
+        // aligner left romanised tokens to swap in.
+        function syncScriptToggle() {
+            const btn = document.getElementById('scriptToggle');
+            if (!btn) return;
+            const usable = timedLyrics && timedLyrics.some(l => l.words && l.words.length)
+                        && timedLyrics.some(l => DEVANAGARI.test(l.text || ''));
+            btn.style.display = usable ? 'inline-block' : 'none';
+            btn.textContent = romanMode ? 'अ' : 'A';
+            btn.title = romanMode ? 'Show Devanagari' : 'Show romanised';
+            btn.className = 'script-toggle' + (romanMode ? ' on' : '');
         }
 
         function renderPlainLyrics(el) {
@@ -1063,9 +1412,44 @@
             else startPlayback();
         }
 
+        // The four stems are mixed through Web Audio, which both iOS and
+        // Android suspend when the screen sleeps — so a song stops mid-verse
+        // with nobody touching anything. A wake lock keeps the screen awake
+        // while something is playing. It does NOT survive the user switching
+        // apps; nothing short of an <audio> element would, and that cannot mix
+        // four stems live.
+        let wakeLock = null;
+
+        async function keepScreenAwake() {
+            if (!('wakeLock' in navigator) || wakeLock) return;
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                // The browser drops it whenever the page is hidden; clear our
+                // handle so the visibility handler can take a fresh one.
+                wakeLock.addEventListener('release', () => { wakeLock = null; });
+            } catch (e) {
+                // Denied, unsupported, or the tab was already hidden. Playback
+                // is unaffected — the screen just may sleep.
+                console.warn('wake lock unavailable', e);
+            }
+        }
+
+        function releaseScreenAwake() {
+            if (!wakeLock) return;
+            try { wakeLock.release(); } catch (e) {}
+            wakeLock = null;
+        }
+
+        // Coming back to the tab re-takes the lock, since the browser released
+        // it on the way out.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && isPlaying) keepScreenAwake();
+        });
+
         function startPlayback() {
             if (!audioCtx || Object.keys(stems).length === 0) return;
             if (audioCtx.state === 'suspended') audioCtx.resume();
+            keepScreenAwake();
 
             for (const stem of STEM_NAMES) {
                 if (!stems[stem]) continue;
@@ -1106,6 +1490,7 @@
             }
             sourceNodes = {};
             isPlaying = false;
+            releaseScreenAwake();
             document.getElementById('playBtn').innerHTML = '&#9654;';
             clearInterval(seekInterval);
         }
@@ -1117,6 +1502,7 @@
                 }
                 sourceNodes = {};
                 isPlaying = false;
+                releaseScreenAwake();
                 clearInterval(seekInterval);
             }
             pauseOffset = 0;
@@ -1269,7 +1655,18 @@
         // pay for the download a second time. Compressed bytes only: decoded
         // PCM is ~18x larger (389MB for a 4:36 song, vs 22MB of mp3), so
         // holding two decoded songs would get a phone tab killed.
+        // A phone has neither the bandwidth to spare nor the memory: another
+        // 22MB in flight competes with the song being loaded, and holding it
+        // alongside ~390MB of decoded audio is what tips a tab over.
+        function shouldPrefetch() {
+            if (window.matchMedia('(max-width: 820px)').matches) return false;
+            const c = navigator.connection;
+            if (c && (c.saveData || /2g|slow-2g/.test(c.effectiveType || ''))) return false;
+            return true;
+        }
+
         async function prefetchNext() {
+            if (!shouldPrefetch()) return;
             const nextIdx = getNextSongIndex();
             if (nextIdx < 0) return;
             const dir = songs[nextIdx].dir;

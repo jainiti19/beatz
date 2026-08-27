@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #0E1413; color: #E6EDEC; }
+    a { color: #4DB6AC; } a:hover { color: #80CBC4; }
+    .fader { flex: 1; height: 6px; border-radius: 3px; background: #1E2A28; position: relative; }
+    .fill { position: absolute; left: 0; top: 0; height: 6px; border-radius: 3px; background: #00897B; }
+    .lbl { font-size: 17px; color: #55605F; letter-spacing: 1.4px; text-transform: uppercase; }
+  </style>
+</helmet>
+<div style="width: 1920px; height: 1080px; background: #0E1413; display: flex; overflow: hidden;">
+
+  <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 0 80px;">
+      <div style="font-size: 38px; line-height: 1.2; color: #333D3C; text-align: center;">पंक्ति एक</div>
+      <div style="font-size: 42px; line-height: 1.2; color: #4A5453; text-align: center;">पंक्ति दो</div>
+      <div style="text-align: center;">
+        <div style="font-size: 80px; line-height: 1.15; font-weight: 600; color: #4DB6AC;">पंक्ति तीन</div>
+        <div style="font-size: 36px; line-height: 1.4; color: #6E8B87; margin-top: 14px; letter-spacing: 0.6px;">pankti teen</div>
+      </div>
+      <div style="font-size: 42px; line-height: 1.2; color: #6B7877; text-align: center;">पंक्ति चार</div>
+      <div style="font-size: 38px; line-height: 1.2; color: #4A5453; text-align: center;">पंक्ति पाँच</div>
+    </div>
+
+    <div style="flex-shrink: 0; background: #141D1C; border-top: 1px solid #223230; padding: 22px 48px 26px;">
+      <div style="display: flex; align-items: center; gap: 24px; margin-bottom: 20px;">
+        <div style="font-size: 20px; color: #6E8B87; white-space: nowrap;">1:52</div>
+        <div class="fader" style="height: 8px;"><div class="fill" style="width: 42%; height: 8px;"></div>
+          <div style="position: absolute; left: calc(42% - 11px); top: -7px; width: 22px; height: 22px; border-radius: 50%; background: #00897B;"></div></div>
+        <div style="font-size: 20px; color: #6E8B87; white-space: nowrap;">4:28</div>
+        <div style="width: 62px; height: 62px; border-radius: 50%; background: #00897B; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+          <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="5" height="16" rx="1.5" fill="white"/><rect x="14" y="4" width="5" height="16" rx="1.5" fill="white"/></svg>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 34px;">
+        <div style="display: flex; align-items: center; gap: 14px; flex: 1;">
+          <span style="font-size: 18px; color: #6E8B87; min-width: 74px;">Vocals</span>
+          <div class="fader"><div class="fill" style="width: 12%;"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 14px; flex: 1;">
+          <span style="font-size: 18px; color: #6E8B87; min-width: 64px;">Drums</span>
+          <div class="fader"><div class="fill" style="width: 80%;"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 14px; flex: 1;">
+          <span style="font-size: 18px; color: #6E8B87; min-width: 52px;">Bass</span>
+          <div class="fader"><div class="fill" style="width: 80%;"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 14px; flex: 1;">
+          <span style="font-size: 18px; color: #6E8B87; min-width: 84px;">Harmony</span>
+          <div class="fader"><div class="fill" style="width: 80%;"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="width: 420px; flex-shrink: 0; background: #141D1C; border-left: 1px solid #223230; display: flex; flex-direction: column;">
+    <div style="padding: 38px 34px 24px; border-bottom: 1px solid #223230;">
+      <div class="lbl">Now singing</div>
+      <div style="font-size: 38px; font-weight: 600; margin-top: 12px; line-height: 1.2;">Kesariya</div>
+    </div>
+    <div style="padding: 28px 34px; flex: 1; min-height: 0;">
+      <div class="lbl" style="margin-bottom: 20px;">Coming up</div>
+      <div style="display: flex; flex-direction: column; gap: 18px;">
+        <div style="font-size: 29px; color: #E6EDEC;">Gerua</div>
+        <div style="font-size: 27px; color: #6E8B87;">Tum Hi Ho</div>
+        <div style="font-size: 26px; color: #55605F;">Chaiyya Chaiyya</div>
+        <div style="font-size: 25px; color: #414D4C;">Pasoori</div>
+        <div style="font-size: 24px; color: #333D3C;">Ajeeb Dastaan Hai Ye</div>
+      </div>
+    </div>
+    <div style="padding: 24px 34px 36px; border-top: 1px solid #223230;">
+      <div class="lbl">Request a song</div>
+      <div style="font-size: 24px; color: #4DB6AC; margin-top: 12px; line-height: 1.35;">beatznbox.wesimplyhome.com</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

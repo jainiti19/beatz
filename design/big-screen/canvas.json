@@ -1,0 +1,16 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Design" },
+    { "id": "page-2", "name": "Options" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html",        "x": 0,    "y": 0,    "w": 1920, "h": 1080, "title": "Big screen — rail below, panel right", "page": "page-1" },
+    { "file": "OptionA.dc.html",     "x": 0,    "y": 0,    "w": 1920, "h": 1080, "title": "Option A — Three lines, nothing else", "page": "page-2" },
+    { "file": "ControlRail.dc.html", "x": 2100, "y": 0,    "w": 1920, "h": 1080, "title": "Option B — Lyrics plus a control rail", "page": "page-2" },
+    { "file": "Roomview.dc.html",    "x": 0,    "y": 1300, "w": 1920, "h": 1080, "title": "Option C — Lyrics plus a room panel", "page": "page-2" }
+  ],
+  "annotations": [
+    { "id": "note-main", "x": 0, "y": -210, "w": 900, "text": "B's control rail below, C's panel on the right.\n\nLyrics keep 1500x860 — the sung line at 80px with two lines of context either side, and the romanised line under it.\n\nThe panel earns its width by answering the room's two questions without anyone asking: what is next, and how do I add one.", "page": "page-1" }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}
