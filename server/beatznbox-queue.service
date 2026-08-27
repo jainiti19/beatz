@@ -1,0 +1,13 @@
+# Installed at /etc/systemd/system/beatznbox-queue.service on the VPS.
+#   systemctl daemon-reload && systemctl enable --now beatznbox-queue
+[Unit]
+Description=BeatznBox song request queue
+After=network.target
+
+[Service]
+User=beatznbox
+ExecStart=/usr/bin/python3 /opt/beatznbox/queue-service.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
