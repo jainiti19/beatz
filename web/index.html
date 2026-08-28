@@ -169,19 +169,26 @@
 
         .presets {
             display: flex;
-            gap: 6px;
-            margin: 8px 0;
+            gap: 4px;
+            margin: 6px 0;
         }
+        /* Four modes now, so they share the row rather than each demanding a
+           comfortable width — min-width:0 lets them shrink instead of wrapping
+           to a second line on a narrow phone. */
         .preset-btn {
             flex: 1;
-            padding: 7px;
+            min-width: 0;
+            padding: 6px 4px;
             border: 1px solid #00897B;
-            border-radius: 8px;
+            border-radius: 6px;
             background: white;
             color: #00897B;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .preset-btn:hover { background: #E0F2F1; }
         .preset-btn.active { background: #00897B; color: white; }
@@ -635,10 +642,17 @@
                 min-height: 48px;
                 font-size: 20px;
             }
-            .preset-btn, .save-btn, .skip-btn {
+            .save-btn, .skip-btn {
                 min-height: 42px;
                 padding: 8px 14px;
                 font-size: 14px;
+            }
+            /* Still a 44px target on a phone, but no wider than a quarter of
+               the row — four of them have to fit. */
+            .preset-btn {
+                min-height: 44px;
+                padding: 8px 6px;
+                font-size: 12px;
             }
             .section-header { padding: 12px 0; font-size: 15px; }
             .search-box input { padding: 12px; font-size: 15px; }
@@ -740,6 +754,21 @@
         let pauseOffset = 0;
         let songDuration = 0;
         let currentSongIndex = -1;
+        // The dir of the song actually loaded, independent of its position in
+        // `songs` — the manifest is refetched while a song plays.
+        let currentSongDir = null;
+
+        // Every other preset drops the vocal entirely, which is right for a
+        // song the room knows cold and wrong for one it half knows — there is
+        // nothing to come back to after a missed line. 'singalong' leaves the
+        // original singer audible underneath rather than out front: enough to
+        // find the line, quiet enough to sing over.
+        const PRESETS = {
+            singalong: { vocals: 30, drums: 75, bass: 80, other: 75 },
+            karaoke:   { vocals: 0,  drums: 80, bass: 80, other: 80 },
+            unplugged: { vocals: 0,  drums: 0,  bass: 80, other: 80 },
+            jamming:   { vocals: 0,  drums: 70, bass: 80, other: 40 },
+        };
         let seekInterval = null;
         let isLoading = false;
         let songs = [];
@@ -769,6 +798,52 @@
             renderPlaylistChips();
             renderSongList();
         }
+
+        // The list used to be fetched exactly once, at startup — so a phone
+        // left open never saw a song the watcher had published, and on a phone
+        // "just reload" is not an obvious gesture: switching apps and back
+        // does not do it. Refresh on returning to the page, and slowly while
+        // it is open.
+        async function refreshSongList({ quiet = true } = {}) {
+            let incoming;
+            try {
+                const resp = await fetch(STEMS_BASE_URL + '/songs.json',
+                                         { cache: 'no-store' });
+                if (!resp.ok) return 0;
+                incoming = await resp.json();
+            } catch (e) { return 0; }
+            if (!Array.isArray(incoming) || incoming.length === 0) return 0;
+
+            const known = new Set(songs.map(s => s.dir));
+            const added = incoming.filter(s => !known.has(s.dir)).length;
+            const graded = JSON.stringify(incoming.map(s => s.dir + s.lyrics))
+                        !== JSON.stringify(songs.map(s => s.dir + s.lyrics));
+            if (!added && !graded) return 0;
+
+            // Re-point at whatever is playing by NAME. currentSongIndex is an
+            // index into `songs`, and a new manifest can order things
+            // differently — a song added alphabetically above the current one
+            // shifts every index below it.
+            songs = incoming;
+            if (currentSongDir) {
+                const i = songs.findIndex(s => s.dir === currentSongDir);
+                // Still playing something the manifest no longer lists: leave
+                // the audio alone rather than silently selecting a neighbour.
+                currentSongIndex = i;
+            }
+            filterSongs();          // re-applies the search box and playlist chip
+            updateUpNext();
+            if (added && !quiet) {
+                const el = document.getElementById('songCount');
+                if (el) el.textContent =
+                    `${filteredSongs.length} songs · ${added} new`;
+            }
+            return added;
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') refreshSongList({ quiet: false });
+        });
 
         function renderPlaylistChips() {
             const el = document.getElementById('playlistChips');
@@ -865,9 +940,17 @@
 
         // ===== Player =====
 
-        async function selectSong(index) {
+        // opts.autoplay   — start as soon as the stems are decoded
+        // opts.inheritMix  — carry the current fader positions across, instead
+        //                    of resetting to a preset. Both are set when one
+        //                    song rolls into the next on its own: nobody asked
+        //                    for a change, so nothing should change.
+        async function selectSong(index, opts = {}) {
             if (currentSongIndex === index) return;
             if (isLoading) return;
+
+            // Read the mix before tearing the graph down.
+            const carriedMix = opts.inheritMix ? currentMix() : null;
 
             // Fully stop and disconnect everything
             stopPlayback();
@@ -881,8 +964,9 @@
             sourceNodes = {};
 
             currentSongIndex = index;
-            isLoading = true;
             const song = songs[index];
+            currentSongDir = song.dir;
+            isLoading = true;
 
             document.getElementById('nowPlaying').textContent = song.name;
             document.getElementById('bsSong').textContent = song.name;
@@ -897,10 +981,11 @@
                     <span class="time" id="totalTime">0:00</span>
                 </div>
                 <div class="transport">
-                    <button class="btn btn-stop" onclick="stopPlayback()">&#9632;</button>
+                    <button class="btn btn-stop" id="stopBtn" onclick="stopPlayback()">&#9632;</button>
                     <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
                 </div>
                 <div class="presets">
+                    <button class="preset-btn" id="pre-singalong" onclick="applyPreset('singalong')">Sing along</button>
                     <button class="preset-btn" id="pre-karaoke" onclick="applyPreset('karaoke')">Karaoke</button>
                     <button class="preset-btn" id="pre-unplugged" onclick="applyPreset('unplugged')">Unplugged</button>
                     <button class="preset-btn" id="pre-jamming" onclick="applyPreset('jamming')">Jamming</button>
@@ -925,6 +1010,10 @@
                 </div>
                 <div class="preset-indicator" id="presetIndicator"></div>
             `;
+
+            // The template above ships fresh, enabled buttons, so the lock has
+            // to go on after it — not when loading started.
+            setTransportEnabled(false);
 
             // Show up next
             updateUpNext();
@@ -1054,19 +1143,61 @@
                 }
             }
 
-            // Restore session preset if available
+            // A mix carried over from the previous song wins: it is what the
+            // room was just listening to. Otherwise this song's own saved
+            // setup, and failing that the default.
             const presetKey = (selectedPlaylist || 'all') + '::' + song.dir;
-            if (sessionPresets[presetKey]) {
+            if (carriedMix) {
+                applyMix(carriedMix);
+            } else if (sessionPresets[presetKey]) {
                 restoreSetup(sessionPresets[presetKey]);
             } else {
-                applyPreset('karaoke');
+                applyPreset('singalong');
             }
+
+            setTransportEnabled(true);
+            if (opts.autoplay) startPlayback();
 
             // Load lyrics
             loadLyrics(song.dir);
 
             // Warm the next song while this one plays.
             prefetchNext();
+        }
+
+        // Faders as plain numbers, so a mix survives the audio graph being
+        // rebuilt for the next song.
+        function currentMix() {
+            const mix = {};
+            for (const stem of STEM_NAMES) {
+                const sl = document.getElementById('sl-' + stem);
+                mix[stem] = sl ? Number(sl.value)
+                               : (gainNodes[stem] ? gainNodes[stem].gain.value * 100 : 80);
+            }
+            return mix;
+        }
+
+        function applyMix(mix) {
+            for (const [stem, vol] of Object.entries(mix)) {
+                setStemVol(stem, vol);
+                const sl = document.getElementById('sl-' + stem);
+                if (sl) sl.value = vol;
+            }
+            // The mix no longer corresponds to a named preset unless it
+            // happens to match one, so light whichever it equals.
+            syncPresetButtons(mix);
+        }
+
+        // Nothing in the transport does anything useful until the stems are
+        // decoded, and a play press that silently does nothing reads as a
+        // broken app.
+        function setTransportEnabled(on) {
+            ['playBtn', 'stopBtn'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) { b.disabled = !on; b.style.opacity = on ? '' : '0.45'; }
+            });
+            const seek = document.getElementById('seekBar');
+            if (seek) seek.disabled = !on;
         }
 
         let timedLyrics = null;
@@ -1475,7 +1606,9 @@
                         // Only auto-next if we're actually near the end
                         if (cur >= songDuration - 1) {
                             stopPlayback();
-                            playNext();
+                            // Reached here because the song ended, not because
+                            // anyone chose: keep playing, keep the same mix.
+                            playNext({ autoplay: true, inheritMix: true });
                         }
                     }
                 });
@@ -1548,13 +1681,25 @@
             if (volEl) volEl.textContent = v === 0 ? 'OFF' : Math.round(v * 100) + '%';
         }
 
+        // Which preset, if any, does this mix correspond to? A carried-over
+        // mix usually matches one exactly, and leaving every button dark when
+        // it does looks like a bug.
+        function syncPresetButtons(mix) {
+            const p = PRESETS;
+            let match = null;
+            for (const [name, vals] of Object.entries(p)) {
+                if (STEM_NAMES.every(k => Number(mix[k]) === vals[k])) { match = name; break; }
+            }
+            currentPreset = match;
+            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            if (match) {
+                const btn = document.getElementById('pre-' + match);
+                if (btn) btn.classList.add('active');
+            }
+        }
+
         function applyPreset(name) {
-            const presets = {
-                karaoke:   { vocals: 0,  drums: 80, bass: 80, other: 80 },
-                unplugged: { vocals: 0,  drums: 0,  bass: 80, other: 80 },
-                jamming:   { vocals: 0,  drums: 70, bass: 80, other: 40 },
-            };
-            const p = presets[name];
+            const p = PRESETS[name];
             if (!p) return;
             currentPreset = name;
             for (const [stem, vol] of Object.entries(p)) {
@@ -1698,9 +1843,9 @@
             return songs.indexOf(filteredSongs[nextFiltered]);
         }
 
-        function playNext() {
+        function playNext(opts = {}) {
             const nextIdx = getNextSongIndex();
-            if (nextIdx >= 0) selectSong(nextIdx);
+            if (nextIdx >= 0) selectSong(nextIdx, opts);
         }
 
         // ===== Session Presets =====
@@ -1784,6 +1929,10 @@
 
         // Init
         loadSongList();
+
+        // 2 minutes: the manifest is ~8KB and no-cache, and a song takes
+        // minutes to process, so anything tighter is just noise.
+        setInterval(() => refreshSongList({ quiet: false }), 120000);
 
         // Track genuine user scrolling only. A 'scroll' listener would also fire
         // for our own smooth scrolling and permanently suppress auto-scroll.

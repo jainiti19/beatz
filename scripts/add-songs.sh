@@ -1,7 +1,8 @@
 #!/bin/bash
 # Add songs end to end: download, separate, normalise, fetch lyrics, align.
 #
-# Reads a manifest of  folder_name | youtube search | lyrics search  and works
+# Reads a manifest of  folder_name | youtube search | lyrics title | artist
+# (the artist is optional) and works
 # through it, skipping any song whose stems already exist so an interrupted run
 # can simply be restarted.
 #
@@ -28,9 +29,12 @@ total=$(grep -cvE '^\s*(#|$)' "$MANIFEST")
 n=0
 ok=0; failed=0; skipped=0
 
-while IFS='|' read -r NAME YT LYR <&3; do
+# Fourth field is the artist, optional — see the lyrics step below for why it
+# must not be glued onto the search string.
+while IFS='|' read -r NAME YT LYR ART <&3; do
   case "$NAME" in ''|\#*) continue;; esac
   NAME=$(echo "$NAME" | xargs); YT=$(echo "$YT" | xargs); LYR=$(echo "$LYR" | xargs)
+  ART=$(echo "${ART:-}" | xargs)
   # A blank name would make DIR the library root and scatter stems across it.
   if [ -z "$NAME" ] || [ -z "$YT" ]; then
     echo "  SKIP: malformed manifest line (name='$NAME' yt='$YT')"; continue
@@ -82,8 +86,17 @@ while IFS='|' read -r NAME YT LYR <&3; do
     echo "        stems written + normalised"
   fi
 
-  echo "  [3/4] lyrics: $LYR"
-  if ! "$VENV/python" "$SCRIPT_DIR/fetch-lyrics-lrclib.py" "$LYR" "$DIR/lyrics.txt"; then
+  # The lyrics search is the TITLE alone; the artist goes over separately.
+  # LRCLIB matches a query near-literally, so "Aao huzoor Asha bhonsle" finds
+  # nothing where "Aao huzoor" finds the song — measured across 29 requests,
+  # folding the artist in was the single biggest cause of zero hits. The
+  # artist then ranks the results, and the separated audio's own length throws
+  # out same-name-different-song matches.
+  DUR=$("$VENV/python" -c "import subprocess,sys;print(subprocess.run(['ffprobe','-v','quiet','-show_entries','format=duration','-of','csv=p=0',sys.argv[1]],capture_output=True,text=True).stdout.strip() or 0)" "$DIR/vocals.wav" 2>/dev/null)
+
+  echo "  [3/4] lyrics: $LYR${ART:+  (artist: $ART)}"
+  if ! "$VENV/python" "$SCRIPT_DIR/fetch-lyrics-lrclib.py" "$LYR" "$DIR/lyrics.txt" \
+        ${ART:+--artist "$ART"} ${DUR:+--duration "$DUR"}; then
     echo "        no usable lyrics — stems are still fine, words need doing by hand"
     ok=$((ok+1)); continue
   fi

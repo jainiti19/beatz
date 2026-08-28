@@ -137,8 +137,11 @@ def run(cmd, **kw):
 
 def process(entry, fast):
     name = entry["name"]
-    search = " ".join(x for x in (field(entry.get("song")),
-                                  field(entry.get("detail"))) if x)
+    title = field(entry.get("song"))
+    artist = field(entry.get("detail"))
+    # YouTube wants everything; LRCLIB wants the title alone with the artist
+    # passed separately, so the manifest keeps them in different fields.
+    search = " ".join(x for x in (title, artist) if x)
     log(f"processing {name!r} (asked by {entry.get('who') or 'someone'}): {search}")
 
     if os.path.exists(os.path.join(STEMS, name, "vocals.wav")):
@@ -146,7 +149,7 @@ def process(entry, fast):
     else:
         manifest = os.path.join(REPO, ".request-manifest.txt")
         with open(manifest, "w", encoding="utf-8") as f:
-            f.write(f"{name} | {search} | {search}\n")
+            f.write(f"{name} | {search} | {title} | {artist}\n")
         cmd = ["./scripts/add-songs.sh", manifest]
         if fast:
             cmd.append("--fast")

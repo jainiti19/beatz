@@ -5,7 +5,12 @@
 
 SRC=~/Music/karaoke/htdemucs
 WEB_STEMS=web/stems
-MAX_SONGS=${1:-100}
+# A safety rail against a runaway loop, not a library size. It used to default
+# to 100 and the library reached exactly 100 — Zindagi Ek Safar was fully
+# processed and silently absent from the player, because watch-requests.py
+# calls this with no argument. Raise it before the VPS disk becomes the real
+# limit: ~22MB a song against 20GB free is roughly 900 songs.
+MAX_SONGS=${1:-1000}
 BITRATE=192k  # Good quality, small files
 
 echo "Preparing web stems as MP3 (${BITRATE}, max $MAX_SONGS songs)..."
@@ -26,7 +31,11 @@ for dir in "$SRC"/*/; do
     echo "$NAME" | grep -qE '[^a-zA-Z0-9_]' && continue
 
     COUNT=$((COUNT + 1))
-    [ $COUNT -gt $MAX_SONGS ] && break
+    if [ $COUNT -gt $MAX_SONGS ]; then
+        echo "  STOPPING at $MAX_SONGS songs — the rest are on disk but will not"
+        echo "  be published. Raise MAX_SONGS or pass a higher limit."
+        break
+    fi
 
     DISPLAY=$(echo "$NAME" | sed 's/_/ /g')
 
