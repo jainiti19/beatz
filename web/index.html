@@ -193,6 +193,38 @@
         .preset-btn:hover { background: #E0F2F1; }
         .preset-btn.active { background: #00897B; color: white; }
 
+        .tempo-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin: 6px 0;
+        }
+        .tempo-label {
+            font-size: 11px;
+            color: #666;
+            flex: 0 0 auto;
+            padding-right: 2px;
+        }
+        /* Taller than the mode buttons on purpose: this one gets used mid-song
+           with a phone in one hand, and the 23px chips elsewhere are already
+           too small to hit. */
+        .tempo-btn {
+            flex: 1;
+            min-width: 0;
+            min-height: 40px;
+            padding: 6px 2px;
+            border: 1px solid #00897B;
+            border-radius: 6px;
+            background: white;
+            color: #00897B;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .tempo-btn:hover { background: #E0F2F1; }
+        .tempo-btn.active { background: #00897B; color: white; }
+
         /* Up next */
         .up-next {
             background: #E8F5E9;
@@ -461,6 +493,7 @@
             body.big-screen .stem-row { min-width: 0; }
             body.big-screen .stem-row input[type="range"] { min-width: 0; }
             body.big-screen #playerContent .presets      { grid-column: 2; grid-row: 2; margin: 0; }
+            body.big-screen #playerContent .tempo-row    { grid-column: 2; grid-row: 3; margin: 0; }
 
             /* The stage */
             body.big-screen .lyrics-header { display: none; }
@@ -527,6 +560,18 @@
             body.big-screen .preset-btn.active {
                 background: #00897B; color: white; border-color: #00897B;
             }
+            /* The speed row is chrome for the singer, not for the room, so it
+               takes the same muted treatment as the mode buttons. Left on its
+               default white it reads as four lit slabs on a dark stage. */
+            body.big-screen .tempo-btn {
+                border-color: #2C3E3B; background: transparent; color: #6E8B87;
+                font-size: 17px; padding: 10px 12px; flex: none; min-height: 0;
+            }
+            body.big-screen .tempo-btn:hover { background: #1B2624; }
+            body.big-screen .tempo-btn.active {
+                background: #00897B; color: white; border-color: #00897B;
+            }
+            body.big-screen .tempo-label { color: #4A5453; font-size: 15px; }
             /* Forced open, and forced into a row: the mixer is a collapsible
                section whose .section-content rule would otherwise stack the
                faders and win on specificity. */
@@ -771,6 +816,14 @@
         };
         let seekInterval = null;
         let isLoading = false;
+        // Practice speed. Everything downstream keeps working in *song* time;
+        // only the two places that read the wall clock have to divide by this.
+        const TEMPOS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+        let tempo = 1;
+        let masterGain = null;   // stems mix here before the tempo shifter
+        let tempoNode = null;
+        let tempoReady = false;
+        let pendingTempo = null;  // a saved setup restored before the worklet loaded
         let songs = [];
         let filteredSongs = [];
         let currentPreset = 'karaoke';
@@ -990,6 +1043,10 @@
                     <button class="preset-btn" id="pre-unplugged" onclick="applyPreset('unplugged')">Unplugged</button>
                     <button class="preset-btn" id="pre-jamming" onclick="applyPreset('jamming')">Jamming</button>
                 </div>
+                <div class="tempo-row" id="tempoRow" style="display:none">
+                    <span class="tempo-label">Speed</span>
+                    ${TEMPOS.map((t) => `<button class="tempo-btn" data-tempo="${t}" onclick="setTempo(${t})">${Math.round(t * 100) + '%'}</button>`).join('')}
+                </div>
                 <div class="up-next" id="upNext" style="display:none">
                     <span class="label">Up next:</span>
                     <span class="next-name" id="nextSongName"></span>
@@ -1043,6 +1100,8 @@
                     audioCtx = new AudioContext();
                 }
             }
+
+            ensureMasterBus();
 
             // Load stems, all four at once. Serially this cost four round
             // trips plus four decodes with no overlap — each decode blocked
@@ -1104,6 +1163,10 @@
                 try { audioCtx.close(); } catch (e) {}
                 audioCtx = new AudioContext();
                 gainNodes = {};
+                // masterGain and the worklet node belong to the context we just
+                // closed. Kept, they would silently route the retry into nothing.
+                masterGain = null; tempoNode = null; tempoReady = false;
+                ensureMasterBus();
                 firstError = null;
                 for (const stem of STEM_NAMES) {
                     try {
@@ -1132,6 +1195,7 @@
                 return;
             }
 
+            renderTempo();
             songDuration = Math.max(...Object.values(stems).map(b => b.duration));
             document.getElementById('loadingStatus').textContent = '';
             document.getElementById('totalTime').textContent = formatTime(songDuration);
@@ -1139,7 +1203,7 @@
             for (const stem of STEM_NAMES) {
                 if (!gainNodes[stem]) {
                     gainNodes[stem] = audioCtx.createGain();
-                    gainNodes[stem].connect(audioCtx.destination);
+                    gainNodes[stem].connect(masterGain);
                 }
             }
 
@@ -1460,7 +1524,7 @@
 
             // When paused, pauseOffset *is* the position — keeps the highlight
             // correct after seeking without playing.
-            const currentTime = isPlaying ? (audioCtx.currentTime - startTime) : pauseOffset;
+            const currentTime = songPosition();
             const activeIdx = computeActiveIdx(currentTime);
 
             // Line classes and scrolling only change when the line changes; the word
@@ -1577,6 +1641,83 @@
             if (document.visibilityState === 'visible' && isPlaying) keepScreenAwake();
         });
 
+        /* Stems -> masterGain -> tempo shifter -> speakers.
+         *
+         * The shifter only ever raises pitch; the slowing is done by the source
+         * nodes themselves. See tempo-worklet.js for why it cannot be the other
+         * way round. */
+        function ensureMasterBus() {
+            if (masterGain) return;
+            masterGain = audioCtx.createGain();
+            masterGain.connect(audioCtx.destination);
+            if (!audioCtx.audioWorklet) return;   // old browser: speed stays 1x
+            const ctx = audioCtx;
+            ctx.audioWorklet.addModule('tempo-worklet.js').then(() => {
+                // A slow phone can finish loading after the context was
+                // rebuilt by the 44.1kHz fallback. Wiring a node into a dead
+                // context is silence, so check we are still the live one.
+                if (audioCtx !== ctx || !masterGain) return;
+                tempoNode = new AudioWorkletNode(ctx, 'tempo-processor', {
+                    numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+                    processorOptions: { pitch: 1 / tempo }
+                });
+                masterGain.disconnect();
+                masterGain.connect(tempoNode);
+                tempoNode.connect(ctx.destination);
+                tempoReady = true;
+                if (pendingTempo !== null) {
+                    const t = pendingTempo; pendingTempo = null;
+                    setTempo(t);
+                }
+                renderTempo();
+            }).catch((e) => {
+                // Without the worklet the only way to slow a song is to drop
+                // its key, which is the thing singers cannot practise against.
+                // Better to offer nothing than to quietly detune the room.
+                console.warn('tempo worklet unavailable, speed control hidden', e);
+                tempoReady = false;
+                renderTempo();
+            });
+        }
+
+        /* Position within the song, in the song's own seconds. At 0.8x the wall
+         * clock advances 1.25s for every second of music. */
+        function songPosition() {
+            if (!isPlaying) return pauseOffset;
+            return (audioCtx.currentTime - startTime) * tempo;
+        }
+
+        function setTempo(t) {
+            // A restored setup can ask for a speed before the worklet exists.
+            // Dropping it would silently ignore what the singer saved.
+            if (!tempoReady && t !== 1) { pendingTempo = t; return; }
+            if (t === tempo) return;
+            const pos = songPosition();
+            tempo = t;
+            if (tempoNode) tempoNode.port.postMessage({ pitch: 1 / t });
+            if (isPlaying) {
+                for (const stem of STEM_NAMES) {
+                    const src = sourceNodes[stem];
+                    if (src) src.playbackRate.setValueAtTime(t, audioCtx.currentTime);
+                }
+                startTime = audioCtx.currentTime - pos / t;
+            } else {
+                pauseOffset = pos;
+            }
+            renderTempo();
+        }
+
+        function renderTempo() {
+            const row = document.getElementById('tempoRow');
+            if (!row) return;
+            // Hidden rather than disabled while the worklet loads: a row of dead
+            // buttons on a slow phone reads as a broken feature.
+            row.style.display = tempoReady ? 'flex' : 'none';
+            row.querySelectorAll('.tempo-btn').forEach((b) => {
+                b.classList.toggle('active', parseFloat(b.dataset.tempo) === tempo);
+            });
+        }
+
         function startPlayback() {
             if (!audioCtx || Object.keys(stems).length === 0) return;
             if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -1586,12 +1727,14 @@
                 if (!stems[stem]) continue;
                 const src = audioCtx.createBufferSource();
                 src.buffer = stems[stem];
+                src.playbackRate.value = tempo;
                 src.connect(gainNodes[stem]);
                 src.start(0, pauseOffset);
                 sourceNodes[stem] = src;
             }
 
-            startTime = audioCtx.currentTime - pauseOffset;
+            // pauseOffset is song time; the wall clock runs 1/tempo faster.
+            startTime = audioCtx.currentTime - pauseOffset / tempo;
             isPlaying = true;
             document.getElementById('playBtn').innerHTML = '&#10074;&#10074;';
             seekInterval = setInterval(updateSeek, 200);
@@ -1602,7 +1745,7 @@
                 const expectedEndSong = currentSongIndex;
                 sourceNodes[firstStem].addEventListener('ended', () => {
                     if (isPlaying && currentSongIndex === expectedEndSong) {
-                        const cur = audioCtx.currentTime - startTime;
+                        const cur = songPosition();
                         // Only auto-next if we're actually near the end
                         if (cur >= songDuration - 1) {
                             stopPlayback();
@@ -1617,7 +1760,7 @@
 
         function pausePlayback() {
             if (!isPlaying) return;
-            pauseOffset = audioCtx.currentTime - startTime;
+            pauseOffset = songPosition();
             for (const stem of STEM_NAMES) {
                 try { sourceNodes[stem]?.stop(); sourceNodes[stem]?.disconnect(); } catch (e) {}
             }
@@ -1667,7 +1810,7 @@
 
         function updateSeek() {
             if (!isPlaying || !songDuration) return;
-            const cur = audioCtx.currentTime - startTime;
+            const cur = songPosition();
             document.getElementById('seekBar').value = (cur / songDuration) * 1000;
             document.getElementById('currentTime').textContent = formatTime(cur);
         }
@@ -1860,6 +2003,7 @@
                 position: seekBar ? seekBar.value / 1000 : 0,
                 volumes: {},
                 preset: currentPreset,
+                tempo: tempo,
                 tag: tag
             };
             for (const stem of STEM_NAMES) {
@@ -1888,6 +2032,7 @@
                     if (sl) sl.value = vol;
                 }
             }
+            if (preset.tempo) setTempo(preset.tempo);
             if (preset.position > 0) {
                 pauseOffset = preset.position * songDuration;
                 const seekBar = document.getElementById('seekBar');
