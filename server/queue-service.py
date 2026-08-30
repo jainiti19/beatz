@@ -78,14 +78,20 @@ class Handler(BaseHTTPRequestHandler):
         meant every song ever asked for counted against MAX_PENDING - the queue
         would have wedged shut at 50 requests forever, refusing everyone with
         "queue is full". Ids the watcher has finished live in done.txt."""
-        done = set()
-        done_path = os.path.join(os.path.dirname(self.queue_path), 'done.txt')
-        try:
-            with open(done_path, encoding='utf-8') as f:
-                done = {l.strip() for l in f if l.strip()}
-        except OSError:
-            pass
+        done = self._done_ids()
         return sum(1 for e in self._queue_entries() if e.get('id') not in done)
+
+    def _done_ids(self):
+        """Ids the watcher has finished. Separate from results.jsonl: done.txt
+        goes back to the first request, results.jsonl only to the day it was
+        added, so anything processed before then is recorded HERE and nowhere
+        else."""
+        path = os.path.join(os.path.dirname(self.queue_path), 'done.txt')
+        try:
+            with open(path, encoding='utf-8') as f:
+                return {l.strip() for l in f if l.strip()}
+        except OSError:
+            return set()
 
     def _queue_entries(self):
         if not os.path.exists(self.queue_path):
@@ -220,14 +226,23 @@ class Handler(BaseHTTPRequestHandler):
             # localStorage, so nothing here has to remember who anyone is.
             ids = [i for i in (parse_qs(u.query).get('ids', [''])[0]).split(',') if i][:60]
             results = self._results()
-            queued = {e['id'] for e in self._queue_entries() if e.get('id')}
+            done = self._done_ids()
+            entries = {e['id']: e for e in self._queue_entries() if e.get('id')}
             out = {}
             for i in ids:
                 if i in results:
                     r = results[i]
                     out[i] = {'state': r.get('state', 'done'),
                               'title': r.get('title'), 'note': r.get('note')}
-                elif i in queued:
+                elif i in done:
+                    # Finished, but before results.jsonl existed. Without this
+                    # branch requests.jsonl -- which is append-only and never
+                    # trimmed -- reported every song ever asked for as still
+                    # queued, so the player's bell said "waiting" forever even
+                    # for songs that had been live for days.
+                    e = entries.get(i, {})
+                    out[i] = {'state': 'done', 'title': e.get('song'), 'note': None}
+                elif i in entries:
                     out[i] = {'state': 'queued'}
                 else:
                     out[i] = {'state': 'unknown'}

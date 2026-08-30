@@ -1952,8 +1952,20 @@
         // What this browser asked for. Kept here rather than server-side so the
         // service stays anonymous - it never needs to know who anyone is.
         function myReqs() {
-            try { return JSON.parse(localStorage.getItem('beatznbox_reqs') || '[]'); }
+            let l;
+            try { l = JSON.parse(localStorage.getItem('beatznbox_reqs') || '[]'); }
             catch (e) { return []; }
+            // A finished request is news for a day, then it is clutter. Only
+            // settled ones expire -- anything still queued stays visible however
+            // long the laptop takes, because that is the case you need to see.
+            const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+            const keep = l.filter(r => !r.at || !r.state || r.state === 'queued'
+                                       || r.seen !== true || r.at > cutoff);
+            if (keep.length !== l.length) {
+                try { localStorage.setItem('beatznbox_reqs', JSON.stringify(keep)); }
+                catch (e) {}
+            }
+            return keep;
         }
         function saveReqs(list) {
             try { localStorage.setItem('beatznbox_reqs', JSON.stringify(list.slice(-30))); }
@@ -1981,7 +1993,7 @@
             if (badge) { badge.hidden = unseen === 0; badge.textContent = unseen; }
             const el = document.getElementById('bellList');
             if (!el) return;
-            if (!list.length) { el.innerHTML = '<div class="bell-empty">Nothing requested yet.</div>'; return; }
+            if (!list.length) { el.innerHTML = '<div class="bell-empty">Nothing waiting. Songs you ask for show up here.</div>'; return; }
             el.innerHTML = list.map(r => {
                 const st = r.state || 'queued';
                 const label = { done: 'Ready — in the list now', queued: 'Waiting for the watcher',
@@ -2047,13 +2059,13 @@
                     // already have and leave the box alone so they can edit it.
                     if (data.duplicate) {
                         note.textContent = data.error || 'Already in the list.';
-                        addReq({ song, title: data.existing || song,
+                        addReq({ at: Date.now(), song, title: data.existing || song,
                                  state: 'duplicate', seen: false });
                         return;
                     }
                     throw new Error(data.error || `HTTP ${resp.status}`);
                 }
-                addReq({ id: data.id, song, title: song, state: 'queued', seen: true });
+                addReq({ id: data.id, song, title: song, state: 'queued', seen: true, at: Date.now() });
                 note.textContent = `Queued. You'll see it under Requests when it's ready.`;
                 document.getElementById('reqSong').value = '';
                 document.getElementById('reqDetail').value = '';
