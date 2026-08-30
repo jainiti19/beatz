@@ -164,6 +164,10 @@ def resolved_title(name):
     return m.get("trackName"), m.get("artistName"), m.get("albumName")
 
 
+def _norm(s):
+    return " ".join((s or "").lower().split())
+
+
 def record_meta(name, title, artist, album=None):
     """Fold the resolved title into data/songs-meta.json.
 
@@ -185,7 +189,9 @@ def record_meta(name, title, artist, album=None):
         entry["singers"] = [a.strip() for a in artist.split(",") if a.strip()]
     # LRCLIB's albumName is the soundtrack for a film song, which is the tag
     # the player shows. Only ever fills a blank -- a hand-set film outranks it.
-    if album and not entry.get("film"):
+    # For a single the album is just the track name again, and showing a song
+    # as its own film reads like a bug, so that case stays empty.
+    if album and not entry.get("film") and _norm(album) != _norm(title):
         entry["film"] = album
     entry.setdefault("film", "")
     entry.setdefault("year", None)
