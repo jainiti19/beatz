@@ -624,12 +624,6 @@
     ],
     "year": 1969
   },
-  "Sacha_Naam_Tera": {
-    "title": "Sacha Naam Tera",
-    "film": "",
-    "singers": [],
-    "year": null
-  },
   "Sagar_Kinare": {
     "title": "Sagar Kinare",
     "film": "Sagar",
@@ -660,9 +654,7 @@
     "title": "Sacha Naam Tera",
     "film": "",
     "singers": [],
-    "year": null,
-    "hide": true,
-    "alias": "Sacha_Naam_Tera"
+    "year": null
   },
   "Sanu_Ek_Pal_Chain": {
     "title": "Sanu Ek Pal Chain",

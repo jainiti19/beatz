@@ -83,10 +83,14 @@ while IFS='|' read -r NAME YT LYR ART <&3; do
     # correctly-spelled name of the song anywhere in this pipeline — the
     # request was typed from memory — and downloading by id guarantees the
     # title we recorded belongs to the audio we actually got.
+    # Two --print flags, one value per line. A "\t" inside a double-quoted
+    # bash string is a literal backslash-t, not a tab, so asking for one field
+    # with a tab in it glued the id onto the title and cut had nothing to split
+    # on -- every lyrics search then went out with a video id on the front.
     "$VENV/yt-dlp" --js-runtimes node --no-playlist --skip-download \
-      --print "%(id)s\t%(title)s" "ytsearch1:$YT" > "$WORK/yt.tsv" 2>/dev/null || true
-    YTID=$(head -1 "$WORK/yt.tsv" | cut -f1)
-    YTTITLE=$(head -1 "$WORK/yt.tsv" | cut -f2-)
+      --print "%(id)s" --print "%(title)s" "ytsearch1:$YT" > "$WORK/yt.txt" 2>/dev/null || true
+    YTID=$(sed -n 1p "$WORK/yt.txt")
+    YTTITLE=$(sed -n 2p "$WORK/yt.txt")
     if [ -z "$YTID" ]; then
       echo "  FAIL: nothing found on YouTube for '$YT'"; failed=$((failed+1)); continue
     fi

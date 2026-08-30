@@ -55,6 +55,30 @@
             outline: none;
         }
         .search-box input:focus { border-color: #00897B; }
+        .search-box { position: relative; }
+        /* Sized for a thumb, not a cursor: this is the control someone reaches
+           for mid-song with a phone in one hand. */
+        .search-clear {
+            position: absolute;
+            right: 14px; top: 50%; transform: translateY(-50%);
+            width: 30px; height: 30px;
+            border: none; background: transparent;
+            color: #888; font-size: 20px; line-height: 1;
+            cursor: pointer; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .search-clear:hover { background: #eee; color: #333; }
+        /* The way back to everything. Only shown while something is actually
+           filtering -- a permanent "clear" reads as clutter, and there was no
+           way at all to undo a search plus a playlist in one action. */
+        .chip.chip-clear {
+            border-color: #B4551C; color: #B4551C; font-weight: 600;
+        }
+        .chip.chip-clear:hover { background: #F7EBE1; }
+        .chip-del {
+            margin-left: 6px; opacity: 0.75; font-weight: 700;
+        }
+        .chip-del:hover { opacity: 1; }
         /* Requests bell. The laptop processes a song minutes after it is asked
            for, so the person who asked needs somewhere to find out what became
            of it without shouting across the room. */
@@ -640,17 +664,32 @@
                 overflow-x: hidden;
             }
 
+            /* Two rows, not a stack: identity left, buttons right, and the
+               song on its own line underneath. As a left-aligned column every
+               item took a line of its own -- five lines of bar above a song
+               list that only has a third of the screen to begin with. */
             .topbar {
                 position: sticky;
                 top: 0;
                 z-index: 10;
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 2px;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto auto;
+                align-items: center;
+                column-gap: 8px;
+                row-gap: 2px;
                 padding: 8px 14px;
             }
-            .topbar h1 { font-size: 18px; }
+            .topbar .brand-logo { grid-column: 1; grid-row: 1; margin-right: 0; }
+            .topbar h1 {
+                grid-column: 2; grid-row: 1; font-size: 18px;
+                min-width: 0; overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap;
+            }
+            .topbar .bell-btn { grid-column: 3; grid-row: 1; margin-right: 0; }
+            .topbar .screen-btn { grid-column: 4; grid-row: 1; }
             .topbar .now-playing {
+                grid-column: 1 / -1;
+                grid-row: 2;
                 font-size: 12px;
                 /* One long title must not push the bar to three lines. */
                 max-width: 100%;
@@ -749,6 +788,8 @@
         <div class="panel-left">
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="Search song, film or singer..." oninput="filterSongs()">
+                <button class="search-clear" id="searchClear" onclick="clearSearch()"
+                        title="Clear search" aria-label="Clear search" hidden>&times;</button>
             </div>
             <div class="bs-head">
                 <div class="bs-label">Now singing</div>
@@ -930,11 +971,52 @@
             if (document.visibilityState === 'visible') refreshSongList({ quiet: false });
         });
 
+        function isFiltering() {
+            const box = document.getElementById('searchInput');
+            return !!selectedPlaylist || !!(box && box.value.trim());
+        }
+
+        function clearSearch() {
+            const box = document.getElementById('searchInput');
+            if (box) box.value = '';
+            filterSongs();
+            if (box) box.focus();
+        }
+
+        /* Both filters at once. Clearing a search and then hunting for the All
+           chip is two operations for one intention. */
+        function clearFilters() {
+            const box = document.getElementById('searchInput');
+            if (box) box.value = '';
+            selectedPlaylist = null;
+            renderPlaylistChips();
+            filterSongs();
+        }
+
+        function deletePlaylist(name) {
+            if (!confirm(`Delete the playlist "${name}"? The songs stay in the library.`)) return;
+            delete playlists[name];
+            if (selectedPlaylist === name) selectedPlaylist = null;
+            savePlaylists();
+            renderPlaylistChips();
+            filterSongs();
+        }
+
         function renderPlaylistChips() {
             const el = document.getElementById('playlistChips');
-            let html = `<span class="chip ${selectedPlaylist === null ? 'active' : ''}" onclick="selectPlaylist(null)">All</span>`;
+            const esc = (t) => String(t).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            let html = '';
+            if (isFiltering()) {
+                html += `<span class="chip chip-clear" onclick="clearFilters()">&times; Clear</span>`;
+            }
+            html += `<span class="chip ${selectedPlaylist === null ? 'active' : ''}" onclick="selectPlaylist(null)">All</span>`;
             for (const name of Object.keys(playlists)) {
-                html += `<span class="chip ${selectedPlaylist === name ? 'active' : ''}" onclick="selectPlaylist('${name}')">${name}</span>`;
+                const on = selectedPlaylist === name;
+                // The delete cross only appears on the playlist you are already
+                // looking at, so a mis-tap on a crowded row cannot bin one.
+                html += `<span class="chip ${on ? 'active' : ''}" onclick="selectPlaylist('${esc(name)}')">${name}`
+                     +  (on ? `<span class="chip-del" onclick="event.stopPropagation();deletePlaylist('${esc(name)}')" title="Delete playlist">&times;</span>` : '')
+                     +  `</span>`;
             }
             html += `<span class="chip" onclick="createPlaylist()">+</span>`;
             el.innerHTML = html;
@@ -961,6 +1043,8 @@
 
         function filterSongs() {
             const query = document.getElementById('searchInput').value.toLowerCase();
+            const x = document.getElementById('searchClear');
+            if (x) x.hidden = !query;
             let list = songs;
 
             if (selectedPlaylist) {
@@ -978,6 +1062,11 @@
             }
 
             filteredSongs = list;
+            // The Clear chip appears and disappears with the filter it undoes.
+            const chips = document.getElementById('playlistChips');
+            if (chips && (chips.querySelector('.chip-clear') !== null) !== isFiltering()) {
+                renderPlaylistChips();
+            }
             renderSongList();
         }
 

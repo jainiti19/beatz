@@ -160,7 +160,11 @@ def resolved_title(name):
         with open(os.path.join(STEMS, name, "match.json"), encoding="utf-8") as f:
             m = json.load(f)
     except Exception:
-        return None, None
+        # Three, not two: every caller unpacks three, and a song with no
+        # match.json is the COMMON case -- anything separated before match.json
+        # existed, and anything published straight from the library without
+        # reprocessing. Returning a short tuple here wedged the whole queue.
+        return None, None, None
     return m.get("trackName"), m.get("artistName"), m.get("albumName")
 
 
