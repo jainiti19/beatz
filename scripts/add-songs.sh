@@ -10,13 +10,23 @@
 # models, roughly 2x realtime, so budget ~10 min for a 5 minute song. Pass
 # --fast to use plain htdemucs instead (~2.5 min, slightly muddier stems).
 #
-# Usage: ./scripts/add-songs.sh manifest.txt [--fast]
+# Re-running over songs that already have stems is safe and useful: it looks up
+# the video's real title and retries the lyrics for anything still without
+# words. Words already on disk are LEFT ALONE -- several songs in this library
+# were fixed by pasting lyrics in the player, and a re-run must never overwrite
+# those. Pass --refresh-lyrics to deliberately re-fetch them.
+#
+# Usage: ./scripts/add-songs.sh manifest.txt [--fast] [--refresh-lyrics]
 
 set -uo pipefail
 
-MANIFEST="${1:?usage: add-songs.sh manifest.txt [--fast]}"
+MANIFEST="${1:?usage: add-songs.sh manifest.txt [--fast] [--refresh-lyrics]}"
 MODEL=htdemucs_ft
-[ "${2:-}" = "--fast" ] && MODEL=htdemucs
+REFRESH=0
+for a in "$@"; do
+  [ "$a" = "--fast" ] && MODEL=htdemucs
+  [ "$a" = "--refresh-lyrics" ] && REFRESH=1
+done
 
 VENV=~/demucs-env/bin
 SRC=~/Music/karaoke/htdemucs
@@ -54,6 +64,9 @@ while IFS='|' read -r NAME YT LYR ART <&3; do
   fi
   n=$((n+1))
   DIR="$SRC/$NAME"
+  # Per-song, and cleared here: left set, a previous song's video title would
+  # drive this one's lyrics search.
+  YTTITLE=""; YTID=""
 
   echo ""
   echo "=========================================================="
@@ -64,9 +77,22 @@ while IFS='|' read -r NAME YT LYR ART <&3; do
     echo "  stems already exist — skipping separation"
   else
     echo "  [1/4] downloading: $YT"
-    rm -f "$WORK/dl.mp3"
+    rm -f "$WORK/dl.mp3" "$WORK/yt.tsv"
+    # Resolve the search to a specific video FIRST, then fetch that video by id.
+    # Two calls rather than one because the video's own title is the only
+    # correctly-spelled name of the song anywhere in this pipeline — the
+    # request was typed from memory — and downloading by id guarantees the
+    # title we recorded belongs to the audio we actually got.
+    "$VENV/yt-dlp" --js-runtimes node --no-playlist --skip-download \
+      --print "%(id)s\t%(title)s" "ytsearch1:$YT" > "$WORK/yt.tsv" 2>/dev/null || true
+    YTID=$(head -1 "$WORK/yt.tsv" | cut -f1)
+    YTTITLE=$(head -1 "$WORK/yt.tsv" | cut -f2-)
+    if [ -z "$YTID" ]; then
+      echo "  FAIL: nothing found on YouTube for '$YT'"; failed=$((failed+1)); continue
+    fi
+    echo "        found: $YTTITLE"
     "$VENV/yt-dlp" --js-runtimes node -x --audio-format mp3 --audio-quality 0 \
-      --no-playlist -o "$WORK/dl.mp3" "ytsearch1:$YT" >/dev/null 2>&1
+      --no-playlist -o "$WORK/dl.mp3" "https://www.youtube.com/watch?v=$YTID" >/dev/null 2>&1
     if [ ! -f "$WORK/dl.mp3" ]; then
       echo "  FAIL: download produced nothing"; failed=$((failed+1)); continue
     fi
@@ -83,7 +109,29 @@ while IFS='|' read -r NAME YT LYR ART <&3; do
     mkdir -p "$DIR"
     cp "$STEM"/*.wav "$DIR/"
     "$VENV/python" "$SCRIPT_DIR/normalize-stems.py" "$DIR" >/dev/null 2>&1
+    # Kept beside the stems so a later re-run of the lyrics step, or a human
+    # wondering what this actually is, does not have to search YouTube again.
+    "$VENV/python" -c "import json,sys;json.dump({'ytId':sys.argv[1],'ytTitle':sys.argv[2],'typed':sys.argv[3]},open(sys.argv[4],'w'),ensure_ascii=False,indent=1)" \
+      "$YTID" "$YTTITLE" "$NAME" "$DIR/source.json" 2>/dev/null || true
     echo "        stems written + normalised"
+  fi
+
+  # Available whether or not we just downloaded: a re-run reads it back.
+  if [ -z "${YTTITLE:-}" ] && [ -f "$DIR/source.json" ]; then
+    YTTITLE=$("$VENV/python" -c "import json,sys;print(json.load(open(sys.argv[1])).get('ytTitle') or '')" "$DIR/source.json" 2>/dev/null)
+  fi
+  # Songs separated before this existed have no source.json, and their stems
+  # short-circuit the download that would have written one. Look the title up
+  # on its own -- it is metadata only, no audio -- so re-running this script
+  # over the existing library can fix its lyrics and titles too.
+  if [ -z "${YTTITLE:-}" ]; then
+    YTTITLE=$("$VENV/yt-dlp" --js-runtimes node --no-playlist --skip-download \
+      --print "%(title)s" "ytsearch1:$YT" 2>/dev/null | head -1)
+    if [ -n "$YTTITLE" ]; then
+      echo "        source: $YTTITLE"
+      "$VENV/python" -c "import json,sys;json.dump({'ytTitle':sys.argv[1],'typed':sys.argv[2]},open(sys.argv[3],'w'),ensure_ascii=False,indent=1)" \
+        "$YTTITLE" "$NAME" "$DIR/source.json" 2>/dev/null || true
+    fi
   fi
 
   # The lyrics search is the TITLE alone; the artist goes over separately.
@@ -94,9 +142,20 @@ while IFS='|' read -r NAME YT LYR ART <&3; do
   # out same-name-different-song matches.
   DUR=$("$VENV/python" -c "import subprocess,sys;print(subprocess.run(['ffprobe','-v','quiet','-show_entries','format=duration','-of','csv=p=0',sys.argv[1]],capture_output=True,text=True).stdout.strip() or 0)" "$DIR/vocals.wav" 2>/dev/null)
 
+  # Words already here stay unless asked otherwise. A hand-pasted set is the
+  # most valuable thing in the directory and there is no way to get it back.
+  EXISTING=0
+  if [ -f "$DIR/lyrics.txt" ]; then
+    EXISTING=$(grep -cvE '^\s*$' "$DIR/lyrics.txt" 2>/dev/null || echo 0)
+  fi
+  if [ "$REFRESH" -eq 0 ] && [ "$EXISTING" -ge 8 ]; then
+    echo "  [3/4] lyrics: keeping the $EXISTING lines already here"
+    ok=$((ok+1)); continue
+  fi
+
   echo "  [3/4] lyrics: $LYR${ART:+  (artist: $ART)}"
   if ! "$VENV/python" "$SCRIPT_DIR/fetch-lyrics-lrclib.py" "$LYR" "$DIR/lyrics.txt" \
-        ${ART:+--artist "$ART"} ${DUR:+--duration "$DUR"}; then
+        ${YTTITLE:+--yt-title "$YTTITLE"} ${ART:+--artist "$ART"} ${DUR:+--duration "$DUR"}; then
     echo "        no usable lyrics — stems are still fine, words need doing by hand"
     ok=$((ok+1)); continue
   fi

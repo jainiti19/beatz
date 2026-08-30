@@ -18,16 +18,30 @@ what comes back.
 
 The second cause is spelling — requests are typed from memory, and LRCLIB wants
 the title near-exact ("tum itna kyun muskura rahe" 0 hits; the real "Tum Itna
-Jo Muskura Rahe Ho" 20). Nothing here fixes that, and deliberately so: searching
-shorter and shorter prefixes of the title DOES find hits, but they are other
-songs ("Hum pyaar karne wale" -> "I'm coming in to get my shits"). Wrong lyrics
-that look right are worse than none — see the Zingaat case in the project
-notes — so a candidate must earn its place, and no-result is an honest answer.
+Jo Muskura Rahe Ho" 20). Shortening the typed title does not fix it: prefixes
+DO find hits, but they are other songs ("Hum pyaar karne wale" -> "I'm coming
+in to get my shits").
+
+What fixes it is asking something that already knows how to spell. YouTube's
+search is fuzzy where LRCLIB's is literal, and we run it anyway to get the
+audio — so the video we downloaded carries a correctly spelled title, and we
+were throwing it away. "Tu kisi raii si" downloads a video called "Tu Kisi Rail
+Si - Masaan | ...", and "Damadam mast kalandar" one called "Dama Dam Mast
+Qalandar" — neither typed string finds anything on LRCLIB; both real titles do.
+So --yt-title takes that raw video title, strips the decoration YouTube uploads
+carry, and tries the results as queries in confidence order, the typed string
+last.
+
+Candidates are tried, not trusted: each one still has to clear score(), which
+gates on title overlap, duration and cover markers. Wrong lyrics that look
+right are worse than none — see the Zingaat case in the project notes — so a
+candidate must earn its place, and no-result is still an honest answer.
 
 Usage:
     fetch-lyrics-lrclib.py "song name" out.txt              # search and write
     fetch-lyrics-lrclib.py "song name" out.txt --artist X   # X ranks, never filters
     fetch-lyrics-lrclib.py "song name" out.txt --duration 275
+    fetch-lyrics-lrclib.py "typed name" out.txt --yt-title "<raw youtube title>"
     fetch-lyrics-lrclib.py --show "song name"               # list candidates only
 """
 import json, os, re, sys, urllib.parse, urllib.request
@@ -93,6 +107,66 @@ def script_of(text):
 
 COVER_MARKERS = ("version", "cover", "remix", " mix", "lofi", "slowed",
                  "reverb", "mashup", "instrumental")
+
+# Decoration that YouTube uploads carry and LRCLIB has never heard of. Stripped
+# only from the ENDS of a candidate, never from the middle: "Guncha Koi Song"
+# should lose its "Song", but a title that genuinely contains one of these words
+# must keep it.
+TITLE_JUNK = {
+    "official", "video", "audio", "song", "full", "hd", "4k", "lyrics",
+    "lyrical", "lyricvideo", "remastered", "quality", "original", "movie",
+    "presents", "exclusive", "new", "latest", "with", "by", "ft", "feat",
+    "popular", "most", "qawwali", "soundtrack", "ost", "track", "hq",
+}
+_BRACKETED = re.compile(r"[\(\[\{][^\)\]\}]*[\)\]\}]")
+_QUOTED = re.compile(r'"([^"]{4,})"|\u201c([^\u201d]{4,})\u201d')
+# Not a plain hyphen: "Film-song" glues the two together with no spaces and is
+# handled separately, while " - " really is a separator.
+_SPLITS = re.compile(r"\s*[|•·]\s*|\s+[-–—]\s+")
+
+
+def _tidy(s):
+    """One candidate, stripped of brackets, junk and stray punctuation."""
+    s = _BRACKETED.sub(" ", s or "")
+    s = re.sub(r"\s+", " ", s).strip(" \t\"'`.,:;!-–—_")
+    words = s.split()
+    while words and words[0].lower().strip(".,:;") in TITLE_JUNK:
+        words.pop(0)
+    while words and words[-1].lower().strip(".,:;") in TITLE_JUNK:
+        words.pop()
+    return " ".join(words).strip(" .,:;-–—")
+
+
+def title_candidates(typed, yt_title=None):
+    """Queries to try, most trustworthy first, de-duplicated.
+
+    The typed string goes last rather than first: it is the one input we know
+    is unreliable, since it was typed from memory by whoever asked."""
+    out = []
+
+    def add(c):
+        c = _tidy(c)
+        if c and len(c) > 2 and c.lower() not in {x.lower() for x in out}:
+            out.append(c)
+
+    if yt_title:
+        # A quoted span is the uploader naming the song explicitly, which beats
+        # anything we could infer: '"Dama Dam Mast Qalandar" most popular
+        # Qawwali, By: Runa Laila'.
+        q = _QUOTED.search(yt_title)
+        if q:
+            add(q.group(1) or q.group(2))
+        head = _SPLITS.split(yt_title)[0]
+        # "Delhi Belly-nakkadwale disco udhaarwaley khisko" — film glued to the
+        # front. The song is the far side, so try that before the whole thing.
+        if "-" in head:
+            tail = head.rsplit("-", 1)[-1]
+            if len(tail.split()) >= 2:
+                add(tail)
+        add(head)
+        add(yt_title)
+    add(typed)
+    return out
 
 
 def is_cover(h):
@@ -201,25 +275,45 @@ def main():
         return
 
     query, out = args[0], args[1]
-    artist = duration = None
+    artist = duration = yt_title = None
     rest = args[2:]
     for i, a in enumerate(rest):
         if a == "--artist" and i + 1 < len(rest):
             artist = rest[i + 1]
+        elif a == "--yt-title" and i + 1 < len(rest):
+            yt_title = rest[i + 1]
         elif a == "--duration" and i + 1 < len(rest):
             try:
                 duration = float(rest[i + 1])
             except ValueError:
                 pass
 
-    hits = gather(query, artist)
-    if not hits:
-        print(f"  no LRCLIB match for {query!r}")
-        sys.exit(2)
-    best = choose(hits, query, artist, duration)
+    # Try the trustworthy spellings first and stop at the first that clears
+    # score(). Each candidate is judged against ITSELF, so a query that finds
+    # a well-formed song which is not this one still fails the overlap gate
+    # and we move on rather than writing someone else's words.
+    candidates = title_candidates(query, yt_title)
+    best = used = None
+    tried = []
+    for cand in candidates:
+        hits = gather(cand, artist)
+        if not hits:
+            tried.append(f"{cand!r} 0 hits")
+            continue
+        b = choose(hits, cand, artist, duration)
+        if b is None:
+            tried.append(f"{cand!r} {len(hits)} hits, none this song")
+            continue
+        best, used = b, cand
+        break
+
     if best is None:
-        print(f"  {len(hits)} results for {query!r}, none of them this song")
-        sys.exit(3)
+        for t in tried:
+            print(f"  tried {t}")
+        print(f"  no usable LRCLIB match for {query!r}")
+        sys.exit(2 if not tried else 3)
+    if used != query:
+        print(f"  matched on {used!r} (asked as {query!r})")
 
     lyrics = best["plainLyrics"].strip()
     with open(out, "w", encoding="utf-8") as f:
@@ -236,7 +330,9 @@ def main():
             json.dump({"trackName":  best.get("trackName"),
                        "artistName": best.get("artistName"),
                        "albumName":  best.get("albumName"),
-                       "duration":   best.get("duration")},
+                       "duration":   best.get("duration"),
+                       "query":      used,
+                       "ytTitle":    yt_title},
                       mf, ensure_ascii=False, indent=1)
     except Exception:
         pass          # a missing match.json must never fail a good lyrics fetch

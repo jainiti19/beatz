@@ -161,10 +161,10 @@ def resolved_title(name):
             m = json.load(f)
     except Exception:
         return None, None
-    return m.get("trackName"), m.get("artistName")
+    return m.get("trackName"), m.get("artistName"), m.get("albumName")
 
 
-def record_meta(name, title, artist):
+def record_meta(name, title, artist, album=None):
     """Fold the resolved title into data/songs-meta.json.
 
     Never overwrites an entry that already has a title - a hand-corrected name
@@ -183,6 +183,10 @@ def record_meta(name, title, artist):
     entry["title"] = title
     if artist and not entry.get("singers"):
         entry["singers"] = [a.strip() for a in artist.split(",") if a.strip()]
+    # LRCLIB's albumName is the soundtrack for a film song, which is the tag
+    # the player shows. Only ever fills a blank -- a hand-set film outranks it.
+    if album and not entry.get("film"):
+        entry["film"] = album
     entry.setdefault("film", "")
     entry.setdefault("year", None)
     meta[name] = entry
@@ -232,12 +236,15 @@ def process(entry, fast):
     if NO_PUBLISH:
         log("  --no-publish: stems are ready, not publishing")
         return True
+    # Before prepare-web, not after: prepare-web folds songs-meta.json into the
+    # player's manifest, so recording the real title afterwards published the
+    # typed one and only corrected it when the NEXT song happened to be added.
+    real, artist, album = resolved_title(name)
+    record_meta(name, real, artist, album)
     if run(["./scripts/prepare-web.sh"], capture_output=True, text=True).returncode != 0:
         log("  prepare-web failed"); return False
     if run(["./scripts/deploy-web.sh"], capture_output=True, text=True).returncode != 0:
         log("  deploy failed"); return False
-    real, artist = resolved_title(name)
-    record_meta(name, real, artist)
     log(f"  published {name}")
     post_result(entry["id"], "done", title=real or title)
     return True

@@ -291,18 +291,6 @@
     ],
     "year": 1998
   },
-  "Gallan_Goodiyaan": {
-    "title": "Gallan Goodiyaan",
-    "film": "Dil Dhadakne Do",
-    "singers": [
-      "Yashita Sharma",
-      "Manish Kumar Tipu",
-      "Farhan Akhtar",
-      "Shankar Mahadevan",
-      "Sunidhi Chauhan"
-    ],
-    "year": 2015
-  },
   "Gerua": {
     "title": "Gerua",
     "film": "Dilwale",
@@ -560,15 +548,6 @@
       "Sonu Nigam"
     ],
     "year": 1999
-  },
-  "Munni_Badnaam": {
-    "title": "Munni Badnaam Hui",
-    "film": "Dabangg",
-    "singers": [
-      "Mamta Sharma",
-      "Aishwarya Nigam"
-    ],
-    "year": 2010
   },
   "Nagada_Sang_Dhol": {
     "title": "Nagada Sang Dhol",
@@ -903,13 +882,12 @@
     ],
     "year": 1971
   },
-  "Piya_bole_pihu_bole": {
-    "title": "Piya Bole Piyu Bole",
-    "film": "Parineeta",
+  "Damadam_mast_kalandar": {
+    "title": "Dama Dam Mast Qalandar",
     "singers": [
-      "Sonu Nigam",
-      "Shreya Ghoshal"
+      "Mame Khan"
     ],
-    "year": 2005
+    "film": "Dama Dam Mast Qalandar",
+    "year": null
   }
 }
