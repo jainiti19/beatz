@@ -1,0 +1,915 @@
+{
+  "_readme": [
+    "Per-song metadata, keyed by the stem directory name under ~/Music/karaoke/htdemucs.",
+    "Created 29 Aug 2026. Before this file the displayed title WAS the directory name with",
+    "underscores swapped (prepare-web.sh), so a typo in a request became the title forever.",
+    "",
+    "prepare-web.sh merges this into songs.json. A directory with no entry here still",
+    "publishes - it just falls back to the old underscore-swapped name.",
+    "",
+    "Drafted by Claude from the song names alone and NOT verified against the audio.",
+    "Where the song was ambiguous or unknown, film/singers are left EMPTY rather than",
+    "guessed - an empty field is a to-do, a wrong field is a lie on a screen at a party.",
+    "",
+    "  title   - what the player shows. Fix typos here, never by renaming the directory:",
+    "            the directory name is the key for stems, lyrics and the request queue.",
+    "  film    - film or album. Empty string means unknown, not 'no film'.",
+    "  singers - list. Empty list means unknown.",
+    "  year    - null when unknown.",
+    "  hide    - true removes it from the player without deleting the stems. Used for",
+    "            duplicates.",
+    "  alias   - for a duplicate: the directory this is a duplicate OF. Documentation only."
+  ],
+  "Aa_Chal_Ke_Tujhe": {
+    "title": "Aa Chal Ke Tujhe",
+    "film": "Door Gagan Ki Chhaon Mein",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1964
+  },
+  "Aaj_Ki_Raat": {
+    "title": "Aaj Ki Raat",
+    "film": "Stree 2",
+    "singers": [
+      "Madhubanti Bagchi",
+      "Divya Kumar",
+      "Sachin-Jigar"
+    ],
+    "year": 2024
+  },
+  "Aaj_Mera_Jee_Kardaa": {
+    "title": "Aaj Mera Jee Kardaa",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Aankh_Marey": {
+    "title": "Aankh Marey",
+    "film": "Simmba",
+    "singers": [
+      "Neha Kakkar",
+      "Mika Singh",
+      "Kumar Sanu"
+    ],
+    "year": 2018
+  },
+  "aaoge_fir_tum_saajna": {
+    "title": "Aaoge Jab Tum O Saajna",
+    "film": "Jab We Met",
+    "singers": [
+      "Ustad Rashid Khan"
+    ],
+    "year": 2007
+  },
+  "Aao_huzoor": {
+    "title": "Aao Huzoor Tumko",
+    "film": "Kismat",
+    "singers": [
+      "Asha Bhosle"
+    ],
+    "year": 1968
+  },
+  "Afreen_Afreen": {
+    "title": "Afreen Afreen",
+    "film": "Coke Studio Pakistan",
+    "singers": [
+      "Rahat Fateh Ali Khan",
+      "Momina Mustehsan"
+    ],
+    "year": 2016
+  },
+  "Agar_tum_mil_jao": {
+    "title": "Agar Tum Mil Jao",
+    "film": "Zeher",
+    "singers": [
+      "Shreya Ghoshal",
+      "Udit Narayan"
+    ],
+    "year": 2005
+  },
+  "Agar_Tum_Na_Hote": {
+    "title": "Agar Tum Na Hote",
+    "film": "Agar Tum Na Hote",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1983
+  },
+  "Agar_Tum_Saath_Ho": {
+    "title": "Agar Tum Saath Ho",
+    "film": "Tamasha",
+    "singers": [
+      "Arijit Singh",
+      "Alka Yagnik"
+    ],
+    "year": 2015
+  },
+  "Ajeeb_Dastaan_Hai_Ye": {
+    "title": "Ajeeb Dastaan Hai Ye",
+    "film": "Dil Apna Aur Preet Parai",
+    "singers": [
+      "Lata Mangeshkar"
+    ],
+    "year": 1960
+  },
+  "Badtameez_Dil": {
+    "title": "Badtameez Dil",
+    "film": "Yeh Jawaani Hai Deewani",
+    "singers": [
+      "Benny Dayal",
+      "Shefali Alvares"
+    ],
+    "year": 2013
+  },
+  "Bahon_ke_darmiyan": {
+    "title": "Baahon Ke Darmiyan",
+    "film": "Khamoshi: The Musical",
+    "singers": [
+      "Kumar Sanu",
+      "Kavita Krishnamurthy"
+    ],
+    "year": 1996
+  },
+  "Balam_Pichkari": {
+    "title": "Balam Pichkari",
+    "film": "Yeh Jawaani Hai Deewani",
+    "singers": [
+      "Vishal Dadlani",
+      "Shalmali Kholgade"
+    ],
+    "year": 2013
+  },
+  "Bol_Na_Halke_Halke": {
+    "title": "Bol Na Halke Halke",
+    "film": "Jhoom Barabar Jhoom",
+    "singers": [
+      "Rahat Fateh Ali Khan",
+      "Mahalakshmi Iyer"
+    ],
+    "year": 2007
+  },
+  "Chaiyya_Chaiyya": {
+    "title": "Chaiyya Chaiyya",
+    "film": "Dil Se",
+    "singers": [
+      "Sukhwinder Singh",
+      "Sapna Awasthi"
+    ],
+    "year": 1998
+  },
+  "Chalte_Chalte": {
+    "title": "Chalte Chalte",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Channa_Mereya": {
+    "title": "Channa Mereya",
+    "film": "Ae Dil Hai Mushkil",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "year": 2016
+  },
+  "Chappa_chappa": {
+    "title": "Chappa Chappa Charkha Chale",
+    "film": "Maachis",
+    "singers": [
+      "Hariharan",
+      "Suresh Wadkar"
+    ],
+    "year": 1996
+  },
+  "Chingari_Koi_Bhadke": {
+    "title": "Chingari Koi Bhadke",
+    "film": "Amar Prem",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1972
+  },
+  "Chittiyaan_Kalaiyaan": {
+    "title": "Chittiyaan Kalaiyaan",
+    "film": "Roy",
+    "singers": [
+      "Kanika Kapoor"
+    ],
+    "year": 2015
+  },
+  "Daaru_badnam_kar_di": {
+    "title": "Daaru Badnam",
+    "film": "",
+    "singers": [
+      "Kamal Kahlon",
+      "Param Singh"
+    ],
+    "year": 2018
+  },
+  "Deewana_hua_badal": {
+    "title": "Deewana Hua Badal",
+    "film": "Kashmir Ki Kali",
+    "singers": [
+      "Mohammed Rafi",
+      "Asha Bhosle"
+    ],
+    "year": 1964
+  },
+  "Deewana_main_hoon_deewana": {
+    "title": "Deewana Main Hoon Deewana",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Deewana_Tera": {
+    "title": "Deewana Tera",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Dhina_Dhin_Dha": {
+    "title": "Dhina Dhin Dha",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Dilbar": {
+    "title": "Dilbar",
+    "film": "Satyameva Jayate",
+    "singers": [
+      "Neha Kakkar",
+      "Dhvani Bhanushali",
+      "Ikka"
+    ],
+    "year": 2018
+  },
+  "Dil_Kya_Kare": {
+    "title": "Dil Kya Kare",
+    "film": "Julie",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1975
+  },
+  "Dil_se_re": {
+    "title": "Dil Se Re",
+    "film": "Dil Se",
+    "singers": [
+      "A. R. Rahman"
+    ],
+    "year": 1998
+  },
+  "Do_Dil_mil_rahe": {
+    "title": "Do Dil Mil Rahe Hain",
+    "film": "Pardes",
+    "singers": [
+      "Kumar Sanu"
+    ],
+    "year": 1997
+  },
+  "Ehsaan_tera_hoga_mujh_par": {
+    "title": "Ehsaan Tera Hoga Mujh Par",
+    "film": "Junglee",
+    "singers": [
+      "Mohammed Rafi"
+    ],
+    "year": 1961
+  },
+  "Ek_Ladki_Bheegi_Bhaagi_Si": {
+    "title": "Ek Ladki Bheegi Bhaagi Si",
+    "film": "Chalti Ka Naam Gaadi",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1958
+  },
+  "Gali_Mein_Aaj_Chand_Nikla": {
+    "title": "Gali Mein Aaj Chand Nikla",
+    "film": "Zakhm",
+    "singers": [
+      "Alka Yagnik"
+    ],
+    "year": 1998
+  },
+  "Gallan_Goodiyaan": {
+    "title": "Gallan Goodiyaan",
+    "film": "Dil Dhadakne Do",
+    "singers": [
+      "Yashita Sharma",
+      "Manish Kumar Tipu",
+      "Farhan Akhtar",
+      "Shankar Mahadevan",
+      "Sunidhi Chauhan"
+    ],
+    "year": 2015
+  },
+  "Gerua": {
+    "title": "Gerua",
+    "film": "Dilwale",
+    "singers": [
+      "Arijit Singh",
+      "Antara Mitra"
+    ],
+    "year": 2015
+  },
+  "Ghagra": {
+    "title": "Ghagra",
+    "film": "Yeh Jawaani Hai Deewani",
+    "singers": [
+      "Rekha Bhardwaj",
+      "Vishal Dadlani"
+    ],
+    "year": 2013
+  },
+  "Ghungroo": {
+    "title": "Ghungroo",
+    "film": "War",
+    "singers": [
+      "Arijit Singh",
+      "Shilpa Rao"
+    ],
+    "year": 2019
+  },
+  "Gulabi_aankhein": {
+    "title": "Gulabi Aankhein",
+    "film": "The Train",
+    "singers": [
+      "Mohammed Rafi"
+    ],
+    "year": 1970
+  },
+  "Guncha_koi_tere": {
+    "title": "Guncha Koi Tere",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Hona_Tha_Pyar": {
+    "title": "Hona Tha Pyar",
+    "film": "Bol",
+    "singers": [
+      "Atif Aslam",
+      "Hadiqa Kiani"
+    ],
+    "year": 2011
+  },
+  "Hudd_Hudd_Dabangg": {
+    "title": "Hudd Hudd Dabangg",
+    "film": "Dabangg",
+    "singers": [
+      "Sukhwinder Singh",
+      "Wajid"
+    ],
+    "year": 2010
+  },
+  "Hume_Tumse_Pyar_Kitna": {
+    "title": "Humein Tumse Pyar Kitna",
+    "film": "Kudrat",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1981
+  },
+  "Hum_pyaar_karne_wale": {
+    "title": "Hum Pyaar Karne Wale",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Husn": {
+    "title": "Husn",
+    "film": "",
+    "singers": [
+      "Anuv Jain"
+    ],
+    "year": 2024
+  },
+  "Ilahi": {
+    "title": "Ilahi",
+    "film": "Yeh Jawaani Hai Deewani",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "year": 2013
+  },
+  "Jaane_jaan_dhoondhta": {
+    "title": "Jaane Jaan Dhoondta",
+    "film": "Jawani Diwani",
+    "singers": [
+      "Kishore Kumar",
+      "Asha Bhosle"
+    ],
+    "year": 1972
+  },
+  "Jaate_Hue_Lamhon": {
+    "title": "Jaate Hue Lamhon",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Kabira": {
+    "title": "Kabira",
+    "film": "Yeh Jawaani Hai Deewani",
+    "singers": [
+      "Tochi Raina",
+      "Rekha Bhardwaj"
+    ],
+    "year": 2013
+  },
+  "Kala_Chashma": {
+    "title": "Kala Chashma",
+    "film": "Baar Baar Dekho",
+    "singers": [
+      "Amar Arshi",
+      "Badshah",
+      "Neha Kakkar"
+    ],
+    "year": 2016
+  },
+  "Kal_Ho_Naa_Ho": {
+    "title": "Kal Ho Naa Ho",
+    "film": "Kal Ho Naa Ho",
+    "singers": [
+      "Sonu Nigam"
+    ],
+    "year": 2003
+  },
+  "Kesariya": {
+    "title": "Kesariya",
+    "film": "Brahmastra",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "year": 2022
+  },
+  "Khaabon_Ke_Parinday": {
+    "title": "Khaabon Ke Parinday",
+    "film": "Zindagi Na Milegi Dobara",
+    "singers": [
+      "Alyssa Mendonsa",
+      "Mohit Chauhan"
+    ],
+    "year": 2011
+  },
+  "Khambe_jaisi_khadi_hai": {
+    "title": "Khambe Jaisi Khadi Hai",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Kuch_Toh_Log_Kahenge": {
+    "title": "Kuch Toh Log Kahenge",
+    "film": "Amar Prem",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1972
+  },
+  "Kun_Faya_Kun": {
+    "title": "Kun Faya Kun",
+    "film": "Rockstar",
+    "singers": [
+      "A. R. Rahman",
+      "Javed Ali",
+      "Mohit Chauhan"
+    ],
+    "year": 2011
+  },
+  "Kya_Khoob_Lagti_Ho": {
+    "title": "Kya Khoob Lagti Ho",
+    "film": "Dharmatma",
+    "singers": [
+      "Kanchan",
+      "Mahendra Kapoor"
+    ],
+    "year": 1975
+  },
+  "Kya_se_kya_ho_gaya": {
+    "title": "Kya Se Kya Ho Gaya",
+    "film": "Guide",
+    "singers": [
+      "Mohammed Rafi"
+    ],
+    "year": 1965
+  },
+  "Laal_Ishq": {
+    "title": "Laal Ishq",
+    "film": "Goliyon Ki Raasleela Ram-Leela",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "year": 2013
+  },
+  "London_Thumakda": {
+    "title": "London Thumakda",
+    "film": "Queen",
+    "singers": [
+      "Labh Janjua",
+      "Sonu Kakkar",
+      "Neha Kakkar"
+    ],
+    "year": 2014
+  },
+  "Maaeri": {
+    "title": "Maaeri",
+    "film": "Phir Dhoom",
+    "singers": [
+      "Palash Sen",
+      "Euphoria"
+    ],
+    "year": 2000
+  },
+  "Main_Agar_Kahoon": {
+    "title": "Main Agar Kahoon",
+    "film": "Om Shanti Om",
+    "singers": [
+      "Sonu Nigam",
+      "Shreya Ghoshal"
+    ],
+    "year": 2007
+  },
+  "Mere_Naina_Sawan_Bhadon": {
+    "title": "Mere Naina Sawan Bhadon",
+    "film": "Mehbooba",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1976
+  },
+  "Mere_Rashke_Qamar": {
+    "title": "Mere Rashke Qamar",
+    "film": "Baadshaho",
+    "singers": [
+      "Rahat Fateh Ali Khan",
+      "Nusrat Fateh Ali Khan"
+    ],
+    "year": 2017
+  },
+  "Mere_Sapno_Ki_Rani": {
+    "title": "Mere Sapno Ki Rani",
+    "film": "Aradhana",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1969
+  },
+  "Mujhe_raat_din": {
+    "title": "Mujhe Raat Din",
+    "film": "Sangharsh",
+    "singers": [
+      "Sonu Nigam"
+    ],
+    "year": 1999
+  },
+  "Munni_Badnaam": {
+    "title": "Munni Badnaam Hui",
+    "film": "Dabangg",
+    "singers": [
+      "Mamta Sharma",
+      "Aishwarya Nigam"
+    ],
+    "year": 2010
+  },
+  "Nagada_Sang_Dhol": {
+    "title": "Nagada Sang Dhol",
+    "film": "Goliyon Ki Raasleela Ram-Leela",
+    "singers": [
+      "Shreya Ghoshal",
+      "Osman Mir"
+    ],
+    "year": 2013
+  },
+  "Neele_Neele_Ambar_Par": {
+    "title": "Neele Neele Ambar Par",
+    "film": "Kalaakaar",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1983
+  },
+  "Oh_Ho_Ho_Ho": {
+    "title": "Oh Ho Ho Ho",
+    "film": "Hindi Medium",
+    "singers": [
+      "Sukhbir",
+      "Ikka"
+    ],
+    "year": 2017
+  },
+  "O_Mere_Dil_Ke_Chain": {
+    "title": "O Mere Dil Ke Chain",
+    "film": "Mere Jeevan Saathi",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1972
+  },
+  "Pal_Pal_Dil_Ke_Paas": {
+    "title": "Pal Pal Dil Ke Paas",
+    "film": "Blackmail",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1973
+  },
+  "Pasoori": {
+    "title": "Pasoori",
+    "film": "Coke Studio Pakistan",
+    "singers": [
+      "Ali Sethi",
+      "Shae Gill"
+    ],
+    "year": 2022
+  },
+  "Phoolon_Ke_Rang_Se": {
+    "title": "Phoolon Ke Rang Se",
+    "film": "Prem Pujari",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1970
+  },
+  "Rim_Jhim_Gire_Sawan": {
+    "title": "Rimjhim Gire Sawan",
+    "film": "Manzil",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1979
+  },
+  "Roop_Tera_Mastana": {
+    "title": "Roop Tera Mastana",
+    "film": "Aradhana",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1969
+  },
+  "Sacha_Naam_Tera": {
+    "title": "Sacha Naam Tera",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Sagar_Kinare": {
+    "title": "Sagar Kinare",
+    "film": "Sagar",
+    "singers": [
+      "Kishore Kumar",
+      "Lata Mangeshkar"
+    ],
+    "year": 1985
+  },
+  "Saiyaan": {
+    "title": "Saiyyan",
+    "film": "Kailasa",
+    "singers": [
+      "Kailash Kher"
+    ],
+    "year": 2006
+  },
+  "Saiyaara": {
+    "title": "Saiyaara",
+    "film": "Ek Tha Tiger",
+    "singers": [
+      "Mohit Chauhan",
+      "Taraannum Mallik"
+    ],
+    "year": 2012
+  },
+  "Sancha_naam_tera": {
+    "title": "Sacha Naam Tera",
+    "film": "",
+    "singers": [],
+    "year": null,
+    "hide": true,
+    "alias": "Sacha_Naam_Tera"
+  },
+  "Sanu_Ek_Pal_Chain": {
+    "title": "Sanu Ek Pal Chain",
+    "film": "Raid",
+    "singers": [
+      "Rahat Fateh Ali Khan"
+    ],
+    "year": 2018
+  },
+  "Senorita": {
+    "title": "Senorita",
+    "film": "Zindagi Na Milegi Dobara",
+    "singers": [
+      "Farhan Akhtar",
+      "Hrithik Roshan",
+      "Abhay Deol",
+      "Maria del Mar Fernandez"
+    ],
+    "year": 2011
+  },
+  "So_Gaya_Yeh_Jahan": {
+    "title": "So Gaya Yeh Jahan",
+    "film": "Tezaab",
+    "singers": [
+      "Nitin Mukesh",
+      "Alisha Chinai"
+    ],
+    "year": 1988
+  },
+  "Sun_raha_hain_na_tu": {
+    "title": "Sun Raha Hai Na Tu",
+    "film": "Aashiqui 2",
+    "singers": [
+      "Ankit Tiwari"
+    ],
+    "year": 2013
+  },
+  "Tauba_Tauba": {
+    "title": "Tauba Tauba",
+    "film": "Bad Newz",
+    "singers": [
+      "Karan Aujla"
+    ],
+    "year": 2024
+  },
+  "Tere_Hawaale": {
+    "title": "Tere Hawaale",
+    "film": "Laal Singh Chaddha",
+    "singers": [
+      "Arijit Singh",
+      "Shilpa Rao"
+    ],
+    "year": 2022
+  },
+  "Teri_diwani": {
+    "title": "Teri Deewani",
+    "film": "Kailasa",
+    "singers": [
+      "Kailash Kher"
+    ],
+    "year": 2006
+  },
+  "Toh_Phir_Aao": {
+    "title": "Toh Phir Aao",
+    "film": "Awarapan",
+    "singers": [
+      "Mustafa Zahid"
+    ],
+    "year": 2007
+  },
+  "Tu_Hai_To_Dil_Dhadakta_Hai": {
+    "title": "Tu Hai To Dil Dhadakta Hai",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Tujhe_Dekha_Toh": {
+    "title": "Tujhe Dekha To",
+    "film": "Dilwale Dulhania Le Jayenge",
+    "singers": [
+      "Kumar Sanu",
+      "Lata Mangeshkar"
+    ],
+    "year": 1995
+  },
+  "Tu_kisi_raii_si": {
+    "title": "Tu Kisi Rail Si",
+    "film": "Masaan",
+    "singers": [
+      "Swanand Kirkire"
+    ],
+    "year": 2015
+  },
+  "Tumhe_apna_banane_ki": {
+    "title": "Tumhe Apna Banane Ka Junoon",
+    "film": "Hate Story 3",
+    "singers": [
+      "Armaan Malik",
+      "Neeti Mohan"
+    ],
+    "year": 2015
+  },
+  "Tum_Hi_Ho": {
+    "title": "Tum Hi Ho",
+    "film": "Aashiqui 2",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "year": 2013
+  },
+  "tum_itna_kyun_muskura_rahe": {
+    "title": "Tum Itna Jo Muskura Rahe Ho",
+    "film": "Arth",
+    "singers": [
+      "Jagjit Singh"
+    ],
+    "year": 1982
+  },
+  "Tu_pyaar_hai_kisi_aur_ka": {
+    "title": "Tu Pyar Hai Kisi Aur Ka",
+    "film": "Dil Hai Ke Manta Nahin",
+    "singers": [
+      "Kumar Sanu",
+      "Anuradha Paudwal"
+    ],
+    "year": 1991
+  },
+  "Yaara_teri_yaari_ko": {
+    "title": "Yaara Teri Yaari Ko",
+    "film": "",
+    "singers": [
+      "Mohammed Rafi"
+    ],
+    "year": null
+  },
+  "Yeh_dil_deewana": {
+    "title": "Yeh Dil Deewana",
+    "film": "Pardes",
+    "singers": [
+      "Sonu Nigam",
+      "Hariharan",
+      "Shankar Mahadevan"
+    ],
+    "year": 1997
+  },
+  "Yeh_Dil_Tum_Bin": {
+    "title": "Yeh Dil Tum Bin",
+    "film": "Izzat",
+    "singers": [
+      "Mohammed Rafi",
+      "Lata Mangeshkar"
+    ],
+    "year": 1968
+  },
+  "Yeh_Jeevan_Hai": {
+    "title": "Yeh Jeevan Hai",
+    "film": "Piya Ka Ghar",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1972
+  },
+  "Yeh_Kaali_Kaali_Aankhen": {
+    "title": "Yeh Kaali Kaali Aankhen",
+    "film": "Baazigar",
+    "singers": [
+      "Kumar Sanu",
+      "Anuradha Paudwal"
+    ],
+    "year": 1993
+  },
+  "Yeh_Sham_Mastani": {
+    "title": "Yeh Shaam Mastani",
+    "film": "Kati Patang",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1970
+  },
+  "Yeh_tune_kya_kiya": {
+    "title": "Yeh Tune Kya Kiya",
+    "film": "Once Upon A Time In Mumbai Dobaara",
+    "singers": [
+      "Javed Bashir"
+    ],
+    "year": 2013
+  },
+  "Ye_Jo_Mohabbat_Hai": {
+    "title": "Ye Jo Mohabbat Hai",
+    "film": "Kati Patang",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1970
+  },
+  "yun_hi": {
+    "title": "Yun Hi",
+    "film": "",
+    "singers": [],
+    "year": null
+  },
+  "Yun_hi_chalachal": {
+    "title": "Yun Hi Chala Chal",
+    "film": "Swades",
+    "singers": [
+      "Udit Narayan",
+      "Kailash Kher",
+      "Hariharan"
+    ],
+    "year": 2004
+  },
+  "Zindagi_Ek_Safar": {
+    "title": "Zindagi Ek Safar",
+    "film": "Andaz",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "year": 1971
+  },
+  "Piya_bole_pihu_bole": {
+    "title": "Piya Bole Piyu Bole",
+    "film": "Parineeta",
+    "singers": [
+      "Sonu Nigam",
+      "Shreya Ghoshal"
+    ],
+    "year": 2005
+  }
+}

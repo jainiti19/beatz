@@ -23,6 +23,8 @@ HOST = "beatznbox@46.224.176.48"
 QUEUE = "/opt/beatznbox/queue/requests.jsonl"
 DONE = "/opt/beatznbox/queue/done.txt"
 DROP = "/opt/beatznbox/queue/lyrics"
+RESULTS = "/opt/beatznbox/queue/results.jsonl"
+META = None          # set in main() to <repo>/data/songs-meta.json
 LOCAL = False        # --local reads the queue as plain files, for testing
 NO_PUBLISH = False   # --no-publish stops before prepare-web/deploy
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -130,6 +132,67 @@ def mark_done(entry_id):
     ssh(f"printf '%s\\n' {json.dumps(entry_id)} >> {DONE}", check=True)
 
 
+def post_result(entry_id, state, title=None, note=None):
+    """Tell the player how a request ended.
+
+    The queue service only appends to requests.jsonl and only reads this, so a
+    laptop that dies mid-write cannot corrupt the queue. Best-effort: failing to
+    report must never stop the song being published."""
+    rec = {"id": entry_id, "state": state, "title": title, "note": note,
+           "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    line = json.dumps(rec, ensure_ascii=False)
+    try:
+        if LOCAL:
+            with open(RESULTS, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        else:
+            ssh(f"printf '%s\\n' {json.dumps(line)} >> {RESULTS}", check=True)
+    except Exception as e:
+        log(f"  could not post result for {entry_id}: {e}")
+
+
+def resolved_title(name):
+    """What LRCLIB actually matched, written by fetch-lyrics-lrclib.py.
+
+    The request only ever carried what someone typed, and that string became
+    the directory and therefore the title. This is the real name."""
+    try:
+        with open(os.path.join(STEMS, name, "match.json"), encoding="utf-8") as f:
+            m = json.load(f)
+    except Exception:
+        return None, None
+    return m.get("trackName"), m.get("artistName")
+
+
+def record_meta(name, title, artist):
+    """Fold the resolved title into data/songs-meta.json.
+
+    Never overwrites an entry that already has a title - a hand-corrected name
+    outranks whatever LRCLIB thinks."""
+    if not META or not title:
+        return
+    try:
+        with open(META, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return
+    cur = meta.get(name)
+    if isinstance(cur, dict) and cur.get("title"):
+        return
+    entry = cur if isinstance(cur, dict) else {}
+    entry["title"] = title
+    if artist and not entry.get("singers"):
+        entry["singers"] = [a.strip() for a in artist.split(",") if a.strip()]
+    entry.setdefault("film", "")
+    entry.setdefault("year", None)
+    meta[name] = entry
+    tmp = META + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, META)
+    log(f"  metadata: {name} -> {title!r}")
+
+
 def run(cmd, **kw):
     log("  $ " + " ".join(os.path.basename(c) for c in cmd[:2]))
     return subprocess.run(cmd, cwd=REPO, **kw)
@@ -146,6 +209,7 @@ def process(entry, fast):
 
     if os.path.exists(os.path.join(STEMS, name, "vocals.wav")):
         log("  already in the library — publishing without reprocessing")
+        post_result(entry["id"], "duplicate", title=title)
     else:
         manifest = os.path.join(REPO, ".request-manifest.txt")
         with open(manifest, "w", encoding="utf-8") as f:
@@ -161,6 +225,8 @@ def process(entry, fast):
             # Leave it un-done so a later run can retry — a failed download is
             # usually the search string, and that is worth a human look.
             log(f"  FAILED: no stems for {name}, leaving it queued")
+            post_result(entry["id"], "failed",
+                        note="Try again with the film or singer added.")
             return False
 
     if NO_PUBLISH:
@@ -170,7 +236,10 @@ def process(entry, fast):
         log("  prepare-web failed"); return False
     if run(["./scripts/deploy-web.sh"], capture_output=True, text=True).returncode != 0:
         log("  deploy failed"); return False
+    real, artist = resolved_title(name)
+    record_meta(name, real, artist)
     log(f"  published {name}")
+    post_result(entry["id"], "done", title=real or title)
     return True
 
 
@@ -186,13 +255,15 @@ def main():
                     help="process but skip prepare-web/deploy (testing)")
     a = ap.parse_args()
 
-    global LOCAL, NO_PUBLISH, QUEUE, DONE, DROP
+    global LOCAL, NO_PUBLISH, QUEUE, DONE, DROP, RESULTS, META
+    META = os.path.join(REPO, "data/songs-meta.json")
     NO_PUBLISH = a.no_publish
     if a.local:
         LOCAL = True
         QUEUE = os.path.join(a.local, "requests.jsonl")
         DONE = os.path.join(a.local, "done.txt")
         DROP = os.path.join(a.local, "lyrics")
+        RESULTS = os.path.join(a.local, "results.jsonl")
 
     where = QUEUE if LOCAL else f"{HOST}:{QUEUE}"
     log(f"watching {where} every {a.interval}s "

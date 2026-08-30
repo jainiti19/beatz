@@ -30,7 +30,7 @@ Usage:
     fetch-lyrics-lrclib.py "song name" out.txt --duration 275
     fetch-lyrics-lrclib.py --show "song name"               # list candidates only
 """
-import json, re, sys, urllib.parse, urllib.request
+import json, os, re, sys, urllib.parse, urllib.request
 
 API = "https://lrclib.net/api/search"
 UA = {"User-Agent": "beatznbox/1.0 (personal singalong library)"}
@@ -224,6 +224,22 @@ def main():
     lyrics = best["plainLyrics"].strip()
     with open(out, "w", encoding="utf-8") as f:
         f.write(lyrics + "\n")
+
+    # What LRCLIB actually matched, saved next to the words. The request queue
+    # only ever knew what the person typed - "tu kisi raii si" - and that string
+    # became the directory and therefore the title. This is the one point in the
+    # pipeline that knows the song's real name, so record it here and let
+    # watch-requests.py fold it into data/songs-meta.json.
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(out)), "match.json"),
+                  "w", encoding="utf-8") as mf:
+            json.dump({"trackName":  best.get("trackName"),
+                       "artistName": best.get("artistName"),
+                       "albumName":  best.get("albumName"),
+                       "duration":   best.get("duration")},
+                      mf, ensure_ascii=False, indent=1)
+    except Exception:
+        pass          # a missing match.json must never fail a good lyrics fetch
     n = len([l for l in lyrics.split("\n") if l.strip()])
     d = best.get("duration") or 0
     print(f"  {best.get('trackName')} — {best.get('artistName')} — {n} lines"

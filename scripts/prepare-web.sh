@@ -16,6 +16,16 @@ BITRATE=192k  # Good quality, small files
 echo "Preparing web stems as MP3 (${BITRATE}, max $MAX_SONGS songs)..."
 mkdir -p "$WEB_STEMS"
 
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+META="$REPO_DIR/data/songs-meta.json"
+HIDDEN=$(python3 -c "
+import json,sys
+try: m=json.load(open(sys.argv[1]))
+except Exception: sys.exit(0)
+for k,v in m.items():
+    if not k.startswith('_') and isinstance(v,dict) and v.get('hide'): print(k)
+" "$META" 2>/dev/null)
+
 # Build songs.json
 echo "[" > "$WEB_STEMS/songs.json"
 COUNT=0
@@ -29,6 +39,11 @@ for dir in "$SRC"/*/; do
 
     # Skip names with special chars for web compatibility
     echo "$NAME" | grep -qE '[^a-zA-Z0-9_]' && continue
+
+    # Skip anything marked hide in data/songs-meta.json (duplicates). Done here
+    # rather than after the loop so a duplicate costs no MP3 encode and no disk
+    # on the VPS.
+    echo "$HIDDEN" | grep -qxF "$NAME" && continue
 
     COUNT=$((COUNT + 1))
     if [ $COUNT -gt $MAX_SONGS ]; then
@@ -85,6 +100,10 @@ find "$WEB_STEMS" -name "*.wav" -type l -delete 2>/dev/null
 # out is to start singing it.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 python3 "$SCRIPT_DIR/check-lyrics-quality.py" "$WEB_STEMS"
+
+# Real titles, films and singers. Must run AFTER check-lyrics-quality.py so the
+# verdict it writes survives; both rewrite songs.json in place.
+python3 "$SCRIPT_DIR/apply-song-meta.py" "$WEB_STEMS" --meta "$META"
 
 TOTAL=$(du -sh "$WEB_STEMS" 2>/dev/null | cut -f1)
 echo ""

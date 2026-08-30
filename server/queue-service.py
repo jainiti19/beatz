@@ -19,6 +19,39 @@ MAX_LYRICS = 32768       # a long song is a few KB; this is generous
 MAX_FIELD = 120
 MAX_PENDING = 50         # a full queue means something is wrong upstream
 
+# The published manifest, used only to answer "do we already have this?".
+# Read fresh when its mtime changes: the watcher rewrites it on every deploy.
+MANIFEST = '/opt/beatznbox/web/stems/songs.json'
+_known = {'mtime': None, 'by_key': {}}
+
+
+def norm(text):
+    """Loose key for duplicate detection: case, spaces and punctuation dropped.
+    'Tu Kisi Rail Si', 'tu kisi rail si' and 'TuKisiRailSi' all collapse."""
+    return re.sub(r'[^a-z0-9]+', '', (text or '').lower())
+
+
+def known_songs():
+    try:
+        m = os.path.getmtime(MANIFEST)
+    except OSError:
+        return {}
+    if _known['mtime'] != m:
+        try:
+            with open(MANIFEST, encoding='utf-8') as f:
+                songs = json.load(f)
+        except Exception:
+            return _known['by_key']
+        by_key = {}
+        for song in songs:
+            for key in (song.get('name'), song.get('dir'),
+                        (song.get('dir') or '').replace('_', ' ')):
+                if norm(key):
+                    by_key.setdefault(norm(key), song.get('name') or song.get('dir'))
+        _known['by_key'] = by_key
+        _known['mtime'] = m
+    return _known['by_key']
+
 # The name becomes a directory, and is interpolated into shell and Python by
 # the pipeline. Everything downstream assumes this character set — see the
 # matching sanitiser in add-songs.sh.
@@ -39,10 +72,52 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _pending(self):
+        """Requests still waiting, NOT the size of the queue file.
+
+        requests.jsonl is append-only and never trimmed, so counting its lines
+        meant every song ever asked for counted against MAX_PENDING - the queue
+        would have wedged shut at 50 requests forever, refusing everyone with
+        "queue is full". Ids the watcher has finished live in done.txt."""
+        done = set()
+        done_path = os.path.join(os.path.dirname(self.queue_path), 'done.txt')
+        try:
+            with open(done_path, encoding='utf-8') as f:
+                done = {l.strip() for l in f if l.strip()}
+        except OSError:
+            pass
+        return sum(1 for e in self._queue_entries() if e.get('id') not in done)
+
+    def _queue_entries(self):
         if not os.path.exists(self.queue_path):
-            return 0
+            return []
+        out = []
         with open(self.queue_path, encoding='utf-8') as f:
-            return sum(1 for line in f if line.strip())
+            for line in f:
+                if line.strip():
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        pass
+        return out
+
+    def _results(self):
+        """Outcomes written back by watch-requests.py on the laptop. Last line
+        for an id wins, so a retry overwrites an earlier failure."""
+        path = os.path.join(os.path.dirname(self.queue_path), 'results.jsonl')
+        out = {}
+        if not os.path.exists(path):
+            return out
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get('id'):
+                    out[r['id']] = r
+        return out
 
     def _read_json(self, limit):
         try:
@@ -75,6 +150,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {'error': 'song name has no usable characters'})
         if self._pending() >= MAX_PENDING:
             return self._json(429, {'error': 'queue is full'})
+
+        # Already in the library: say so and do not queue it. Processing a song
+        # we have costs ~10 minutes of separation and republishes the same file.
+        existing = known_songs().get(norm(song))
+        if existing:
+            return self._json(409, {'error': f'"{existing}" is already in the list.',
+                                    'duplicate': True, 'existing': existing})
+
+        # Already asked for by someone else and not yet processed.
+        for line in self._queue_entries():
+            if norm(line.get('song')) == norm(song):
+                return self._json(409, {
+                    'error': f'Already requested by {line.get("who") or "someone"}.',
+                    'duplicate': True, 'existing': line.get('song')})
 
         entry = {
             'id': f"{int(time.time())}-{name[:24]}",
@@ -121,8 +210,28 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {'ok': True, 'name': name, 'lines': n})
 
     def do_GET(self):
-        if self.path.rstrip('/') == '/api/health':
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(self.path)
+        path = u.path.rstrip('/')
+        if path == '/api/health':
             return self._json(200, {'ok': True, 'pending': self._pending()})
+        if path == '/api/status':
+            # The player asks about the ids it submitted; it holds those in
+            # localStorage, so nothing here has to remember who anyone is.
+            ids = [i for i in (parse_qs(u.query).get('ids', [''])[0]).split(',') if i][:60]
+            results = self._results()
+            queued = {e['id'] for e in self._queue_entries() if e.get('id')}
+            out = {}
+            for i in ids:
+                if i in results:
+                    r = results[i]
+                    out[i] = {'state': r.get('state', 'done'),
+                              'title': r.get('title'), 'note': r.get('note')}
+                elif i in queued:
+                    out[i] = {'state': 'queued'}
+                else:
+                    out[i] = {'state': 'unknown'}
+            return self._json(200, {'ok': True, 'status': out})
         return self._json(404, {'error': 'not found'})
 
     def log_message(self, fmt, *args):
