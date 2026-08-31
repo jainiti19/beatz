@@ -13,7 +13,13 @@ set -euo pipefail
 HOST=root@46.224.176.48
 SITE=beatznbox.wesimplyhome.com
 USER_NAME="${1:-beatz}"
-COST=14   # matches the other hashes already in the Caddyfile
+COST=11   # see below before raising this
+# Cost 14 measured 1307ms per verification on the VPS -- Caddy re-runs bcrypt on
+# any credential not already in its in-memory cache, and the player fetches four
+# stems at once, so a cold cache cost ~2.6s each on a 2-core box shared with five
+# other sites. Cost 11 is ~165ms there and still far above what a private
+# password needs. Caddy caches a verified credential either way, so this is
+# purely about the first request after each Caddy restart.
 
 if [ ! -t 0 ]; then
   echo "error: needs a terminal to read the password with echo off." >&2
