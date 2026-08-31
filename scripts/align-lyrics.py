@@ -493,6 +493,19 @@ def reanchor_outliers(segments, max_gap=6.0, min_span=12.0):
     return segments
 
 
+def reapply_roman(stems_dir):
+    """Re-lay <stems>/roman.json over a freshly written lyrics_timed.json."""
+    job = os.path.join(stems_dir, "roman.json")
+    if not os.path.exists(job):
+        return
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "romanize-lyrics.py")
+    import subprocess
+    r = subprocess.run([sys.executable, script, "apply", stems_dir, job],
+                       capture_output=True, text=True)
+    print("    " + (r.stdout or r.stderr).strip().splitlines()[-1])
+
+
 def process_song(stems_dir, force=False, int8=False):
     name = os.path.basename(stems_dir.rstrip("/"))
     out_path = os.path.join(stems_dir, "lyrics_timed.json")
@@ -539,12 +552,23 @@ def process_song(stems_dir, force=False, int8=False):
         """Align a line list against the (already computed) emission."""
         # Star between lines lets instrumental breaks be skipped rather than absorbed
         # into a neighbouring line's duration.
-        units = []
+        #
+        # The leading and trailing stars matter just as much and were missing. A
+        # Viterbi path has to consume every frame, so without a star before the
+        # first line the path must *start* on that line's first word at frame 0 —
+        # the opening lyric gets force-fit onto whatever the prelude holds
+        # (instrumental, an alaap, spoken narration) and the singer sees the
+        # highlight sweeping before anyone has sung. Gulabi Aankhein's first line
+        # landed at 0.10-1.30s scoring -6.72 against a song median of -0.95, then
+        # left a 42s hole before line 2. The trailing star is the same failure at
+        # the other end: the closing line stretched to the last frame of the outro.
+        units = [("star", [dictionary["*"]])]
         for idx, line in enumerate(line_list):
             if idx:
                 units.append(("star", [dictionary["*"]]))
             for word in line["words"]:
                 units.append(("word", [dictionary[c] for c in word]))
+        units.append(("star", [dictionary["*"]]))
         return _regroup(align(emission, units, dictionary), line_list, seconds_per_frame)
 
     try:
@@ -575,6 +599,11 @@ def process_song(stems_dir, force=False, int8=False):
 
     with open(out_path, "w") as f:
         json.dump(segments, f, indent=2, ensure_ascii=False)
+
+    # Aligning rewrites the file wholesale, which would silently drop the
+    # reviewed romanisation. roman.json is keyed by line text, not line index,
+    # precisely so it can be laid back down over a fresh alignment.
+    reapply_roman(stems_dir)
 
     longest = max(s["end"] - s["start"] for s in segments)
     covered = segments[-1]["end"] - segments[0]["start"]

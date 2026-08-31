@@ -15,12 +15,17 @@ noticed by playing the song:
            never sang collapses to near-zero width and flashes past.
   gap      one line covering 20s+ means the aligner lost the thread and spread
            a line across a passage it does not belong to.
+  prelude  the opening line was force-fit onto the intro, so the highlight
+           sweeps before anyone has sung and the room comes in early. Caught by
+           the first line's Viterbi score against the song's *own* median --
+           an absolute threshold cannot work, since a song aligned poorly
+           throughout scores badly on every line.
 
 Grades: good | check | bad.  Only bad and check are shown in the player.
 
 Usage: check-lyrics-quality.py [web/stems]
 """
-import json, os, re, sys
+import json, os, re, statistics, sys
 
 STEMS = sys.argv[1] if len(sys.argv) > 1 else "web/stems"
 
@@ -28,6 +33,7 @@ MIN_LINES      = 8
 CRUSHED_SEC    = 0.35
 CRUSHED_PCT    = 15
 LONG_LINE_SEC  = 20
+LEAD_MARGIN    = 3.0     # score points below the song median; measured, see below
 
 
 def script_of(text):
@@ -68,6 +74,16 @@ def grade(song_dir):
     crushed = sum(1 for d in durs if d < CRUSHED_SEC)
     pct = 100 * crushed / len(durs)
     longest = max(durs)
+
+    # An opening line the model never found sat 4-6 points under its song's
+    # median across the library, while a correctly placed one sits within about
+    # 1. Gulabi Aankhein's read -6.72 against a median of -0.95 and pinned the
+    # first line at 0.10s, 42s before the singer.
+    scores = [e["score"] for e in entries if "score" in e]
+    if len(scores) >= MIN_LINES:
+        lead = scores[0] - statistics.median(scores)
+        if lead < -LEAD_MARGIN:
+            return "check", f"opening line off ({lead:+.1f} vs median)"
 
     if pct > CRUSHED_PCT:
         return "check", f"{pct:.0f}% crushed lines"

@@ -1497,6 +1497,13 @@
         // leave any display word without a match untimed rather than forcing a pairing.
         const DEVANAGARI = /[\u0900-\u097F]/;
 
+        // The aligned token is uroman's rule-based transliteration, which reads
+        // "mujhako itanaa bataae koii" for a line everyone spells "mujhko itna
+        // bata de koi". romanize-lyrics.py writes a readable `roman` beside it
+        // where one has been reviewed; the token stays the fallback so a song
+        // that has not been through that pass still renders.
+        const roman = w => w.roman || w.word;
+
         function buildWordSpans(line, lineIdx) {
             const aligned = line.words || [];
             // Romanised view: the aligned tokens ARE the display text, so every
@@ -1507,7 +1514,7 @@
             if (romanMode && aligned.length) {
                 return aligned.map((w, di) =>
                     `<span class="lyrics-word" id="w-${lineIdx}-${di}" ` +
-                    `data-s="${w.start}" data-e="${w.end}">${escapeHtml(w.word)}</span>`
+                    `data-s="${w.start}" data-e="${w.end}">${escapeHtml(roman(w))}</span>`
                 ).join(' ');
             }
             const display = line.text.split(/\s+/).filter(Boolean);
@@ -1545,7 +1552,7 @@
                 const echo = (!romanMode && line.words && line.words.length
                               && DEVANAGARI.test(line.text || ''))
                     ? `<div class="lyric-roman">${escapeHtml(
-                          line.words.map(w => w.word).join(' '))}</div>`
+                          line.words.map(roman).join(' '))}</div>`
                     : '';
                 return `<div class="lyrics-line upcoming${crushedLines[i] ? ' crushed' : ''}" ` +
                        `id="lyric-${i}">${buildWordSpans(line, i)}${echo}</div>`;
