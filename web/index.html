@@ -1284,10 +1284,22 @@
             // ~100MB allocations under the allocator at the same moment, which
             // hung an iPhone and gave Android "failed to load" -- that is why
             // this loop was serial. Two at once holds half the peak of the
-            // version that broke, and phones are excluded outright on the same
-            // width test shouldPrefetch() uses, so their path is unchanged.
-            const decodeWidth =
-                window.matchMedia('(max-width: 820px)').matches ? 1 : 2;
+            // version that broke.
+            //
+            // Phones were excluded wholesale at first, which meant the machine
+            // that needs the help most got none of it. Measured over adb on the
+            // OnePlus 12 (8 cores, 8GB), Kesariya's four stems: width 1 took
+            // 1923ms and 1733ms, width 2 took 984ms and 990ms -- 45% off, the
+            // same ratio as the laptop, with no failure.
+            //
+            // So the gate is memory, not screen size. navigator.deviceMemory is
+            // a Chromium API that iOS Safari does not implement, so it reads
+            // undefined there and an iPhone -- the device that actually hung --
+            // keeps the serial path by construction rather than by our guess
+            // about which iPhone is safe. Low-end Androids fall out too.
+            const roomyEnough = !window.matchMedia('(max-width: 820px)').matches
+                                || (navigator.deviceMemory || 0) >= 4;
+            const decodeWidth = roomyEnough ? 2 : 1;
             for (let i = 0; i < STEM_NAMES.length; i += decodeWidth) {
                 await Promise.all(STEM_NAMES.slice(i, i + decodeWidth).map(async (stem) => {
                     try {
