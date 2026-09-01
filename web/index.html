@@ -1237,6 +1237,17 @@
             // the next download — which is where the 10-15s wait came from.
             let loaded = 0;
             const pre = (prefetched.dir === song.dir) ? prefetched.bytes : null;
+            // A prefetch for some *other* song is now dead weight: nothing will
+            // ever read those bytes, but they are still on the wire competing
+            // with the four stems we actually need. prefetchNext only aborted
+            // the previous prefetch when starting the next one, so picking out
+            // of list order -- which is what a room calling out songs does --
+            // left 8 mp3s in flight instead of 4. Measured 7.1-7.4s against
+            // 5.8s for the same load in order.
+            if (!pre && prefetched.ctrl) {
+                prefetched.ctrl.abort();
+                prefetched = { dir: null, bytes: null, ctrl: null };
+            }
             // decodeAudioData detaches the buffer it is given, so prefetched
             // bytes are good for exactly one decode. Drop our handle now.
             if (pre) prefetched = { dir: null, bytes: null, ctrl: null };
