@@ -1280,17 +1280,27 @@
                     return null;
                 });
             });
-            for (const stem of STEM_NAMES) {
-                try {
-                    const buf = await pending[stem];
-                    if (!buf) continue;
-                    stems[stem] = await audioCtx.decodeAudioData(buf);
-                    loaded++;
-                    setLoadStatus();
-                } catch (e) {
-                    if (!firstError) firstError = e;
-                    console.warn(`Decode failed: ${stem}`, e);
-                }
+            // Decode WIDTH, not "decode in parallel". Four at once put four
+            // ~100MB allocations under the allocator at the same moment, which
+            // hung an iPhone and gave Android "failed to load" -- that is why
+            // this loop was serial. Two at once holds half the peak of the
+            // version that broke, and phones are excluded outright on the same
+            // width test shouldPrefetch() uses, so their path is unchanged.
+            const decodeWidth =
+                window.matchMedia('(max-width: 820px)').matches ? 1 : 2;
+            for (let i = 0; i < STEM_NAMES.length; i += decodeWidth) {
+                await Promise.all(STEM_NAMES.slice(i, i + decodeWidth).map(async (stem) => {
+                    try {
+                        const buf = await pending[stem];
+                        if (!buf) return;
+                        stems[stem] = await audioCtx.decodeAudioData(buf);
+                        loaded++;
+                        setLoadStatus();
+                    } catch (e) {
+                        if (!firstError) firstError = e;
+                        console.warn(`Decode failed: ${stem}`, e);
+                    }
+                }));
             }
 
             // A context pinned to 44.1kHz decodes faster and holds less, but
