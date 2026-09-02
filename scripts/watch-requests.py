@@ -214,6 +214,21 @@ def run(cmd, **kw):
     return subprocess.run(cmd, cwd=REPO, **kw)
 
 
+def sync_r2():
+    """Push the new song's stems to R2, so the edge serves it too.
+
+    Best effort on purpose. The player falls back to the origin for anything
+    the bucket lacks, so a failure here costs a few seconds on first play and
+    nothing else -- it must never hold up a publish or fail a request. The
+    common causes are a lapsed wrangler login and no network.
+    """
+    r = run(["./scripts/sync-stems-r2.sh"], capture_output=True, text=True)
+    tail = (r.stdout or "").strip().splitlines()
+    log(f"  r2 sync: {tail[-1] if tail else 'no output'}"
+        + ("" if r.returncode == 0 else "  (FAILED — the edge will miss this song"
+                                        " until sync-stems-r2.sh is re-run)"))
+
+
 def process(entry, fast):
     name = entry["name"]
     title = field(entry.get("song"))
@@ -257,6 +272,7 @@ def process(entry, fast):
         log("  prepare-web failed"); return False
     if run(["./scripts/deploy-web.sh"], capture_output=True, text=True).returncode != 0:
         log("  deploy failed"); return False
+    sync_r2()
     log(f"  published {name}")
     post_result(entry["id"], "done", title=real or title)
     return True

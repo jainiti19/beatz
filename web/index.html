@@ -958,7 +958,13 @@
          * account subdomain, and a page holding a stale one would fail in a
          * way indistinguishable from an outage.
          */
-        const STEMS_MODE = new URLSearchParams(location.search).get('stems') || 'origin';
+        // Default flipped to the edge on 2 Sep, after it was proven on Iti's
+        // phone: zero .mp3 requests reached Nuremberg for a whole session,
+        // against 13-20s per cold song before. ?stems=origin is the way back.
+        // Safe to default because EVERY failure here degrades rather than
+        // breaks -- no token, no edge configured, a 404, a 5xx, or a CORS
+        // refusal all fall through to the origin, which holds every file.
+        const STEMS_MODE = new URLSearchParams(location.search).get('stems') || 'edge';
         let edgeBase = null, stemToken = null;
         const edgeReady = (async () => {
             if (STEMS_MODE !== 'edge') return;
