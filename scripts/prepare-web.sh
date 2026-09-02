@@ -82,7 +82,12 @@ for dir in "$SRC"/*/; do
     else
         echo "," >> "$WEB_STEMS/songs.json"
     fi
-    echo "  {\"name\": \"$DISPLAY\", \"dir\": \"$NAME\"}" >> "$WEB_STEMS/songs.json"
+    # rev = newest mp3 mtime. The player holds audio in the Cache API now, and
+    # this loop re-encodes to the SAME filename when a wav is newer -- which is
+    # why the Caddy header deliberately stops short of `immutable`. Without a
+    # rev in the URL a held copy would survive a reprocess forever, invisibly.
+    REV=$(stat -c %Y "$WEB_STEMS/$NAME"/*.mp3 2>/dev/null | sort -n | tail -1)
+    echo "  {\"name\": \"$DISPLAY\", \"dir\": \"$NAME\", \"rev\": ${REV:-0}}" >> "$WEB_STEMS/songs.json"
 
     # Show size
     SIZE=$(du -sh "$WEB_STEMS/$NAME" 2>/dev/null | cut -f1)

@@ -922,6 +922,22 @@
             `${STEMS_BASE_URL}/${encodeURIComponent(dir)}/${file}`;
         const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 
+        /* Audio is now held on the device, and prepare-web.sh re-encodes to the
+         * SAME filename when a song is reprocessed — which is exactly why the
+         * Caddy header stops short of `immutable`. A held copy under a bare URL
+         * would therefore be stale forever with nothing to bust it, so the URL
+         * carries `rev`, the newest mp3 mtime, written into songs.json.
+         * Looked up rather than kept in a map: `songs` is replaced wholesale by
+         * refreshSongList(), and a map would be the thing that went stale. */
+        const revOf = (dir) => {
+            const s = songs.find((x) => x.dir === dir);
+            return s && s.rev;
+        };
+        const audioUrl = (dir, stem) => {
+            const rev = revOf(dir);
+            return stemUrl(dir, `${stem}.mp3`) + (rev ? `?v=${rev}` : '');
+        };
+
         let audioCtx = null;
         let stems = {};
         // Compressed bytes for the song most likely to be picked next. Never
@@ -1435,7 +1451,7 @@
             const fetchStem = async (stem) => {
                 let buf = pre && pre[stem];
                 if (!buf || buf.byteLength === 0) {
-                    const resp = await fetch(stemUrl(song.dir, `${stem}.mp3`));
+                    const resp = await cachedFetch(audioUrl(song.dir, stem));
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     buf = await resp.arrayBuffer();
                 }
@@ -1658,8 +1674,7 @@
             // cache:'no-store' — realignment rewrites this file in place, and a
             // stale cached copy is indistinguishable from a bad alignment.
             try {
-                const resp = await fetch(stemUrl(dir, 'lyrics_timed.json'),
-                                         { cache: 'no-store' });
+                const resp = await netFirstCached(stemUrl(dir, 'lyrics_timed.json'));
                 if (resp.ok) {
                     timedLyrics = await resp.json();
                     syncScriptToggle();
@@ -1671,7 +1686,7 @@
 
             // Fallback to plain text lyrics — render as scrollable lines
             try {
-                const resp = await fetch(stemUrl(dir, 'lyrics.txt'));
+                const resp = await netFirstCached(stemUrl(dir, 'lyrics.txt'));
                 if (resp.ok) {
                     const text = await resp.text();
                     lyricsLines = text.split('\n').filter(l => l.trim());
@@ -2455,6 +2470,72 @@
          * progress. The worker just serves what is held.
          */
         const STEM_CACHE_NAME = 'beatz-stems-v1';
+
+        /* The way out, for a device where holding audio turns out to be the
+         * problem rather than the fix. ?nocache=1 serves everything from the
+         * network and empties what is held; an outside tester can be told a
+         * URL, and cannot be talked through Chrome's storage settings. */
+        const CACHE_OFF = new URLSearchParams(location.search).has('nocache');
+
+        async function stemCache() {
+            if (CACHE_OFF || !window.caches) return null;
+            // Private windows and a browser with site data blocked both throw
+            // here rather than returning null.
+            try { return await caches.open(STEM_CACHE_NAME); } catch (e) { return null; }
+        }
+
+        /* Audio, read through the cache. NOT a service worker: a worker's own
+         * fetches carry none of the page's basic-auth credentials, so they 401,
+         * and a browser answers a 401 by re-opening its Sign in dialog. That is
+         * what locked a real user out of the live site on 2 Sep. The page has
+         * no such problem — the browser attaches the credentials to a fetch the
+         * page makes — and caches.open() has never needed a worker.
+         *
+         * Playing a song also holds it. The case Iti actually hit is "a song I
+         * played last week is slow again": Chrome's HTTP cache is evictable and
+         * evicts, so nothing short of the Cache API survives. */
+        async function cachedFetch(url, opts = {}) {
+            const cache = await stemCache();
+            if (cache) {
+                try {
+                    const hit = await cache.match(url);
+                    if (hit) return hit;
+                } catch (e) {}
+            }
+            const resp = await fetch(url, opts);
+            if (cache && resp.ok) {
+                // Clone BEFORE the caller reads the body, and do not await:
+                // a full quota must slow nothing down and must not fail a load.
+                const copy = resp.clone();
+                cache.put(url, copy).catch(() => {});
+            }
+            return resp;
+        }
+
+        /* Lyrics go to the network first and fall back to what is held.
+         * Realignment rewrites lyrics_timed.json in place and there is no rev
+         * to bust it with, so a held copy must never beat the live one — but a
+         * saved song with no signal still has to show its words. */
+        async function netFirstCached(url) {
+            try {
+                const r = await fetch(url, { cache: 'no-store' });
+                if (r.ok) {
+                    // Hold it too. Playing a song holds its audio, and audio
+                    // with no words is not a sing-along -- a song that went
+                    // quiet on the train would have shown a blank pane.
+                    const cache = await stemCache();
+                    if (cache) cache.put(url, r.clone()).catch(() => {});
+                    return r;
+                }
+            } catch (e) {}
+            if (window.caches) {
+                try {
+                    const hit = await caches.match(url);
+                    if (hit) return hit;
+                } catch (e) {}
+            }
+            return new Response(null, { status: 504 });
+        }
         // Which songs are held locally. Kept as a set so filterSongs() can ask
         // synchronously -- it runs on every keystroke and cannot await a cache.
         let offlineDirs = new Set();
@@ -2464,6 +2545,10 @@
         let offlineBusy = false, offlineCancel = false, offlineArmed = false;
 
         async function initOffline() {
+            if (CACHE_OFF && window.caches) {
+                await caches.delete(STEM_CACHE_NAME);
+                console.warn('?nocache=1 — held audio dropped, network only');
+            }
             // A worker that misbehaves is not something an outside tester could
             // clear, so ?nosw=1 is the way back out.
             if (new URLSearchParams(location.search).has('nosw')) {
@@ -2495,6 +2580,16 @@
                     }
                 }
             } catch (e) { console.warn('could not clean up the old worker', e); }
+
+            // Saving is back, without the worker that broke it. The row is
+            // hidden in the markup so that a browser with no Cache API — or
+            // one refusing it in a private window — offers nothing it cannot
+            // deliver.
+            const row = document.getElementById('offlineRow');
+            if (row && await stemCache()) {
+                row.hidden = false;
+                renderOffline();
+            }
         }
 
         /* How many of the songs currently listed are fully held. Counted from
@@ -2507,11 +2602,20 @@
             // that was 440 lookups on this library every time the filter moved.
             const per = new Map();
             for (const req of await c.keys()) {
-                const m = new URL(req.url).pathname.match(/\/stems\/([^/]+)\/([^/]+)\.mp3$/);
-                if (m) {
-                    const dir = decodeURIComponent(m[1]);
-                    per.set(dir, (per.get(dir) || 0) + 1);
+                const u = new URL(req.url);
+                const m = u.pathname.match(/\/stems\/([^/]+)\/([^/]+)\.mp3$/);
+                if (!m) continue;
+                const dir = decodeURIComponent(m[1]);
+                // A reprocessed song writes the same filename under a new rev,
+                // so the copy held under the old one can never be reached
+                // again. Dropped here rather than left to the quota, which
+                // would evict something still wanted instead.
+                const rev = revOf(dir);
+                if (rev && String(rev) !== (u.searchParams.get('v') || '')) {
+                    c.delete(req).catch(() => {});
+                    continue;
                 }
+                per.set(dir, (per.get(dir) || 0) + 1);
             }
             offlineDirs = new Set([...per].filter(([, n]) => n >= STEM_NAMES.length).map(([d]) => d));
             return offlineDirs;
@@ -2579,7 +2683,7 @@
                 if (offlineCancel) break;
                 try {
                     for (const stem of STEM_NAMES) {
-                        const u = stemUrl(song.dir, stem + '.mp3');
+                        const u = audioUrl(song.dir, stem);
                         if (await c.match(u)) continue;
                         const r = await fetch(u);
                         if (r.ok) await c.put(u, r); else throw new Error('HTTP ' + r.status);
@@ -2644,8 +2748,8 @@
             prefetched = { dir, bytes, ctrl };
             try {
                 await Promise.all(STEM_NAMES.map(async (stem) => {
-                    const resp = await fetch(stemUrl(dir, `${stem}.mp3`),
-                                            { signal: ctrl.signal });
+                    const resp = await cachedFetch(audioUrl(dir, stem),
+                                                   { signal: ctrl.signal });
                     bytes[stem] = await resp.arrayBuffer();
                 }));
             } catch (e) {
