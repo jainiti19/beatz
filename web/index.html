@@ -1120,9 +1120,14 @@
             }
         }
 
+        // credentials:'include' is explicit rather than relying on the default.
+        // These requests MUST carry the login: one that does not comes back 401
+        // and the browser reopens its password prompt over a page that is
+        // already signed in.
         async function loadPlaylists() {
             try {
-                const r = await fetch('/api/playlists', { cache: 'no-store' });
+                const r = await fetch('/api/playlists',
+                                      { cache: 'no-store', credentials: 'include' });
                 if (!r.ok) return;
                 const d = await r.json();
                 playlists = d.playlists || {};
@@ -1142,8 +1147,8 @@
             localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
             const body = () => JSON.stringify({ playlists, rev: playlistRev });
             try {
-                let r = await fetch('/api/playlists', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body() });
+                let r = await fetch('/api/playlists', { method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' }, body: body() });
                 if (r.status === 409) {
                     // Someone edited from another phone between our load and
                     // our save. Keep both: their lists, ours winning on names
@@ -1153,8 +1158,8 @@
                     for (const n of deletedPlaylists) delete merged[n];
                     playlists = merged;
                     playlistRev = d.rev || 0;
-                    r = await fetch('/api/playlists', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body() });
+                    r = await fetch('/api/playlists', { method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' }, body: body() });
                 }
                 if (r.ok) {
                     const d = await r.json();
@@ -2758,9 +2763,13 @@
         // minutes to process, so anything tighter is just noise.
         setInterval(() => refreshSongList({ quiet: false }), 120000);
 
-        // Someone else building the set on their phone should show up here
-        // without a reload. Same cadence as the song list, same reasoning.
-        setInterval(loadPlaylists, 120000);
+        // NO periodic playlist poll. The site is behind basic auth, and any
+        // request that reaches the server without credentials returns 401 --
+        // which a browser answers by re-opening its Sign in dialog. A one-off
+        // failure is one stray prompt; polling it every two minutes turns that
+        // into an endless loop of prompts, which is exactly what locked a user
+        // out. Playlists load once per page load; a reload picks up anyone
+        // else's changes, which is often enough for a set built before a jam.
 
         // Track genuine user scrolling only. A 'scroll' listener would also fire
         // for our own smooth scrolling and permanently suppress auto-scroll.

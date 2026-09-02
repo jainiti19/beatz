@@ -25,7 +25,9 @@ BEATZ_USER = "beatz"
 # Routed on the player's OWN hostname -- see the note at the top of index.js for
 # why a separate domain cannot work. Everything not under /stems/ still goes to
 # Caddy in Nuremberg.
-# ROLLED BACK. See index.js -- kept off until the authorised path is verified.
+# Routed on the player's OWN hostname -- see index.js for why a separate domain
+# cannot work. Everything outside /stems/ still goes to Caddy in Nuremberg.
+# OFF. Enabling this broke the live site twice on 2 Sep. See index.js.
 # [[routes]]
 # pattern = "beatznbox.wesimplyhome.com/stems/*"
 # zone_name = "wesimplyhome.com"
