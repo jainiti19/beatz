@@ -1,0 +1,30 @@
+name = "beatznbox-stems"
+main = "src/index.js"
+compatibility_date = "2026-09-02"
+
+# No public workers.dev URL and no preview URLs. Both are on by default, and
+# both put this Worker -- and therefore the whole song library -- on an address
+# that bypasses the site entirely. The only way in is the route below.
+workers_dev = false
+preview_urls = false
+
+# The bucket holding the audio. Private: this Worker is the only way in.
+[[r2_buckets]]
+binding = "STEMS"
+bucket_name = "beatznbox-stems"
+
+# BEATZ_USER is not a secret; the password is set with
+#   wrangler secret put BEATZ_PASS
+# so it is typed by its owner and never written into this file or the repo.
+[vars]
+BEATZ_USER = "beatz"
+
+# Routed on the player's OWN hostname -- see the note at the top of index.js for
+# why a separate domain cannot work. Requires the zone proxied through
+# Cloudflare; everything not under /stems/ still goes to Caddy in Nuremberg.
+# Route intentionally NOT enabled on the first deploy. With BEATZ_PASS unset
+# the Worker 401s every stem request, which would take the songs off the live
+# site. Uncomment once the secret exists, then redeploy.
+# [[routes]]
+# pattern = "beatznbox.wesimplyhome.com/stems/*"
+# zone_name = "wesimplyhome.com"
