@@ -225,6 +225,33 @@ def _word_overlap(a, b):
     return sum(1 for w in wa if w in wb) / len(wa)
 
 
+def infer_artist(yt_title, typed):
+    """The performer named in "Artist - Song", when we can tell which is which.
+
+    Without this the pipeline asked for "Just The Way You Are" and was offered
+    The Piano Guys' cover, which is_cover() cannot catch because it inspects the
+    track name and the giveaway is the artist. The uploader already told us:
+    "Bruno Mars - Just The Way You Are". This never touches the QUERY -- gluing
+    an artist onto the search text is what made LRCLIB return nothing at all in
+    earlier rounds -- it only feeds score()'s existing artist bonus.
+
+    Deliberately limited to a two-part " - " split. "Song | Film | Singer" puts
+    the performer last, and guessing wrong would push scoring toward the wrong
+    recording rather than away from it.
+    """
+    if not yt_title:
+        return None
+    parts = [p.strip() for p in _SPLITS.split(yt_title) if p and p.strip()]
+    if len(parts) != 2:
+        return None
+    # The half that answers the request is the song; the other half is who sang.
+    a, b = _word_overlap(typed, parts[0]), _word_overlap(typed, parts[1])
+    if a == b:
+        return None
+    artist = _tidy(parts[1] if a > b else parts[0])
+    return artist or None
+
+
 def belongs_to_audio(hit, yt_title):
     """Reject a hit that is a different song by the SAME artist.
 
@@ -360,6 +387,11 @@ def main():
     # score(). Each candidate is judged against ITSELF, so a query that finds
     # a well-formed song which is not this one still fails the overlap gate
     # and we move on rather than writing someone else's words.
+    if not artist:
+        artist = infer_artist(yt_title, query)
+        if artist:
+            print(f"  artist from the video title: {artist!r}")
+
     candidates = title_candidates(query, yt_title)
     best = used = None
     tried = []
