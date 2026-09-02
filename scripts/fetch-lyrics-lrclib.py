@@ -156,14 +156,26 @@ def title_candidates(typed, yt_title=None):
         q = _QUOTED.search(yt_title)
         if q:
             add(q.group(1) or q.group(2))
-        head = _SPLITS.split(yt_title)[0]
-        # "Delhi Belly-nakkadwale disco udhaarwaley khisko" — film glued to the
-        # front. The song is the far side, so try that before the whole thing.
-        if "-" in head:
-            tail = head.rsplit("-", 1)[-1]
-            if len(tail.split()) >= 2:
-                add(tail)
-        add(head)
+        parts = [p for p in _SPLITS.split(yt_title) if p and p.strip()]
+        # Which side of a separator holds the song depends on the upload's
+        # convention: "Song | Film | Singer" puts it first, but the Western
+        # "Artist - Song" puts it last. Taking the head unconditionally asked
+        # LRCLIB for "Bruno Mars" and got back Bruno Mars' "Natalie" -- right
+        # artist, wrong song, and it passed every gate because a candidate is
+        # judged against itself. What was actually asked for settles it, so
+        # order the parts by how much of the request each one contains. The
+        # sort is stable, so a useless typed string leaves the order alone.
+        if len(parts) > 1:
+            parts.sort(key=lambda part: -_word_overlap(typed, part))
+        for part in parts:
+            # "Delhi Belly-nakkadwale disco udhaarwaley khisko" — film glued to
+            # the front with no spaces, which _SPLITS deliberately does not
+            # break on. The song is the far side, so try that before the whole.
+            if "-" in part:
+                tail = part.rsplit("-", 1)[-1]
+                if len(tail.split()) >= 2:
+                    add(tail)
+            add(part)
         add(yt_title)
     add(typed)
     return out
@@ -181,6 +193,62 @@ def is_cover(h):
 
 def _words(text):
     return [w for w in re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).split() if w]
+
+
+# "[00:19.90] Make the stars look like they're not shining" -- some LRCLIB
+# contributors paste synced LRC straight into the plainLyrics field, and Bruno
+# Mars' entry is one of them: 56 of its 57 lines carried a timestamp. Written
+# through verbatim those render on screen, and the aligner would try to sing
+# them. Also drops the [ar:]/[ti:]/[by:] header tags LRC files carry.
+_LRC_TIME = re.compile(r"^\s*(?:\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]\s*)+")
+_LRC_TAG = re.compile(r"^\s*\[[a-z]{2,}:[^\]]*\]\s*$", re.I)
+
+
+def strip_lrc(text):
+    """Plain words only, whatever the contributor actually uploaded."""
+    out = []
+    for line in (text or "").split("\n"):
+        if _LRC_TAG.match(line):
+            continue
+        line = _LRC_TIME.sub("", line).rstrip()
+        if line.strip():
+            out.append(line)
+    return "\n".join(out)
+
+
+def _word_overlap(a, b):
+    """Fraction of a's distinctive words that appear in b."""
+    wa = [w for w in _words(a) if len(w) > 2]
+    if not wa:
+        return 0.0
+    wb = set(_words(b))
+    return sum(1 for w in wa if w in wb) / len(wa)
+
+
+def belongs_to_audio(hit, yt_title):
+    """Reject a hit that is a different song by the SAME artist.
+
+    score() judges a candidate against itself, which is circular once the
+    candidate is wrong: asking for "Bruno Mars" returned "Bruno Mars - Natalie
+    (Official Audio)", whose name contains every word of the query, so the
+    overlap gate passed it and the duration gate agreed at 225s against 236s.
+    Nothing in that chain ever asked whether it was the song we separated.
+
+    The YouTube title is the one string known to belong to this audio. So take
+    the hit's own name, remove the artist's words and the usual upload junk,
+    and require what is left -- the part that actually names the song -- to
+    appear in it. Only a hit with nothing in common is refused, which leaves
+    room for LRCLIB spelling its titles differently from the uploader.
+    """
+    if not yt_title:
+        return True
+    name = {w for w in _words(hit.get("trackName")) if len(w) > 2}
+    name -= set(_words(hit.get("artistName")))
+    name -= TITLE_JUNK
+    if not name:
+        return True
+    have = set(_words(yt_title))
+    return any(w in have for w in name)
 
 
 def title_overlap(title, hit):
@@ -304,6 +372,10 @@ def main():
         if b is None:
             tried.append(f"{cand!r} {len(hits)} hits, none this song")
             continue
+        if not belongs_to_audio(b, yt_title):
+            tried.append(f"{cand!r} matched {b.get('trackName')!r}, "
+                         f"not the song in the video title")
+            continue
         best, used = b, cand
         break
 
@@ -315,7 +387,7 @@ def main():
     if used != query:
         print(f"  matched on {used!r} (asked as {query!r})")
 
-    lyrics = best["plainLyrics"].strip()
+    lyrics = strip_lrc(best["plainLyrics"]).strip()
     with open(out, "w", encoding="utf-8") as f:
         f.write(lyrics + "\n")
 
