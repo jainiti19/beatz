@@ -11,8 +11,22 @@ and recover from. Nothing here processes a song; it only records the ask.
 
 Usage: queue-service.py [--port 8931] [--queue /opt/beatznbox/queue/requests.jsonl]
 """
-import argparse, json, os, re, time
+import argparse, base64, hashlib, hmac, json, os, re, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Signs the short-lived tokens that let the R2 Worker serve audio from the
+# edge. Read at every mint rather than cached, so rotating the file takes
+# effect without a restart -- and so a missing file fails closed instead of
+# serving a token signed with something stale.
+TOKEN_KEY_PATH = os.environ.get('BEATZ_TOKEN_KEY', '/opt/beatznbox/stem-token.key')
+TOKEN_TTL = 7 * 24 * 3600     # a week; the page refreshes on every load
+
+# Where the audio is served from, handed to the player rather than compiled
+# into it. The workers.dev hostname carries an account subdomain nobody should
+# have to remember, and a player holding a stale one would fail in a way that
+# looks like an outage. One file on the box decides it; an empty or missing
+# file means there is no edge and the player uses the origin.
+EDGE_BASE_PATH = os.environ.get('BEATZ_EDGE_BASE', '/opt/beatznbox/stem-edge.url')
 
 MAX_BODY = 4096          # a request is a song name, not a payload
 MAX_LYRICS = 32768       # a long song is a few KB; this is generous
@@ -58,6 +72,31 @@ def known_songs():
 def slug(text):
     s = re.sub(r'[^A-Za-z0-9_]+', '_', text).strip('_')
     return s[:64]
+
+
+def mint_stem_token():
+    """A capability to read the audio, for someone who has already logged in.
+
+    Caddy has authenticated every request that reaches this service, so there
+    is nobody to identify and nothing to encode: the token says only "issued,
+    and good until". It grants exactly the authority the logged-in user
+    already has, which is why it can be handed to a cache and a Worker that
+    know nothing about passwords.
+    """
+    try:
+        with open(TOKEN_KEY_PATH, encoding='utf-8') as f:
+            key = f.read().strip()
+    except OSError:
+        return None, 0
+    if not key:
+        return None, 0
+    exp = int(time.time()) + TOKEN_TTL
+
+    msg = f'v1.{exp}'
+    sig = base64.urlsafe_b64encode(
+        hmac.new(key.encode(), msg.encode(), hashlib.sha256).digest()
+    ).decode().rstrip('=')
+    return f'{msg}.{sig}', exp
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -283,6 +322,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {'ok': True, 'pending': self._pending()})
         if path == '/api/playlists':
             return self.get_playlists()
+        if path == '/api/stem-token':
+            token, exp = mint_stem_token()
+            if not token:
+                # No key on the box means the edge is not set up. Say so
+                # plainly: the player falls back to the origin, which is
+                # slower and completely correct.
+                return self._json(503, {'ok': False, 'error': 'no signing key'})
+            base = ''
+            try:
+                with open(EDGE_BASE_PATH, encoding='utf-8') as f:
+                    base = f.read().strip()
+            except OSError:
+                pass
+            return self._json(200, {'ok': True, 'token': token,
+                                    'exp': exp, 'base': base})
         if path == '/api/status':
             # The player asks about the ids it submitted; it holds those in
             # localStorage, so nothing here has to remember who anyone is.

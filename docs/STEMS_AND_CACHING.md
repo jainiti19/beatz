@@ -136,3 +136,74 @@ point is there a Worker route on `beatznbox.wesimplyhome.com`.
 Part B only helps the *first* play of a song on a device. Part A is what makes
 the second and every later play fast. If Part B turns out to be a small gain on
 top of Part A, stopping after Part A is a reasonable place to stop.
+
+---
+
+## What was actually built, 2 Sep
+
+Part A is **live**. Part B is built and **switched off**, waiting on one command
+and one unknown.
+
+### Decisions taken during the build, that the design above did not anticipate
+
+- **Only the mp3s go to the edge.** songs.json and the lyrics stay on the
+  origin: the manifest must be fresh on every load, and lyrics_timed.json is
+  rewritten in place by a realign, so putting either in a bucket would add a
+  sync obligation for a few KB of gain.
+- **The edge hostname comes from the server, not the page.** The token endpoint
+  returns `base` alongside the token, read from `/opt/beatznbox/stem-edge.url`.
+  A workers.dev hostname carries an account subdomain nobody should have to
+  remember, and a page compiled against a stale one would fail in a way that
+  looks exactly like an outage. **Absent or empty file = no edge**, and the
+  player silently uses the origin. That is why everything shipped today is
+  inert.
+- **Cache keys are always the origin URL**, whichever host served the bytes.
+  Proven in the browser: a song downloaded through a stand-in edge then played
+  with the edge off needed **zero** network calls. Flipping `?stems=` costs
+  nobody a re-download, and neither will the eventual default flip.
+- **The Worker has a `/_keys` listing**, token-protected. The bucket was filled
+  by hand and nothing in the repo recorded the key layout, so checking whether
+  a file is there meant guessing paths one at a time. It returns names and
+  sizes, never bytes.
+
+### The one unknown: the R2 key layout
+
+`bucket info` reports 651 objects and 2.52GB — the library is there — but every
+key guessed for it came back "does not exist": `Kesariya/vocals.mp3`,
+`stems/Kesariya/vocals.mp3`, `web/stems/...`, `songs.json`. So the Worker's
+`/stems/<dir>/<file>` -> `<dir>/<file>` mapping **may be wrong**, and if it is,
+every stem 404s (not 401s — the distinction tells you which half is broken).
+
+`GET /_keys?t=<token>&limit=20` answers this in one call the moment the Worker
+is deployed. Fix the prefix in `index.js` if it differs, and redeploy.
+
+### Verified before deploying, not after
+
+- 17 Worker tests under Node with R2 stubbed
+  (`node server/r2-worker/test/auth.test.mjs`): valid token accepted; missing,
+  empty, malformed, wrong-key, tampered-expiry and expired tokens all refused;
+  an unconfigured Worker serves nobody; a 401 never carries
+  `WWW-Authenticate`, so it can never make a browser open a Sign in dialog;
+  Range answers 206; CORS granted to the player origin and withheld from
+  others.
+- **Cross-language**: a token minted by the queue service's own
+  `mint_stem_token()` on the VPS is accepted by the Worker's JavaScript
+  verifier. The Python-signs / JavaScript-verifies seam is the one a unit test
+  on either side alone would have missed.
+- In the browser against a stand-in Worker: requests go to the edge carrying
+  the token, responses are read through CORS, cache keys stay token-free, and
+  when the stand-in omitted its CORS headers the player said **"Failed to
+  load"** in the status line rather than hanging.
+
+### Still to do, in order
+
+1. **Deploy the Worker.** `cd server/r2-worker && npx wrangler@4.86.0 deploy`.
+   Pin 4.86.0: newer wrangler needs Node 22 and this laptop is on 20, whose
+   version the watcher service's PATH is pinned to. The deploy prints the
+   workers.dev hostname.
+2. **Check the key layout** with `/_keys` (above) before anything else.
+3. **Point the site at it**: write that hostname into
+   `/opt/beatznbox/stem-edge.url` on the VPS. Nothing changes for anyone —
+   the player only reads `base` when asked with `?stems=edge`.
+4. **Measure on the phone** with `?stems=edge`, against 13-20s cold today.
+5. Only then flip the default, keeping `?stems=origin` as the way back.

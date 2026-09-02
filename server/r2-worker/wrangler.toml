@@ -2,10 +2,13 @@ name = "beatznbox-stems"
 main = "src/index.js"
 compatibility_date = "2026-09-02"
 
-# No public workers.dev URL and no preview URLs. Both are on by default, and
-# both put this Worker -- and therefore the whole song library -- on an address
-# that bypasses the site entirely. The only way in is the route below.
-workers_dev = false
+# A workers.dev URL is now the INTENDED way in, and is safe in a way it was
+# not before. The old Worker checked the site's basic-auth password, so it had
+# to sit on the player's own hostname and a public URL really would have been
+# an open door. This one checks a signed token and fails closed without one,
+# so its own hostname is fine -- and that is what keeps a Worker route off
+# beatznbox.wesimplyhome.com, where enabling one broke the live site twice.
+workers_dev = true
 preview_urls = false
 
 # The bucket holding the audio. Private: this Worker is the only way in.
@@ -13,21 +16,18 @@ preview_urls = false
 binding = "STEMS"
 bucket_name = "beatznbox-stems"
 
-# BEATZ_USER is not a secret; the password is set with
-#   wrangler secret put BEATZ_PASS
-# so it is typed by its owner and never written into this file or the repo.
-[vars]
-BEATZ_USER = "beatz"
+# The HMAC key that signs stem tokens is set with
+#   wrangler secret put STEM_TOKEN_KEY
+# and must match /opt/beatznbox/stem-token.key on the VPS, which is what the
+# queue service signs with. A mismatch looks exactly like every token being
+# forged: a uniform 401 on audio and nothing else wrong.
+#
+# BEATZ_PASS is no longer read by this Worker. Leaving a stale secret set does
+# nothing, but it can be removed with `wrangler secret delete BEATZ_PASS`.
 
-# Routed on the player's OWN hostname -- see the note at the top of index.js for
-# why a separate domain cannot work. Requires the zone proxied through
-# Cloudflare; everything not under /stems/ still goes to Caddy in Nuremberg.
-# Routed on the player's OWN hostname -- see the note at the top of index.js for
-# why a separate domain cannot work. Everything not under /stems/ still goes to
-# Caddy in Nuremberg.
-# Routed on the player's OWN hostname -- see index.js for why a separate domain
-# cannot work. Everything outside /stems/ still goes to Caddy in Nuremberg.
-# OFF. Enabling this broke the live site twice on 2 Sep. See index.js.
-# [[routes]]
-# pattern = "beatznbox.wesimplyhome.com/stems/*"
-# zone_name = "wesimplyhome.com"
+# NO ROUTE, deliberately, and there should never be one again. A route here
+# would put this Worker in front of beatznbox.wesimplyhome.com, which is what
+# broke the live site twice on 2 Sep. Token auth removes the reason a route
+# was ever needed: the player can reach the workers.dev hostname above from
+# any origin, because the credential travels in the URL rather than in a
+# header the browser only sends to one origin.

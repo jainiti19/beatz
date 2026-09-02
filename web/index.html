@@ -938,6 +938,62 @@
             return stemUrl(dir, `${stem}.mp3`) + (rev ? `?v=${rev}` : '');
         };
 
+        /* ===== Where the audio actually comes from =====
+         *
+         * The origin is in Nuremberg and everyone using this is in Asia: 305ms
+         * RTT against 120ms to Cloudflare's nearest edge, and 83-89% of a cold
+         * song's load is the download. So the mp3s can come from an R2 Worker
+         * instead -- but OPT IN, per session, with ?stems=edge. Twice on 2 Sep
+         * hosting was changed under everybody at once and everybody lost the
+         * site. Nobody's default moves until this has been proven on a phone.
+         *
+         * The Worker takes a signed token in the URL rather than the site
+         * password. That is what lets it live on its own hostname: a browser
+         * only sends an Authorization header to the origin that asked for it,
+         * so a password-checking Worker had to sit in front of the live site,
+         * and when it was wrong the live site was wrong. A token in the URL
+         * travels anywhere, so the player is now untouchable from there.
+         *
+         * The hostname comes from the server, not from here: it carries an
+         * account subdomain, and a page holding a stale one would fail in a
+         * way indistinguishable from an outage.
+         */
+        const STEMS_MODE = new URLSearchParams(location.search).get('stems') || 'origin';
+        let edgeBase = null, stemToken = null;
+        const edgeReady = (async () => {
+            if (STEMS_MODE !== 'edge') return;
+            try {
+                // Same-origin and behind the same password, so the browser
+                // attaches the credentials and only someone already logged in
+                // can get a token.
+                const r = await fetch('/api/stem-token', { credentials: 'include' });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const d = await r.json();
+                if (d.ok && d.token && d.base) {
+                    stemToken = d.token;
+                    edgeBase = d.base.replace(/\/+$/, '');
+                    console.info('stems: edge at', edgeBase);
+                } else {
+                    console.warn('stems: no edge configured — using the origin');
+                }
+            } catch (e) {
+                // Never fatal. The origin serves every one of these files.
+                console.warn('stems: could not get an edge token — using the origin', e);
+            }
+        })();
+
+        /* A cache key is ALWAYS the origin URL, whoever served the bytes.
+         * Otherwise switching ?stems= would orphan the whole held library, and
+         * a token refresh would orphan it again a week later. */
+        function toNet(url) {
+            if (!edgeBase || !stemToken) return url;
+            if (!/\.mp3(\?|$)/.test(url)) return url;   // audio only; lyrics and
+                                                       // the manifest stay put
+            const path = url.replace(/^\./, '');
+            return edgeBase + path + (path.includes('?') ? '&' : '?')
+                 + 't=' + encodeURIComponent(stemToken);
+        }
+
         let audioCtx = null;
         let stems = {};
         // Compressed bytes for the song most likely to be picked next. Never
@@ -2502,7 +2558,9 @@
                     if (hit) return hit;
                 } catch (e) {}
             }
-            const resp = await fetch(url, opts);
+            await edgeReady;             // so the first song is not the one
+                                         // measurement that quietly used the origin
+            const resp = await fetch(toNet(url), opts);
             if (cache && resp.ok) {
                 // Clone BEFORE the caller reads the body, and do not await:
                 // a full quota must slow nothing down and must not fail a load.
