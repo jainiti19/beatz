@@ -32,3 +32,7 @@ design/**/beatznbox-*.html
 !.dev.vars.example
 .env*
 !.env.example
+
+# Written and deleted by watch-requests.py while a song is processing.
+# It was committed once by a `git add -A` that landed mid-run.
+.request-manifest.txt

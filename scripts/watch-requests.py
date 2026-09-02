@@ -204,7 +204,10 @@ def record_meta(name, title, artist, album=None):
     meta[name] = entry
     tmp = META + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=1)
+        # indent=2 to match the file as written by hand and by
+        # apply-song-meta.py. At indent=1 every publish reformatted all 1800
+        # lines, so the one song that actually changed was invisible in a diff.
+        json.dump(meta, f, ensure_ascii=False, indent=2)
     os.replace(tmp, META)
     log(f"  metadata: {name} -> {title!r}")
 
