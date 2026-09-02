@@ -137,10 +137,70 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return None, self._json(400, {'error': 'bad json'})
 
+    # ---- shared playlists --------------------------------------------
+    # Playlists lived in each device's localStorage, so the person running the
+    # night could build a set and nobody else could see it. One shared file,
+    # because that is what a shared set means -- there are no accounts here and
+    # inventing them to scope playlists per person would be a bigger change
+    # than the feature.
+    def _playlists_path(self):
+        return os.path.join(os.path.dirname(self.queue_path), 'playlists.json')
+
+    def _read_playlists(self):
+        try:
+            with open(self._playlists_path(), encoding='utf-8') as f:
+                d = json.load(f)
+            return d.get('playlists', {}), int(d.get('rev', 0))
+        except Exception:
+            return {}, 0
+
+    def get_playlists(self):
+        pl, rev = self._read_playlists()
+        return self._json(200, {'ok': True, 'playlists': pl, 'rev': rev})
+
+    def post_playlists(self):
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        incoming = data.get('playlists')
+        if not isinstance(incoming, dict):
+            return self._json(400, {'error': 'playlists must be an object'})
+        if len(incoming) > 100:
+            return self._json(400, {'error': 'too many playlists'})
+        clean = {}
+        for name, dirs in incoming.items():
+            if not isinstance(name, str) or not isinstance(dirs, list):
+                continue
+            name = name.strip()[:60]
+            if not name:
+                continue
+            # Directory names only: these are looked up against the stems tree,
+            # so anything with a slash or traversal in it has no business here.
+            clean[name] = [d for d in dirs
+                           if isinstance(d, str) and d and '/' not in d
+                           and '\\' not in d and '..' not in d][:500]
+
+        cur, rev = self._read_playlists()
+        # Last-writer-wins would silently bin a playlist someone else just made
+        # from another phone. The client sends the rev it started from; a stale
+        # one gets the current state back and re-sends its change on top.
+        sent = data.get('rev')
+        if sent is not None and int(sent) != rev:
+            return self._json(409, {'error': 'stale', 'playlists': cur, 'rev': rev})
+
+        rev += 1
+        tmp = self._playlists_path() + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'playlists': clean, 'rev': rev}, f, ensure_ascii=False)
+        os.replace(tmp, self._playlists_path())     # atomic: no half-written file
+        return self._json(200, {'ok': True, 'playlists': clean, 'rev': rev})
+
     def do_POST(self):
         path = self.path.rstrip('/')
         if path == '/api/lyrics':
             return self.post_lyrics()
+        if path == '/api/playlists':
+            return self.post_playlists()
         if path != '/api/request':
             return self._json(404, {'error': 'not found'})
         data, err = self._read_json(MAX_BODY)
@@ -221,6 +281,8 @@ class Handler(BaseHTTPRequestHandler):
         path = u.path.rstrip('/')
         if path == '/api/health':
             return self._json(200, {'ok': True, 'pending': self._pending()})
+        if path == '/api/playlists':
+            return self.get_playlists()
         if path == '/api/status':
             # The player asks about the ids it submitted; it holds those in
             # localStorage, so nothing here has to remember who anyone is.

@@ -947,7 +947,15 @@
         let currentPreset = 'karaoke';
 
         // Playlists (stored in localStorage)
+        // Playlists are shared across everyone's devices now: the server holds
+        // them and localStorage is only the offline copy, so the set still shows
+        // when the venue wifi is gone. Seeded from that copy so the first paint
+        // has something before the fetch lands.
         let playlists = JSON.parse(localStorage.getItem('beatznbox_playlists') || '{}');
+        let playlistRev = 0;
+        // Names deleted on THIS device, so a merge after someone else's edit
+        // does not resurrect them from the server's copy.
+        const deletedPlaylists = new Set();
         let selectedPlaylist = null;
 
         // Session presets (stored in localStorage)
@@ -1041,6 +1049,7 @@
         function deletePlaylist(name) {
             if (!confirm(`Delete the playlist "${name}"? The songs stay in the library.`)) return;
             delete playlists[name];
+            deletedPlaylists.add(name);
             if (selectedPlaylist === name) selectedPlaylist = null;
             savePlaylists();
             renderPlaylistChips();
@@ -1086,8 +1095,52 @@
             }
         }
 
-        function savePlaylists() {
+        async function loadPlaylists() {
+            try {
+                const r = await fetch('/api/playlists', { cache: 'no-store' });
+                if (!r.ok) return;
+                const d = await r.json();
+                playlists = d.playlists || {};
+                playlistRev = d.rev || 0;
+                localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
+                renderPlaylistChips();
+                filterSongs();
+            } catch (e) {
+                // Offline, or the queue service is down. The localStorage copy
+                // is already loaded, so the set still works -- it just will not
+                // pick up anyone else's changes until the next successful load.
+                console.warn('playlists: using the local copy', e);
+            }
+        }
+
+        async function savePlaylists() {
             localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
+            const body = () => JSON.stringify({ playlists, rev: playlistRev });
+            try {
+                let r = await fetch('/api/playlists', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body() });
+                if (r.status === 409) {
+                    // Someone edited from another phone between our load and
+                    // our save. Keep both: their lists, ours winning on names
+                    // we hold, minus whatever we deleted here.
+                    const d = await r.json();
+                    const merged = Object.assign({}, d.playlists || {}, playlists);
+                    for (const n of deletedPlaylists) delete merged[n];
+                    playlists = merged;
+                    playlistRev = d.rev || 0;
+                    r = await fetch('/api/playlists', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body() });
+                }
+                if (r.ok) {
+                    const d = await r.json();
+                    playlists = d.playlists || {};
+                    playlistRev = d.rev || 0;
+                    localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
+                    renderPlaylistChips();
+                }
+            } catch (e) {
+                console.warn('playlists: change kept locally, not shared', e);
+            }
         }
 
         function filterSongs() {
@@ -2614,6 +2667,7 @@
 
         // Init
         loadSongList();
+        loadPlaylists();
         initOffline();
         renderBell();
         pollRequests();
@@ -2622,6 +2676,10 @@
         // 2 minutes: the manifest is ~8KB and no-cache, and a song takes
         // minutes to process, so anything tighter is just noise.
         setInterval(() => refreshSongList({ quiet: false }), 120000);
+
+        // Someone else building the set on their phone should show up here
+        // without a reload. Same cadence as the song list, same reasoning.
+        setInterval(loadPlaylists, 120000);
 
         // Track genuine user scrolling only. A 'scroll' listener would also fire
         // for our own smooth scrolling and permanently suppress auto-scroll.
