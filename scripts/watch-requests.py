@@ -32,7 +32,9 @@ STEMS = os.path.expanduser("~/Music/karaoke/htdemucs")
 
 
 def log(msg):
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    # Date as well as time: the log is append-only across restarts, and reading
+    # a bare clock time led to a wrong diagnosis of why the watcher was down.
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 
 def ssh(*args, check=False):
