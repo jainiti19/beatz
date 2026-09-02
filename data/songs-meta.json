@@ -922,5 +922,53 @@
     ],
     "film": "",
     "year": null
+  },
+  "O_sanam": {
+    "title": "O Sanam",
+    "singers": [
+      "Lucky Ali"
+    ],
+    "film": "O Sanam (Greatest Hits : Lucky Ali)",
+    "year": null
+  },
+  "Sham": {
+    "title": "Sham",
+    "singers": [
+      "JalRaj"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Sayoonee": {
+    "title": "Sayonee",
+    "singers": [
+      "Junoon"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Tanha_Dil": {
+    "title": "Tanha Dil Tanha Safar",
+    "singers": [
+      "Shaan"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Dil_Dooba": {
+    "title": "Dil Dooba",
+    "singers": [
+      "Sonu Nigam"
+    ],
+    "film": "Khakee",
+    "year": null
+  },
+  "Bahara_bahara": {
+    "title": "Bahara",
+    "singers": [
+      "Shreya Ghoshal"
+    ],
+    "film": "",
+    "year": null
   }
 }
