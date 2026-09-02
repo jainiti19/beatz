@@ -32,6 +32,13 @@ MAX_BODY = 4096          # a request is a song name, not a payload
 MAX_LYRICS = 32768       # a long song is a few KB; this is generous
 MAX_FIELD = 120
 MAX_PENDING = 50         # a full queue means something is wrong upstream
+MAX_NOTE = 300           # a fault report is a sentence, not an essay
+
+# What a listener can tell us is wrong. Kept as a fixed set rather than free
+# text because the four cases need different repairs: a wrong recording needs
+# re-downloading, wrong words need refetching, bad sound needs re-separating.
+# The note is where anything else goes.
+REPORT_REASONS = {'wrong-song', 'lyrics', 'quality', 'other'}
 
 # The published manifest, used only to answer "do we already have this?".
 # Read fresh when its mtime changes: the watcher rewrites it on every deploy.
@@ -240,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_lyrics()
         if path == '/api/playlists':
             return self.post_playlists()
+        if path == '/api/report':
+            return self.post_report()
         if path != '/api/request':
             return self._json(404, {'error': 'not found'})
         data, err = self._read_json(MAX_BODY)
@@ -313,6 +322,42 @@ class Handler(BaseHTTPRequestHandler):
             os.fsync(f.fileno())
         n = len([l for l in text.split('\n') if l.strip()])
         return self._json(200, {'ok': True, 'name': name, 'lines': n})
+
+    def post_report(self):
+        """Someone listening says this song is wrong.
+
+        Until now the only detector for a bad song was Iti playing it and
+        noticing -- which is how both of 2 Sep's mismatched songs were found,
+        one of them graded "good" by every automatic check we have. The room
+        hears these before any script does, so let the room say so.
+
+        Appended, never rewritten: the same rule the request queue follows, so
+        a half-finished write cannot lose what came before it.
+        """
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        name = slug((data.get('dir') or '').strip())
+        reason = (data.get('reason') or '').strip()
+        if not name:
+            return self._json(400, {'error': 'which song?'})
+        if reason not in REPORT_REASONS:
+            return self._json(400, {'error': 'unknown reason'})
+        rec = {
+            'id': f"r{int(time.time() * 1000)}",
+            'dir': name,
+            'song': (data.get('song') or '')[:MAX_FIELD],
+            'reason': reason,
+            'note': (data.get('note') or '')[:MAX_NOTE],
+            'who': (data.get('who') or '')[:MAX_FIELD],
+            'at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        }
+        path = os.path.join(os.path.dirname(self.queue_path), 'reports.jsonl')
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+            f.flush()
+            os.fsync(f.fileno())
+        return self._json(200, {'ok': True, 'id': rec['id']})
 
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs

@@ -232,6 +232,49 @@
         .btn-stop { width: 36px; height: 36px; background: #888; font-size: 14px; }
         .btn:hover { opacity: 0.85; }
 
+        /* ===== Report a fault =====
+         * Both of 2 Sep's mismatched songs were found by Iti playing them and
+         * noticing; every automatic check had passed one of them as "good".
+         * The room hears these before any script does. */
+        .player-head { display: flex; align-items: center; gap: 6px; }
+        .player-head .player-title { flex: 1; min-width: 0; }
+        .flag-btn {
+            flex: 0 0 auto; border: none; background: none; cursor: pointer;
+            color: #b0bec5; font-size: 15px; line-height: 1;
+            padding: 7px 9px; border-radius: 6px;
+        }
+        .flag-btn:hover { background: #ECEFF1; color: #78909C; }
+        .flag-btn.open { background: #FFEBEE; color: #C62828; }
+        .report-box {
+            border: 1px solid #e0e0e0; border-radius: 8px;
+            padding: 10px; margin: 6px 0; background: #fafafa;
+        }
+        .report-reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+        .report-reason {
+            flex: 1 1 auto; min-height: 34px; padding: 6px 10px;
+            border: 1px solid #cfd8dc; border-radius: 6px; background: white;
+            color: #455a64; font-size: 12px; cursor: pointer; white-space: nowrap;
+        }
+        .report-reason.active { background: #C62828; border-color: #C62828; color: #fff; }
+        .report-box input {
+            width: 100%; padding: 8px 10px; margin-top: 8px;
+            border: 1px solid #ccc; border-radius: 8px; font-size: 13px; outline: none;
+        }
+        .report-send {
+            margin-top: 8px; padding: 8px 14px; border: none; border-radius: 8px;
+            background: #00897B; color: #fff; font-size: 13px; cursor: pointer;
+        }
+        .report-send:disabled { opacity: .5; cursor: default; }
+
+        /* Enter the lyrics view from beside the sound controls, which is where
+           you are when you want it. The topbar button stays, but only ON the
+           stage, where it is the way out -- a phone has no Escape key. */
+        .btn-expand {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: #ECEFF1; color: #455A64; font-size: 15px;
+        }
+        .btn-expand:hover { background: #CFD8DC; }
+
         .presets {
             display: flex;
             gap: 4px;
@@ -270,14 +313,16 @@
             flex: 0 0 auto;
             padding-right: 2px;
         }
-        /* Taller than the mode buttons on purpose: this one gets used mid-song
-           with a phone in one hand, and the 23px chips elsewhere are already
-           too small to hit. */
+        /* Sized to its label rather than stretched across the row, and 30px
+           tall. It was 40px and flex:1 on the argument that it gets used
+           mid-song -- true, but six of them stretched edge to edge dominated
+           the player, and Iti asked for the row back. Still comfortably above
+           the 23px chips that were the actual too-small case. */
         .tempo-btn {
-            flex: 1;
+            flex: 0 1 auto;
             min-width: 0;
-            min-height: 40px;
-            padding: 6px 2px;
+            min-height: 30px;
+            padding: 5px 10px;
             border: 1px solid #00897B;
             border-radius: 6px;
             background: white;
@@ -593,6 +638,10 @@
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         body.big-screen .screen-btn { display: none; }
+        /* Off the topbar in normal use -- entering the lyrics view now happens
+           from the expand button beside the transport. It stays here for the
+           stage, where the sheet can be hidden and this is the way out. */
+        body:not(.big-screen) .topbar .screen-btn { display: none; }
         body.big-screen.controls-open .screen-btn {
             display: inline-block; font-size: var(--bs-chrome);
             background: transparent; border: 1px solid #2C3E3B; color: #6E8B87;
@@ -669,6 +718,7 @@
         body.big-screen #playerContent {
             display: flex; flex-direction: column; gap: calc(var(--bs-pad) * 0.65);
         }
+        body.big-screen .player-head,
         body.big-screen .player-title,
         body.big-screen .save-row,
         body.big-screen .preset-indicator,
@@ -680,6 +730,10 @@
         /* loadLyrics() still sets pasteBox inline, and "Replace the lyrics"
            has no business on a wall. */
         body.big-screen #pasteBox { display: none !important; }
+        /* A fault form has no business on a wall, and the expand button is
+           replaced up there by the topbar's "Leave". */
+        body.big-screen .report-box,
+        body.big-screen .btn-expand { display: none !important; }
         /* Up next belongs on the stage: when a phone is mirrored this sheet is
            the only control surface there is, so without it nobody can move the
            room to the next song without leaving the stage. */
@@ -815,18 +869,31 @@
                 min-height: 48px;
                 font-size: 20px;
             }
+            /* Secondary to play and stop, so it does not take their size --
+               .btn's phone minimums would otherwise override the base rule. */
+            .btn-expand {
+                min-width: 40px;
+                min-height: 40px;
+                width: 40px;
+                height: 40px;
+                font-size: 15px;
+            }
             .save-btn, .skip-btn {
                 min-height: 42px;
                 padding: 8px 14px;
                 font-size: 14px;
             }
-            /* Still a 44px target on a phone, but no wider than a quarter of
-               the row — four of them have to fit. */
+            /* 32px rather than the 44px touch minimum, at Iti's request: two
+               full-width 44px rows sat between the transport and the mixer and
+               made the player taller than the song list. These are picked once
+               at the start of a song, not hunted for mid-verse -- unlike the
+               faders below, which keep their large targets. */
             .preset-btn {
-                min-height: 44px;
-                padding: 8px 6px;
-                font-size: 12px;
+                min-height: 32px;
+                padding: 5px 6px;
+                font-size: 11px;
             }
+            .tempo-btn { min-height: 30px; font-size: 11px; }
             .section-header { padding: 12px 0; font-size: 15px; }
             .search-box input { padding: 12px; font-size: 15px; }
             /* The stage used to be hidden here because it was built for a
@@ -1468,7 +1535,28 @@
             renderSongList();
 
             document.getElementById('playerContent').innerHTML = `
-                <div class="player-title">${song.name}</div>
+                <div class="player-head">
+                    <div class="player-title">${song.name}</div>
+                    <button class="flag-btn" id="flagBtn" onclick="toggleReport()"
+                            title="Report a problem with this song"
+                            aria-label="Report a problem with this song">&#9873;</button>
+                </div>
+                <div class="report-box" id="reportBox" hidden>
+                    <div class="report-reasons">
+                        <button class="report-reason" data-reason="wrong-song"
+                                onclick="pickReason(this)">Wrong song</button>
+                        <button class="report-reason" data-reason="lyrics"
+                                onclick="pickReason(this)">Lyrics don't match</button>
+                        <button class="report-reason" data-reason="quality"
+                                onclick="pickReason(this)">Sound quality</button>
+                        <button class="report-reason" data-reason="other"
+                                onclick="pickReason(this)">Something else</button>
+                    </div>
+                    <input type="text" id="reportNote" maxlength="200"
+                           placeholder="Anything worth knowing (optional)">
+                    <button class="report-send" id="reportSend" onclick="sendReport()" disabled>Send</button>
+                    <div class="request-note" id="reportResult"></div>
+                </div>
                 <div class="loading" id="loadingStatus">Loading stems...</div>
                 <div class="seek-row">
                     <span class="time" id="currentTime">0:00</span>
@@ -1478,6 +1566,8 @@
                 <div class="transport">
                     <button class="btn btn-stop" id="stopBtn" onclick="stopPlayback()">&#9632;</button>
                     <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
+                    <button class="btn btn-expand" onclick="toggleBigScreen()"
+                            title="Lyrics view" aria-label="Lyrics view">&#9974;</button>
                 </div>
                 <div class="presets">
                     <button class="preset-btn" id="pre-singalong" onclick="applyPreset('singalong')">Sing along</button>
@@ -1956,6 +2046,85 @@
             if (document.body.classList.contains('big-screen')
                 && e.target.closest('.panel-center')) showStageControls();
         }));
+
+        /* ===== Reporting a fault =====
+         *
+         * The only detector this library has ever had for a wrong song is a
+         * person playing it. Both of 2 Sep's mismatches were found that way,
+         * and one of them had been graded "good" by every automatic check --
+         * the words were real, well-formed and belonged to a different song.
+         * Nothing a script looks at can see that. Someone singing can.
+         *
+         * The reason is a fixed choice rather than free text because the four
+         * cases need different repairs: a wrong recording has to be
+         * re-downloaded, wrong words refetched, bad sound re-separated.
+         */
+        let reportReason = null;
+
+        function toggleReport() {
+            const box = document.getElementById('reportBox');
+            const btn = document.getElementById('flagBtn');
+            if (!box) return;
+            box.hidden = !box.hidden;
+            btn.classList.toggle('open', !box.hidden);
+            if (box.hidden) resetReport();
+        }
+
+        function resetReport() {
+            reportReason = null;
+            document.querySelectorAll('.report-reason')
+                .forEach((b) => b.classList.remove('active'));
+            const send = document.getElementById('reportSend');
+            if (send) { send.disabled = true; send.textContent = 'Send'; }
+            const note = document.getElementById('reportNote');
+            if (note) note.value = '';
+            const out = document.getElementById('reportResult');
+            if (out) out.textContent = '';
+        }
+
+        function pickReason(el) {
+            document.querySelectorAll('.report-reason')
+                .forEach((b) => b.classList.toggle('active', b === el));
+            reportReason = el.dataset.reason;
+            document.getElementById('reportSend').disabled = false;
+        }
+
+        async function sendReport() {
+            const song = songs[currentSongIndex];
+            const out = document.getElementById('reportResult');
+            const send = document.getElementById('reportSend');
+            if (!song || !reportReason) return;
+            send.disabled = true;
+            send.textContent = 'Sending...';
+            try {
+                const r = await fetch('/api/report', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dir: song.dir,
+                        song: song.name,
+                        reason: reportReason,
+                        note: document.getElementById('reportNote').value.trim(),
+                    }),
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+                // Say so plainly. A paste used to succeed in silence and Iti
+                // hit that as a real annoyance -- there was no way to tell a
+                // send from a no-op.
+                out.textContent = 'Thanks — logged. Someone will look at it.';
+                send.textContent = 'Sent';
+                setTimeout(() => {
+                    const box = document.getElementById('reportBox');
+                    if (box && !box.hidden) toggleReport();
+                }, 2000);
+            } catch (e) {
+                out.textContent = 'Could not send that — try again in a moment.';
+                send.disabled = false;
+                send.textContent = 'Send';
+            }
+        }
 
         function toggleBigScreen() {
             const on = document.body.classList.toggle('big-screen');
