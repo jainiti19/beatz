@@ -414,6 +414,17 @@
         .offline-btn.armed { background: #17604a; color: #fff; border-color: #17604a; }
         .offline-note { color: #6b8a7d; }
         .lyric-roman { display: none; }
+        /* Lyrics live on the stage, not the landing page: at desk size the pane
+           was a narrow light-on-white column nobody read, and it pushed the
+           song list and player apart. body.big-screen re-shows it below. */
+        .panel-right { display: none; }
+        .add-pl {
+            font-size: 17px; line-height: 1; cursor: pointer; padding: 4px 8px;
+            color: #17604a; border-radius: 6px; min-width: 30px; text-align: center;
+        }
+        .add-pl:hover { background: #e8f3ee; }
+        .up-next { display: none; }
+        .up-next.is-on { display: flex; }
         .no-lyrics { color: #999; font-style: italic; font-size: 14px; }
         .lyrics-line {
             padding: 6px 8px;
@@ -572,6 +583,10 @@
            nobody in the room can read. */
         body.big-screen .panel-left { display: none; }
         body.big-screen .panel-right {
+            /* Explicit display, because the pane is display:none off-stage now.
+               Every other child of this grid is placed by hand for the same
+               reason -- inheriting a default here is what breaks the stage. */
+            display: flex; flex-direction: column;
             flex: 1 1 auto; min-height: 0; overflow: hidden;
             border: none; background: transparent; padding: 0;
         }
@@ -638,8 +653,23 @@
         /* updateUpNext() sets style="display:flex" inline, which beats any
            stylesheet rule -- hence !important. loadLyrics() sets pasteBox the
            same way, and a "Replace the lyrics" link has no business on a wall. */
-        body.big-screen .up-next,
+        /* loadLyrics() still sets pasteBox inline, and "Replace the lyrics"
+           has no business on a wall. */
         body.big-screen #pasteBox { display: none !important; }
+        /* Up next belongs on the stage: when a phone is mirrored this sheet is
+           the only control surface there is, so without it nobody can move the
+           room to the next song without leaving the stage. */
+        body.big-screen .up-next.is-on {
+            display: flex; align-items: center; gap: 10px;
+            background: transparent; border: 1px solid #2C3E3B; border-radius: 8px;
+            padding: 8px 10px; margin: 0;
+        }
+        body.big-screen .up-next .label { color: #4A5453; font-size: var(--bs-chrome); }
+        body.big-screen .up-next .next-name { color: #6E8B87; font-size: var(--bs-chrome); }
+        body.big-screen .up-next .skip-btn {
+            background: #00897B; color: #fff; border: none; border-radius: 6px;
+            padding: 9px 16px; font-size: var(--bs-chrome); min-height: 40px; cursor: pointer;
+        }
         body.big-screen .seek-row { display: flex; align-items: center; gap: 10px; margin: 0; }
         body.big-screen .seek-row input[type="range"] { height: 20px; }
         body.big-screen .time { font-size: var(--bs-chrome); color: #6E8B87; min-width: 3.4em; }
@@ -1021,9 +1051,6 @@
             const el = document.getElementById('playlistChips');
             const esc = (t) => String(t).replace(/'/g, "\\'").replace(/"/g, '&quot;');
             let html = '';
-            if (isFiltering()) {
-                html += `<span class="chip chip-clear" onclick="clearFilters()">&times; Clear</span>`;
-            }
             html += `<span class="chip ${selectedPlaylist === null ? 'active' : ''}" onclick="selectPlaylist(null)">All</span>`;
             for (const name of Object.keys(playlists)) {
                 const on = selectedPlaylist === name;
@@ -1034,6 +1061,13 @@
                      +  `</span>`;
             }
             html += `<span class="chip" onclick="createPlaylist()">+</span>`;
+            // Only offered once something is actually saved, or it reads as a
+            // filter that always empties the list.
+            if (offlineDirs.size) {
+                html += `<span class="chip ${savedOnly ? 'active' : ''}" onclick="toggleSavedOnly()"`
+                     +  ` title="Only songs downloaded to this device">&#8681; Saved`
+                     +  ` (${offlineDirs.size})</span>`;
+            }
             el.innerHTML = html;
         }
 
@@ -1069,6 +1103,8 @@
 
             // One box across title, film and singer: at a party people type
             // "Kishore" or "Dabangg" as readily as they type the song.
+            if (savedOnly) list = list.filter(s => offlineDirs.has(s.dir));
+
             if (query) {
                 list = list.filter(s => {
                     const hay = [s.name, s.film || '', ...(s.singers || [])].join(' ').toLowerCase();
@@ -1078,10 +1114,6 @@
 
             filteredSongs = list;
             // The Clear chip appears and disappears with the filter it undoes.
-            const chips = document.getElementById('playlistChips');
-            if (chips && (chips.querySelector('.chip-clear') !== null) !== isFiltering()) {
-                renderPlaylistChips();
-            }
             renderSongList();
         }
 
@@ -1114,7 +1146,7 @@
                             : ''}
                         ${songPlaylists.length ? `<div class="song-playlists">${songPlaylists.join(', ')}</div>` : ''}
                     </div>
-                    <span style="font-size:11px;cursor:pointer;padding:4px" onclick="event.stopPropagation();addToPlaylist(${globalIdx})">+P</span>
+                    <span class="add-pl" title="Add to a playlist" aria-label="Add to a playlist" onclick="event.stopPropagation();addToPlaylist(${globalIdx})">+</span>
                 </div>`;
             }).join('');
         }
@@ -1192,7 +1224,7 @@
                     <span class="tempo-label">Speed</span>
                     ${TEMPOS.map((t) => `<button class="tempo-btn" data-tempo="${t}" onclick="setTempo(${t})">${Math.round(t * 100) + '%'}</button>`).join('')}
                 </div>
-                <div class="up-next" id="upNext" style="display:none">
+                <div class="up-next" id="upNext">
                     <span class="label">Up next:</span>
                     <span class="next-name" id="nextSongName"></span>
                     <button class="skip-btn" onclick="playNext()">Skip</button>
@@ -1570,6 +1602,22 @@
             if (!aligned.length) return escapeHtml(line.text);
 
             const norm = s => s.toLowerCase().replace(/[^a-z']/g, '');
+
+            // Why some songs swept word by word and others only line by line:
+            // norm() strips everything outside [a-z'], so every Devanagari word
+            // normalises to the empty string, never matches a token, and the
+            // whole line falls back to plain text. The aligner built its tokens
+            // from these very words though, so when the counts agree, pairing
+            // them by position is sound -- and when they do not (a hyphenate
+            // split in two, a token dropped) we still fall through to the
+            // matcher below rather than pairing words with the wrong times.
+            if (display.length === aligned.length && display.every(w => !norm(w))) {
+                return display.map((dw, di) =>
+                    `<span class="lyrics-word" id="w-${lineIdx}-${di}" ` +
+                    `data-s="${aligned[di].start}" data-e="${aligned[di].end}">` +
+                    `${escapeHtml(dw)}</span>`
+                ).join(' ');
+            }
             let ai = 0;
             return display.map((dw, di) => {
                 const key = norm(dw);
@@ -2252,12 +2300,12 @@
             const el = document.getElementById('upNext');
             if (!el) return;
             const nextIdx = getNextSongIndex();
-            if (nextIdx >= 0 && filteredSongs.length > 1) {
-                el.style.display = 'flex';
-                document.getElementById('nextSongName').textContent = songs[nextIdx].name;
-            } else {
-                el.style.display = 'none';
-            }
+            // A class, not an inline style. Inline display is what forced
+            // `!important` into the stage rules three separate times; with the
+            // state in a class the stage can simply restyle it.
+            const on = nextIdx >= 0 && filteredSongs.length > 1;
+            el.classList.toggle('is-on', on);
+            if (on) document.getElementById('nextSongName').textContent = songs[nextIdx].name;
         }
 
         // Pull the next song's mp3s in the background so switching does not
@@ -2281,6 +2329,10 @@
          * progress. The worker just serves what is held.
          */
         const STEM_CACHE_NAME = 'beatz-stems-v1';
+        // Which songs are held locally. Kept as a set so filterSongs() can ask
+        // synchronously -- it runs on every keystroke and cannot await a cache.
+        let offlineDirs = new Set();
+        let savedOnly = false;
         const MB_PER_SONG = 22;              // measured mean across the library
         const CONFIRM_OVER = 25;             // songs, before asking twice
         let offlineBusy = false, offlineCancel = false, offlineArmed = false;
@@ -2300,14 +2352,18 @@
             try { await navigator.serviceWorker.register('sw.js'); }
             catch (e) { console.warn('service worker registration failed', e); return; }
             document.getElementById('offlineRow').hidden = false;
+            // Populate offlineDirs before anything asks it, or the Saved chip
+            // stays missing until the filter happens to move.
+            await refreshOfflineDirs();
+            renderPlaylistChips();
             renderOffline();
         }
 
         /* How many of the songs currently listed are fully held. Counted from
          * the cache rather than remembered in localStorage, because the cache is
          * the only thing that actually decides whether a load hits the network. */
-        async function offlineHeld(list) {
-            if (!window.caches) return 0;
+        async function refreshOfflineDirs() {
+            if (!window.caches) return offlineDirs;
             const c = await caches.open(STEM_CACHE_NAME);
             // One sweep of the cache index, not four match() calls per song --
             // that was 440 lookups on this library every time the filter moved.
@@ -2319,7 +2375,19 @@
                     per.set(dir, (per.get(dir) || 0) + 1);
                 }
             }
-            return list.filter((song) => (per.get(song.dir) || 0) >= STEM_NAMES.length).length;
+            offlineDirs = new Set([...per].filter(([, n]) => n >= STEM_NAMES.length).map(([d]) => d));
+            return offlineDirs;
+        }
+
+        async function offlineHeld(list) {
+            const held = await refreshOfflineDirs();
+            return list.filter((song) => held.has(song.dir)).length;
+        }
+
+        function toggleSavedOnly() {
+            savedOnly = !savedOnly;
+            renderPlaylistChips();
+            filterSongs();
         }
 
         async function renderOffline() {
@@ -2393,6 +2461,8 @@
                 paint(done);
             }
             offlineBusy = false;
+            await refreshOfflineDirs();
+            renderPlaylistChips();
             if (failed) {
                 el.innerHTML = `<span class="offline-note">Saved with ${failed} failure${failed === 1 ? '' : 's'}
                     &mdash; tap to retry the rest</span> <button class="offline-btn" onclick="saveOffline()">Retry</button>`;
@@ -2407,6 +2477,12 @@
         async function clearOffline() {
             if (!window.caches) return;
             await caches.delete(STEM_CACHE_NAME);
+            await refreshOfflineDirs();
+            // Nothing is saved any more, so a Saved filter would show an empty
+            // list with no way back to the songs.
+            savedOnly = false;
+            renderPlaylistChips();
+            filterSongs();
             renderOffline();
         }
 
