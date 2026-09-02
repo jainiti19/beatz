@@ -22,9 +22,10 @@ BEATZ_USER = "beatz"
 # Routed on the player's OWN hostname -- see the note at the top of index.js for
 # why a separate domain cannot work. Requires the zone proxied through
 # Cloudflare; everything not under /stems/ still goes to Caddy in Nuremberg.
-# Route intentionally NOT enabled on the first deploy. With BEATZ_PASS unset
-# the Worker 401s every stem request, which would take the songs off the live
-# site. Uncomment once the secret exists, then redeploy.
+# Routed on the player's OWN hostname -- see the note at the top of index.js for
+# why a separate domain cannot work. Everything not under /stems/ still goes to
+# Caddy in Nuremberg.
+# ROLLED BACK. See index.js -- kept off until the authorised path is verified.
 # [[routes]]
 # pattern = "beatznbox.wesimplyhome.com/stems/*"
 # zone_name = "wesimplyhome.com"

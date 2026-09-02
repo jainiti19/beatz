@@ -20,7 +20,13 @@
  * change to the player at all.
  */
 
-const REALM = 'BeatznBox';
+// MUST match Caddy's realm exactly. Browsers store basic-auth credentials per
+// (origin, realm), so announcing a different realm means the browser does not
+// recognise the password it already holds -- it never sends it, every stem
+// request 401s, and the song list comes up empty. Caddy's basic_auth has no
+// realm configured, so it uses Caddy's default, "restricted". Changing this
+// string logs every tester out of the stems.
+const REALM = 'restricted';
 
 /** Compare without leaking the answer through timing. */
 function sameSecret(a, b) {
@@ -87,6 +93,10 @@ export default {
         headers.set('Accept-Ranges', 'bytes');
         // Private content: never let a shared cache hold it for another user.
         headers.append('Vary', 'Authorization');
+        // Both Caddy and this Worker send the same cache headers, so without a
+        // marker there is no way to tell from a response which one answered --
+        // and "is it actually using R2?" is the whole question here.
+        headers.set('X-Beatz-Served-By', 'r2-worker');
 
         if (object.range && range) {
             const end = object.range.offset + object.range.length - 1;
