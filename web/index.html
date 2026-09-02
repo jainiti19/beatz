@@ -1096,11 +1096,7 @@
             html += `<span class="chip" onclick="createPlaylist()">+</span>`;
             // Only offered once something is actually saved, or it reads as a
             // filter that always empties the list.
-            if (offlineDirs.size) {
-                html += `<span class="chip ${savedOnly ? 'active' : ''}" onclick="toggleSavedOnly()"`
-                     +  ` title="Only songs downloaded to this device">&#8681; Saved`
-                     +  ` (${offlineDirs.size})</span>`;
-            }
+
             el.innerHTML = html;
         }
 
@@ -2473,15 +2469,27 @@
                 console.warn('service worker unregistered and caches dropped (?nosw=1)');
                 return;
             }
-            if (!('serviceWorker' in navigator) || !window.caches) return;
-            try { await navigator.serviceWorker.register('sw.js'); }
-            catch (e) { console.warn('service worker registration failed', e); return; }
-            document.getElementById('offlineRow').hidden = false;
-            // Populate offlineDirs before anything asks it, or the Saved chip
-            // stays missing until the filter happens to move.
-            await refreshOfflineDirs();
-            renderPlaylistChips();
-            renderOffline();
+            // Offline saving is REMOVED, not merely disabled. The worker sat in
+            // front of every request, and its own fetches carry no basic-auth
+            // credentials, so they 401 -- and a browser answers a 401 by
+            // re-opening its Sign in dialog. Logging in worked; the worker then
+            // produced another 401 and the box came back, over and over. A
+            // cache for audio must never sit in the authentication path.
+            //
+            // sw.js is now a stub that unregisters itself, because a worker
+            // already on a device keeps running until a new script replaces it.
+            if (!('serviceWorker' in navigator)) return;
+            try {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                if (regs.length) {
+                    // Let the stub run so it can clear the caches it made.
+                    await navigator.serviceWorker.register('sw.js');
+                } else if (window.caches) {
+                    for (const k of await caches.keys()) {
+                        if (k.startsWith('beatz-')) await caches.delete(k);
+                    }
+                }
+            } catch (e) { console.warn('could not clean up the old worker', e); }
         }
 
         /* How many of the songs currently listed are fully held. Counted from
