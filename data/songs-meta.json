@@ -898,12 +898,29 @@
     "film": "",
     "year": 2010
   },
-  "Abhi_mujh_mein_kahin": {
-    "title": "Agneepath (Ek Awaaz)",
+  "Piya_bole": {
+    "title": "Piyu Bole",
     "singers": [
-      "Bintu Pabra feat. Kp Kundu"
+      "Sonu Nigam",
+      "Shreya Ghoshal"
     ],
-    "film": "Agneepath (Ek Awaaz) - Single",
+    "film": "Parineeta (Original Motion Picture Soundtrack)",
+    "year": null
+  },
+  "Kya_hua_tera_wada": {
+    "title": "Kya Hua Tera Wada",
+    "singers": [
+      "Sushma Shreshta & Mohd. Rafi"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Abhi_mujh_mein_kahin": {
+    "title": "Abhi Mujh Mein Kahin",
+    "singers": [
+      "Sonu Nigam"
+    ],
+    "film": "",
     "year": null
   }
 }

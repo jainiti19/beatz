@@ -44,7 +44,7 @@ Usage:
     fetch-lyrics-lrclib.py "typed name" out.txt --yt-title "<raw youtube title>"
     fetch-lyrics-lrclib.py --show "song name"               # list candidates only
 """
-import json, os, re, sys, urllib.parse, urllib.request
+import difflib, json, os, re, sys, urllib.parse, urllib.request
 
 API = "https://lrclib.net/api/search"
 UA = {"User-Agent": "beatznbox/1.0 (personal singalong library)"}
@@ -252,7 +252,67 @@ def infer_artist(yt_title, typed):
     return artist or None
 
 
-def belongs_to_audio(hit, yt_title):
+# How much of the shorter name the two must share. Half is the point where
+# "Wada Kar Le Sajna" stops looking like "Kya Hua Tera Wada" while
+# "Tu Kisi Rail Si" still looks like the typed "Tu kisi raii si".
+NAME_AGREEMENT = 0.5
+
+
+# Two transliterations of one Hindi word are rarely spelled identically --
+# "Qafirana" against LRCLIB's "Qaafirana", "kalandar" against "qalandar". An
+# exact set intersection rejected the CORRECT match for Qafirana, so words are
+# compared for near-identity instead.
+SAME_WORD = 0.8
+
+
+def _same_word(w, others):
+    if w in others:
+        return True
+    return any(difflib.SequenceMatcher(None, w, o).ratio() >= SAME_WORD
+               for o in others)
+
+
+def _name_agreement(a, b):
+    """Two-way: the fraction of the SHORTER name's distinctive words shared.
+
+    One-way was the hole. "Wada Kar Le Sajna (feat. Mohammed Rafi)" contains
+    "wada", so a one-word test called it the same song as "Kya Hua Tera Wada".
+    Measuring against the shorter side means a long, differently-named track
+    has to earn the match rather than collect one word by accident.
+    """
+    wa = {w for w in _words(a) if len(w) > 2} - TITLE_JUNK
+    wb = {w for w in _words(b) if len(w) > 2} - TITLE_JUNK
+    if not wa or not wb:
+        return 0.0
+    shared = sum(1 for w in wa if _same_word(w, wb))
+    return shared / min(len(wa), len(wb))
+
+
+def song_segment(yt_title, typed):
+    """The part of an upload title that names the SONG, not the film or singer.
+
+    "Kya Hua Tera Wada-Lyrical | Hum Kisise kum nahi | Mohammed Rafi" carries
+    the song, the film and the performer, and only the first is evidence about
+    which song this is. A quoted span is the uploader saying so outright;
+    otherwise the segment answering the request most closely is the song.
+    """
+    if not yt_title:
+        return None
+    q = _QUOTED.search(yt_title)
+    if q:
+        return _tidy(q.group(1) or q.group(2)) or None
+    parts = [p for p in _SPLITS.split(yt_title) if p and p.strip()]
+    if not parts:
+        return None
+    best = max(parts, key=lambda part: _word_overlap(typed, part))
+    # A segment sharing nothing with the request tells us nothing; falling back
+    # to the whole title is what the old check effectively did.
+    if _word_overlap(typed, best) == 0:
+        return None
+    return _tidy(best) or None
+
+
+def belongs_to_audio(hit, yt_title, typed=None):
     """Reject a hit that is a different song by the SAME artist.
 
     score() judges a candidate against itself, which is circular once the
@@ -275,7 +335,21 @@ def belongs_to_audio(hit, yt_title):
     if not name:
         return True
     have = set(_words(yt_title))
-    return any(w in have for w in name)
+    if not any(w in have for w in name):
+        return False
+
+    # Sharing ONE word with the upload title is not enough, and this is where
+    # two wrong songs reached the library on 2 Sep. Both requests named an
+    # artist and a film in the title, and both wrong hits borrowed a word from
+    # exactly there: "Mohammed Rafi" is in the title because Rafi sang the
+    # song we asked for, and "Agneepath" is in it because that is the film.
+    # So compare against the part of the title that names the SONG, and
+    # against what was actually asked for -- a wrong hit has to resemble one
+    # of those, not merely mention someone who appears in the credits.
+    anchors = [a for a in (song_segment(yt_title, typed), typed) if a]
+    if not anchors:
+        return True
+    return max(_name_agreement(a, " ".join(name)) for a in anchors) >= NAME_AGREEMENT
 
 
 def title_overlap(title, hit):
@@ -404,7 +478,7 @@ def main():
         if b is None:
             tried.append(f"{cand!r} {len(hits)} hits, none this song")
             continue
-        if not belongs_to_audio(b, yt_title):
+        if not belongs_to_audio(b, yt_title, query):
             tried.append(f"{cand!r} matched {b.get('trackName')!r}, "
                          f"not the song in the video title")
             continue
