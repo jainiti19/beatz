@@ -528,7 +528,7 @@
            container.clientHeight and scrolls the container itself, so if it
            grew to fit the page instead, the word sweep would stop following
            the singer.                                                      */
-        /* ===== Big screen =====
+        /* ===== Lyrics view (class name stays .big-screen) =====
            A projector in a dim room washes out white, and the normal 16px
            lyric pane is unreadable past about a metre. This is the same three
            panels rearranged by grid — lyrics as the stage, the player panel as
@@ -577,7 +577,7 @@
 
         /* The topbar becomes the stage's title: the song, and nothing else the
            room has to read. The way out appears with the controls -- a phone
-           has no Escape key, and the rail that used to carry "Leave big screen"
+           has no Escape key, and the rail that used to carry "Leave lyrics view"
            is gone. */
         body.big-screen .topbar {
             background: transparent; box-shadow: none; border: none;
@@ -833,10 +833,57 @@
                desktop and leaked badly onto a phone. It now sizes itself, and
                a phone mirrored to a television is the main reason to have it. */
             .screen-btn { font-size: 11px; padding: 5px 8px; }
+
+            /* ===== Landing on a phone is the song list, and nothing else =====
+             *
+             * Before a song is picked, the player and the lyric pane are both
+             * empty states saying "Select a song" -- and between them they
+             * pushed "Request a song" most of a screen below the fold. You
+             * arrived, saw a third of a song list, and had to scroll past two
+             * placeholders to ask for anything.
+             *
+             * So the two empty panels are not rendered until there is
+             * something to put in them. The list then owns the screen and the
+             * request row sits at the bottom of it, always in reach.
+             *
+             * :not(.big-screen) matters: the stage deliberately shows the
+             * centre panel, and these rules sit LATER in the file than the
+             * stage's, so at equal specificity they would win and blank it.
+             * The same trap that leaked big-screen CSS onto phones in August.
+             */
+            body.no-song:not(.big-screen) {
+                display: flex;
+                flex-direction: column;
+                /* dvh, not vh: vh is the height WITHOUT the browser's own
+                   chrome, so the request row would sit under the address bar
+                   on exactly the phones this is for. */
+                height: 100dvh;
+                overflow: hidden;
+            }
+            body.no-song:not(.big-screen) .panels {
+                flex: 1 1 auto;
+                height: auto;
+                min-height: 0;
+            }
+            body.no-song:not(.big-screen) .panel-left {
+                flex: 1 1 auto;
+                min-height: 0;
+                border-bottom: none;
+            }
+            body.no-song:not(.big-screen) .song-list {
+                flex: 1 1 auto;
+                max-height: none;
+            }
+            /* The lyric pane is already hidden everywhere but the stage
+               (see .panel-right above), so only the player needs hiding. */
+            body.no-song:not(.big-screen) .panel-center { display: none; }
         }
     </style>
 </head>
-<body>
+<!-- no-song: on a phone this collapses the page to the song list alone. Set
+     in the markup rather than by script so the empty panels never flash up
+     before the first paint. Removed for good the first time a song is picked. -->
+<body class="no-song">
     <div class="topbar">
         <img class="brand-logo" src="data:image/webp;base64,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" alt="">
         <h1>BeatznBox</h1>
@@ -848,7 +895,7 @@
             <div class="bell-head">Your requests<button onclick="clearSeen()">Clear</button></div>
             <div id="bellList"></div>
         </div>
-        <button class="screen-btn" onclick="toggleBigScreen()" title="Big screen (Esc to leave)">Big screen</button>
+        <button class="screen-btn" onclick="toggleBigScreen()" title="Lyrics view (Esc to leave)">Lyrics view</button>
     </div>
 
     <div class="panels">
@@ -870,7 +917,7 @@
             <div class="bs-foot">
                 <div class="bs-label">Request a song</div>
                 <div class="bs-url" id="bsUrl"></div>
-                <button class="screen-btn dark" onclick="toggleBigScreen()">Leave big screen</button>
+                <button class="screen-btn dark" onclick="toggleBigScreen()">Leave lyrics view</button>
             </div>
             <div class="request-box">
                 <details id="requestPanel">
@@ -1398,6 +1445,20 @@
             sourceNodes = {};
 
             currentSongIndex = index;
+            // There is something to show now, so the player and the lyric pane
+            // come back. On a phone they were never rendered until this point.
+            const wasLanding = document.body.classList.contains('no-song');
+            document.body.classList.remove('no-song');
+            if (wasLanding && window.matchMedia('(max-width: 820px)').matches) {
+                // Only on the FIRST pick. The controls did not exist a moment
+                // ago, so without this you tap a song and the thing you were
+                // sent to is below the fold. On later picks the player is
+                // already on screen and moving the page would just be rude.
+                requestAnimationFrame(() => {
+                    const el = document.querySelector('.panel-center');
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+            }
             const song = songs[index];
             currentSongDir = song.dir;
             isLoading = true;
@@ -1901,7 +1962,7 @@
             // There is no Escape key on a phone, so the way out rides with the
             // controls. It is the same button that got you in.
             const btn = document.querySelector('.topbar .screen-btn');
-            if (btn) btn.textContent = on ? 'Leave' : 'Big screen';
+            if (btn) btn.textContent = on ? 'Leave' : 'Lyrics view';
             if (on) showStageControls(); else hideStageControls();
             document.getElementById('bsUrl').textContent = location.host;
             const song = songs[currentSongIndex];
