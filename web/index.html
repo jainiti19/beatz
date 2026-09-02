@@ -2560,7 +2560,26 @@
             }
             await edgeReady;             // so the first song is not the one
                                          // measurement that quietly used the origin
-            const resp = await fetch(toNet(url), opts);
+
+            /* The origin holds every file; the edge holds what was last
+             * uploaded to it. A song added since then would simply fail to
+             * play, and "this one song is broken" is the hardest kind of bug
+             * to hear about. So an edge that cannot serve a file is not an
+             * error, it is a slower route. */
+            const netUrl = toNet(url);
+            let resp = null;
+            try {
+                resp = await fetch(netUrl, opts);
+            } catch (e) {
+                // A superseded prefetch aborts on purpose. That is not the
+                // edge failing and must not turn into a second request.
+                if (netUrl === url || (opts.signal && opts.signal.aborted)) throw e;
+            }
+            if (netUrl !== url && (!resp || !resp.ok)) {
+                console.warn('stems: edge gave', resp ? resp.status : 'no response',
+                             'for', url, '— falling back to the origin');
+                resp = await fetch(url, opts);
+            }
             if (cache && resp.ok) {
                 // Clone BEFORE the caller reads the body, and do not await:
                 // a full quota must slow nothing down and must not fail a load.

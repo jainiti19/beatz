@@ -140,15 +140,21 @@ export default {
          * "is the file actually there" meant guessing paths one at a time.
          * Reveals names, never bytes, and needs the same token as the audio. */
         if (url.pathname === '/_keys') {
+            // Paged. R2 caps a list at 1000 and this library is already 651
+            // objects; a caller that ignored the cursor would silently see a
+            // prefix of the bucket and conclude files were missing. Two
+            // separate bugs in this project have been exactly that shape.
             const listed = await env.STEMS.list({
                 prefix: url.searchParams.get('prefix') || '',
                 limit: Math.min(Number(url.searchParams.get('limit')) || 20, 1000),
+                cursor: url.searchParams.get('cursor') || undefined,
             });
             const h = corsHeaders(request);
             h.set('Content-Type', 'application/json');
             h.set('Cache-Control', 'no-store');
             return new Response(JSON.stringify({
                 truncated: listed.truncated,
+                cursor: listed.truncated ? listed.cursor : null,
                 keys: listed.objects.map((o) => ({ key: o.key, size: o.size })),
             }, null, 1), { headers: h });
         }
