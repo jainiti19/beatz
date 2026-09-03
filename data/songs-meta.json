@@ -970,5 +970,21 @@
     ],
     "film": "",
     "year": null
+  },
+  "Ghar_kab_aaoge": {
+    "title": "Ghar Kab Aaoge",
+    "singers": [
+      "Anu Malik"
+    ],
+    "film": "Ghar Kab Aaoge (From \"BORDER 2\")",
+    "year": null
+  },
+  "Hai_apna_Dil_to_awara": {
+    "title": "Hai Apna Dil Toh Awara (From \"The Xpose\")",
+    "singers": [
+      "Himesh Reshammiya"
+    ],
+    "film": "Best Of Himesh Reshammiya",
+    "year": null
   }
 }
