@@ -31,8 +31,8 @@ def write_wav(path, data, params):
         f.writeframes(data.clip(-32767, 32767).astype(np.int16).tobytes())
 
 
-def get_song_rms(song_dir):
-    """Calculate combined RMS of all stems mixed together."""
+def get_combined(song_dir):
+    """The four stems summed — which is what the player actually plays."""
     combined = None
     for stem in STEM_NAMES:
         path = os.path.join(song_dir, f'{stem}.wav')
@@ -45,6 +45,11 @@ def get_song_rms(song_dir):
             minlen = min(len(combined), len(data))
             combined = combined[:minlen] + data[:minlen]
 
+    return combined
+
+
+def get_song_rms(song_dir):
+    combined = get_combined(song_dir)
     if combined is None:
         return 0.0
     return np.sqrt(np.mean(combined ** 2)) / 32767
@@ -72,11 +77,15 @@ def normalize_song(song_dir, check_only=False):
 
     gain = TARGET_RMS / current_rms
 
-    # Check peak to prevent clipping
-    max_peak = 0
-    for path in stems.values():
-        data, _ = read_wav(path)
-        max_peak = max(max_peak, np.max(np.abs(data)))
+    # Check peak to prevent clipping.
+    #
+    # This used to take the loudest SINGLE stem, which is not the signal
+    # anybody hears -- the player sums all four, and four stems each sitting
+    # below the ceiling can sum well past it. Aa Chal Ke Tujhe came out at
+    # +0.3 dBFS with clipped samples and Iti reported it as "a bit distorted
+    # here and there". Guard on the sum, which is what plays.
+    combined = get_combined(song_dir)
+    max_peak = float(np.max(np.abs(combined))) if combined is not None else 0.0
 
     if max_peak * gain > 32000:
         gain = 32000 / max_peak
