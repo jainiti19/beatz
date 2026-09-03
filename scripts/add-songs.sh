@@ -87,8 +87,20 @@ while IFS='|' read -r NAME YT LYR ART <&3; do
     # bash string is a literal backslash-t, not a tab, so asking for one field
     # with a tab in it glued the id onto the title and cut had nothing to split
     # on -- every lyrics search then went out with a video id on the front.
+    # A bare 11-character video id or a YouTube URL is used AS the source
+    # instead of being searched for. Search takes the first hit and cannot be
+    # argued with: repairing four songs on 3 Sep it returned a 7-minute DJ
+    # megamix, a "Composing" making-of and a German rap track, and all three
+    # were separated and published before anyone heard them. When the right
+    # upload has already been identified by hand, say so exactly.
+    case "$YT" in
+      *youtube.com/watch*|*youtu.be/*) YTREF="$YT" ;;
+      *[!A-Za-z0-9_-]*|"")             YTREF="ytsearch1:$YT" ;;
+      ??????????? )                    YTREF="https://www.youtube.com/watch?v=$YT" ;;
+      *)                               YTREF="ytsearch1:$YT" ;;
+    esac
     "$VENV/yt-dlp" --js-runtimes node --no-playlist --skip-download \
-      --print "%(id)s" --print "%(title)s" "ytsearch1:$YT" > "$WORK/yt.txt" 2>/dev/null || true
+      --print "%(id)s" --print "%(title)s" "$YTREF" > "$WORK/yt.txt" 2>/dev/null || true
     YTID=$(sed -n 1p "$WORK/yt.txt")
     YTTITLE=$(sed -n 2p "$WORK/yt.txt")
     if [ -z "$YTID" ]; then

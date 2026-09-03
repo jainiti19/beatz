@@ -228,10 +228,13 @@
     "year": null
   },
   "Dhina_Dhin_Dha": {
-    "title": "Dhina Dhin Dha",
-    "film": "",
-    "singers": [],
-    "year": null
+    "title": "My Name Is Lakhan",
+    "singers": [
+      "Mohammed Aziz",
+      "Nitin Mukesh"
+    ],
+    "film": "Ram Lakhan",
+    "year": 1989
   },
   "Dilbar": {
     "title": "Dilbar",

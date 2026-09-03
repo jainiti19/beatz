@@ -637,16 +637,11 @@
             font-size: var(--bs-chrome); color: #6E8B87; flex: 1 1 auto;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        body.big-screen .screen-btn { display: none; }
-        /* Off the topbar in normal use -- entering the lyrics view now happens
-           from the expand button beside the transport. It stays here for the
-           stage, where the sheet can be hidden and this is the way out. */
-        body:not(.big-screen) .topbar .screen-btn { display: none; }
-        body.big-screen.controls-open .screen-btn {
-            display: inline-block; font-size: var(--bs-chrome);
-            background: transparent; border: 1px solid #2C3E3B; color: #6E8B87;
-        }
-
+        /* The topbar no longer carries a way in or out. Both live on the one
+           button beside the transport, which toggles: an expand icon on the
+           player, a list icon on the stage. The topbar button was only ever
+           reachable with the control sheet open -- which is exactly when the
+           transport is reachable too -- so it was pure duplication. */
         body.big-screen .panels {
             flex: 1 1 auto; min-height: 0;
             display: flex; flex-direction: column; overflow: hidden;
@@ -730,10 +725,15 @@
         /* loadLyrics() still sets pasteBox inline, and "Replace the lyrics"
            has no business on a wall. */
         body.big-screen #pasteBox { display: none !important; }
-        /* A fault form has no business on a wall, and the expand button is
-           replaced up there by the topbar's "Leave". */
-        body.big-screen .report-box,
-        body.big-screen .btn-expand { display: none !important; }
+        /* A fault form has no business on a wall. The expand button DOES
+           stay: on the stage it becomes the way back, in the same place, so
+           the one control toggles between the two views. */
+        body.big-screen .report-box { display: none !important; }
+        body.big-screen .btn-expand {
+            width: 40px; height: 40px; font-size: 15px;
+            background: #37474F; color: #B0BEC5;
+        }
+        body.big-screen .btn-expand:hover { background: #455A64; }
         /* Up next belongs on the stage: when a phone is mirrored this sheet is
            the only control surface there is, so without it nobody can move the
            room to the next song without leaving the stage. */
@@ -761,6 +761,18 @@
             border-color: #2C3E3B; background: transparent; color: #6E8B87;
             font-size: var(--bs-chrome); padding: 9px 6px;
             flex: 1 1 0; min-width: 0; min-height: 40px;
+        }
+        /* The speed buttons are sized to their labels here as they are on the
+           main screen. Six of them stretched edge to edge is the shape the
+           main player just moved away from, and the stage had kept it -- the
+           two read as different apps. Type stays at --bs-chrome: this sheet
+           gets used at arm's length from a mirrored phone, or across a room.
+           Six short labels also leave the row shorter than the presets above
+           it, so it is pushed to the left rather than centred by the gap. */
+        body.big-screen .tempo-row { justify-content: flex-start; }
+        body.big-screen .tempo-btn {
+            flex: 0 1 auto;
+            padding: 9px 14px;
         }
         body.big-screen .preset-btn:hover,
         body.big-screen .tempo-btn:hover { background: #1B2624; }
@@ -795,7 +807,7 @@
                 top: 0;
                 z-index: 10;
                 display: grid;
-                grid-template-columns: auto minmax(0, 1fr) auto auto;
+                grid-template-columns: auto minmax(0, 1fr) auto;
                 align-items: center;
                 column-gap: 8px;
                 row-gap: 2px;
@@ -808,7 +820,6 @@
                 text-overflow: ellipsis; white-space: nowrap;
             }
             .topbar .bell-btn { grid-column: 3; grid-row: 1; margin-right: 0; }
-            .topbar .screen-btn { grid-column: 4; grid-row: 1; }
             .topbar .now-playing {
                 grid-column: 1 / -1;
                 grid-row: 2;
@@ -962,7 +973,6 @@
             <div class="bell-head">Your requests<button onclick="clearSeen()">Clear</button></div>
             <div id="bellList"></div>
         </div>
-        <button class="screen-btn" onclick="toggleBigScreen()" title="Lyrics view (Esc to leave)">Lyrics view</button>
     </div>
 
     <div class="panels">
@@ -2130,8 +2140,14 @@
             const on = document.body.classList.toggle('big-screen');
             // There is no Escape key on a phone, so the way out rides with the
             // controls. It is the same button that got you in.
-            const btn = document.querySelector('.topbar .screen-btn');
-            if (btn) btn.textContent = on ? 'Leave' : 'Lyrics view';
+            // One button, two jobs, same place. On the player it opens the
+            // lyrics; on the stage it is the way back to the songs.
+            const ex = document.querySelector('.btn-expand');
+            if (ex) {
+                ex.textContent = on ? '\u2630' : '\u26F6';
+                ex.title = on ? 'Playlist' : 'Lyrics view';
+                ex.setAttribute('aria-label', ex.title);
+            }
             if (on) showStageControls(); else hideStageControls();
             document.getElementById('bsUrl').textContent = location.host;
             const song = songs[currentSongIndex];
