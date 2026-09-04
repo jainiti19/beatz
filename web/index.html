@@ -1334,6 +1334,11 @@
         };
         let seekInterval = null;
         let isLoading = false;
+        // Which load is current. Everything a load does to shared state is
+        // guarded on this, because a cancelled load's promises still settle
+        // afterwards and would otherwise write the wrong song into the player.
+        let loadGen = 0;
+        let cancelLoad = null;
         // Practice speed. Everything downstream keeps working in *song* time;
         // only the two places that read the wall clock have to divide by this.
         const TEMPOS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
@@ -1713,7 +1718,15 @@
             // tapping what is playing looks like nothing happened.
             document.body.classList.remove('view-library');
             if (currentSongIndex === index) return;
-            if (isLoading) return;
+
+            /* A load used to make every other song untappable until it
+             * finished -- `if (isLoading) return;` with no feedback. An
+             * average song is 22MB, which is ~12s on good 4G but nearer two
+             * minutes on 3G, so "the whole library is dead" was the normal
+             * experience of a weak connection rather than an edge case.
+             * Picking a different song now cancels the one in flight. */
+            if (cancelLoad) cancelLoad();
+            const myLoad = ++loadGen;
 
             // Read the mix before tearing the graph down.
             const carriedMix = opts.inheritMix ? currentMix() : null;
@@ -1899,8 +1912,7 @@
             // depend on that behaviour at all.
             let onStall = () => {};
             const stalled = new Promise((_, reject) => {
-                onStall = () => reject(new Error(
-                    `nothing arrived for ${STALL_MS / 1000}s`));
+                onStall = (why) => reject(new Error(why || `nothing arrived for ${STALL_MS / 1000}s`));
             });
             stalled.catch(() => {});      // never an unhandled rejection
             const stallTimer = setInterval(() => {
@@ -1910,6 +1922,14 @@
                 loadCtl.abort(new Error('stalled'));
                 onStall();
             }, 2000);
+            // Picking another song uses the same machinery the watchdog does.
+            cancelLoad = () => {
+                clearInterval(stallTimer);
+                loadCtl.abort(new Error('superseded'));
+                onStall('superseded');
+                isLoading = false;
+                cancelLoad = null;
+            };
 
             // The abort has to be raced explicitly rather than trusted to
             // propagate. A response whose body simply stops yielding leaves
@@ -2000,8 +2020,10 @@
                 await Promise.all(STEM_NAMES.slice(i, i + decodeWidth).map(async (stem) => {
                     try {
                         const buf = await pending[stem];
-                        if (!buf) return;
-                        stems[stem] = await audioCtx.decodeAudioData(buf);
+                        if (!buf || myLoad !== loadGen) return;
+                        const decoded = await audioCtx.decodeAudioData(buf);
+                        if (myLoad !== loadGen) return;   // superseded mid-decode
+                        stems[stem] = decoded;
                         loaded++;
                         setLoadStatus();
                     } catch (e) {
@@ -2041,6 +2063,10 @@
             }
 
             clearInterval(stallTimer);
+            // A superseded load must not touch the player: another song is
+            // already loading into it, and its own finish will do this.
+            if (myLoad !== loadGen) return;
+            cancelLoad = null;
             isLoading = false;
 
             if (loaded === 0) {
