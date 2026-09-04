@@ -1864,22 +1864,105 @@
             // decodeAudioData detaches the buffer it is given, so prefetched
             // bytes are good for exactly one decode. Drop our handle now.
             if (pre) prefetched = { dir: null, bytes: null, ctrl: null };
+            /* A song is about 22MB. The status used to move only when a whole
+             * ~6MB stem finished, so on weak mobile data you watched
+             * "Loading... (0/4)" for minutes with no sign of life -- and if the
+             * connection stalled there was no timeout anywhere, so it simply
+             * hung. Iti hit exactly that outside on 4 Sep: the page and the
+             * password were fine and no song would load. Slow and dead looked
+             * the same, again. */
+            let bytesIn = 0, bytesExpected = 0, lastProgressAt = Date.now();
+            const mb = (b) => (b / 1048576).toFixed(1);
             const setLoadStatus = () => {
-                document.getElementById('loadingStatus').textContent =
-                    loaded < STEM_NAMES.length
-                        ? `Loading... (${loaded}/${STEM_NAMES.length})` : '';
+                const el = document.getElementById('loadingStatus');
+                if (!el) return;
+                if (loaded >= STEM_NAMES.length) { el.textContent = ''; return; }
+                el.textContent = bytesIn
+                    ? `Loading... ${mb(bytesIn)}`
+                      + (bytesExpected ? ` / ${mb(bytesExpected)} MB` : ' MB')
+                    : `Loading... (${loaded}/${STEM_NAMES.length})`;
             };
             setLoadStatus();
             let firstError = null;
-            const fetchStem = async (stem) => {
+
+            // One controller for the whole song, so a stall can cancel all four
+            // rather than leaving them hanging.
+            const loadCtl = new AbortController();
+            const STALL_MS = 25000;
+            // The watchdog rejects a promise of its own AND aborts the fetches.
+            // Both, because neither alone is enough: abort() tears down a real
+            // network request, but a body that has stopped yielding does not
+            // reliably reject its pending read when the signal fires -- proved
+            // on 4 Sep, abort() was called and the read stayed pending, so the
+            // player sat at "Loading... (0/4)" with isLoading stuck true and
+            // no other song could be picked. Racing our own promise does not
+            // depend on that behaviour at all.
+            let onStall = () => {};
+            const stalled = new Promise((_, reject) => {
+                onStall = () => reject(new Error(
+                    `nothing arrived for ${STALL_MS / 1000}s`));
+            });
+            stalled.catch(() => {});      // never an unhandled rejection
+            const stallTimer = setInterval(() => {
+                if (loaded >= STEM_NAMES.length) return;
+                if (Date.now() - lastProgressAt < STALL_MS) return;
+                clearInterval(stallTimer);
+                loadCtl.abort(new Error('stalled'));
+                onStall();
+            }, 2000);
+
+            // The abort has to be raced explicitly rather than trusted to
+            // propagate. A response whose body simply stops yielding leaves
+            // reader.read() pending forever, and aborting the signal does not
+            // always reject it -- so the watchdog fired and nothing happened,
+            // isLoading stayed true, and NO further song could be selected.
+            // That is the shape of "none of the songs were loading when
+            // clicked": one stall wedges the whole player.
+            const onAbort = (signal) => new Promise((_, reject) => {
+                if (signal.aborted) return reject(signal.reason);
+                signal.addEventListener('abort',
+                    () => reject(signal.reason), { once: true });
+            });
+
+            const readWithProgress = async (resp, signal) => {
+                const len = Number(resp.headers.get('Content-Length')) || 0;
+                if (len) { bytesExpected += len; }
+                // A cache hit and a very old browser both land here.
+                if (!resp.body || !resp.body.getReader) return resp.arrayBuffer();
+                const reader = resp.body.getReader();
+                const chunks = [];
+                let got = 0;
+                try {
+                    for (;;) {
+                        const { done, value } =
+                            await Promise.race([reader.read(), onAbort(signal)]);
+                        if (done) break;
+                        chunks.push(value);
+                        got += value.length;
+                        bytesIn += value.length;
+                        lastProgressAt = Date.now();
+                        setLoadStatus();
+                    }
+                } catch (e) {
+                    try { await reader.cancel(); } catch (_) {}
+                    throw e;
+                }
+                const out = new Uint8Array(got);
+                let off = 0;
+                for (const c of chunks) { out.set(c, off); off += c.length; }
+                return out.buffer;
+            };
+
+            const fetchStem = (stem) => Promise.race([stalled, (async () => {
                 let buf = pre && pre[stem];
                 if (!buf || buf.byteLength === 0) {
-                    const resp = await cachedFetch(audioUrl(song.dir, stem));
+                    const resp = await cachedFetch(audioUrl(song.dir, stem),
+                                                   { signal: loadCtl.signal });
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                    buf = await resp.arrayBuffer();
+                    buf = await readWithProgress(resp, loadCtl.signal);
                 }
                 return buf;
-            };
+            })()]);
             // Fetch all four at once, decode them one at a time. The network
             // is where the parallel win is; decoding in parallel as well put
             // four ~100MB buffers under allocation at the same moment, which a
@@ -1957,6 +2040,7 @@
                 }
             }
 
+            clearInterval(stallTimer);
             isLoading = false;
 
             if (loaded === 0) {
@@ -1965,8 +2049,16 @@
                 const why = firstError
                     ? `${firstError.name || 'Error'}: ${firstError.message || firstError}`
                     : 'no reason given';
-                document.getElementById('loadingStatus').textContent =
-                    `Failed to load — ${why}`;
+                // A stall is the one failure with a real answer for the person
+                // holding the phone: it is 22MB over whatever signal they have,
+                // and saving the setlist beforehand is what makes a jam
+                // independent of the venue's wifi.
+                const stalled = /nothing arrived|aborted/i.test(why);
+                document.getElementById('loadingStatus').innerHTML = stalled
+                    ? `Nothing arrived — the connection looks too weak for this song
+                       (about ${mb(bytesExpected || 22 * 1048576)} MB).
+                       <button class="save-btn" onclick="retryCurrentSong()">Try again</button>`
+                    : `Failed to load — ${why}`;
                 return;
             }
 
@@ -2846,6 +2938,15 @@
          * changes which of the two is on screen -- it never changes what is
          * loaded or playing, so going back to browse does not interrupt the
          * song someone is singing to. */
+        /* selectSong() returns early when the index has not changed, so a
+         * retry has to forget what is loaded before asking for it again. */
+        function retryCurrentSong() {
+            const i = currentSongIndex;
+            if (i < 0) return;
+            currentSongIndex = -1;
+            selectSong(i);
+        }
+
         function toggleLibrary() {
             document.body.classList.toggle('view-library');
         }
