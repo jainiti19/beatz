@@ -1097,6 +1097,15 @@
         .report-reason:hover { background: var(--border); }
         .report-box input { background: var(--raised); border-color: var(--border); color: var(--text); }
         .report-box input::placeholder { color: var(--text-faint); }
+        .list-error {
+            padding: 18px 14px; font-size: 13px; color: var(--text-dim); line-height: 1.6;
+        }
+        .list-error b { color: var(--text); }
+        .list-error button {
+            display: block; margin-top: 12px; padding: 8px 14px;
+            background: var(--accent); color: #fff; border: none;
+            border-radius: 8px; font-size: 13px; cursor: pointer;
+        }
         /* accent-color alone only tints the filled half; the empty half stays
            near-white, which on this background reads as a glowing bar across
            the player. The track is styled explicitly instead. */
@@ -1362,11 +1371,41 @@
                 // shipped, so copies cached before that stay stale forever.
                 const resp = await fetch(STEMS_BASE_URL + '/songs.json',
                                          { cache: 'no-store' });
+                // resp.ok was never checked, so a 401 fell into the catch below
+                // and rendered an empty library. A fetch does NOT make the
+                // browser show its Sign in box -- only a navigation does -- so
+                // a dropped password looked exactly like "the app is broken",
+                // with nothing on screen saying so.
+                if (!resp.ok) throw Object.assign(new Error('HTTP ' + resp.status),
+                                                  { status: resp.status });
                 songs = await resp.json();
-            } catch (e) { songs = []; }
+                if (!Array.isArray(songs)) throw new Error('manifest is not a list');
+            } catch (e) {
+                songs = [];
+                filteredSongs = [];
+                return showListError(e);
+            }
             filteredSongs = [...songs];
             renderPlaylistChips();
             renderSongList();
+        }
+
+        /* An empty song list must never be silent. Before this, every failure
+         * -- no signal, a dropped password, a bad deploy -- looked identical:
+         * a library with nothing in it and no explanation. */
+        function showListError(e) {
+            const el = document.getElementById('songList');
+            const count = document.getElementById('songCount');
+            if (count) count.textContent = '';
+            if (!el) return;
+            const signedOut = e && e.status === 401;
+            el.innerHTML = signedOut
+                ? `<div class="list-error"><b>Signed out.</b><br>
+                     The password needs entering again — reloading will ask for it.
+                     <button onclick="location.reload()">Reload</button></div>`
+                : `<div class="list-error"><b>Could not load the songs.</b><br>
+                     ${String((e && e.message) || 'no reason given')}
+                     <button onclick="loadSongList()">Try again</button></div>`;
         }
 
         // The list used to be fetched exactly once, at startup — so a phone
