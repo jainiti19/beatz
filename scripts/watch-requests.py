@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Process song requests queued by the web player.
+"""Process song requests and fault reports queued by the web player.
 
 Polls the VPS queue over the SSH access deploy-web.sh already uses, runs the
 normal pipeline for anything new, and publishes the result. Meant to sit
 running on the desktop; requests made while it is off are picked up whenever
 it next starts, which is what makes this work for both a request shouted
 across the room and one Karan files three weeks early.
+
+Three queues, drained in the same poll: song requests, lyrics pasted in the
+player, and fault reports. Reports used to land on the VPS and surface
+nowhere, which wasted the single best signal we have -- the room hears a wrong
+recording long before any script does. Every report is now announced in the
+log and written to a to-do file, and a "wrong song" report that says WHICH
+version is wanted re-fetches the song on its own.
 
 Completion is recorded by appending an id to a separate done file. The service
 only ever appends to the queue and this only ever appends to done, so the two
@@ -24,6 +31,10 @@ QUEUE = "/opt/beatznbox/queue/requests.jsonl"
 DONE = "/opt/beatznbox/queue/done.txt"
 DROP = "/opt/beatznbox/queue/lyrics"
 RESULTS = "/opt/beatznbox/queue/results.jsonl"
+REPORTS = "/opt/beatznbox/queue/reports.jsonl"
+REPORTS_SEEN = "/opt/beatznbox/queue/reports-seen.txt"
+FAULTS = os.path.expanduser("~/.beatznbox/faults.md")
+RETRY = True         # --no-retry only announces reports, never re-fetches
 META = None          # set in main() to <repo>/data/songs-meta.json
 LOCAL = False        # --local reads the queue as plain files, for testing
 NO_PUBLISH = False   # --no-publish stops before prepare-web/deploy
@@ -126,12 +137,24 @@ def field(text):
     return re.sub(r"[|\r\n\t]+", " ", (text or "")).strip()
 
 
-def mark_done(entry_id):
+def append_remote(path, line):
+    """Append one line to a queue file. Appending is the whole safety story
+    here: the service only ever appends to requests/reports and this only ever
+    appends to the done files, so the two never write the same file and a
+    laptop that dies mid-write cannot corrupt either."""
     if LOCAL:
-        with open(DONE, "a", encoding="utf-8") as f:
-            f.write(entry_id + "\n")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
         return
-    ssh(f"printf '%s\\n' {json.dumps(entry_id)} >> {DONE}", check=True)
+    ssh(f"printf '%s\\n' {json.dumps(line)} >> {path}", check=True)
+
+
+def mark_done(entry_id):
+    append_remote(DONE, entry_id)
+
+
+def mark_report_seen(report_id):
+    append_remote(REPORTS_SEEN, report_id)
 
 
 def post_result(entry_id, state, title=None, note=None):
@@ -142,13 +165,8 @@ def post_result(entry_id, state, title=None, note=None):
     report must never stop the song being published."""
     rec = {"id": entry_id, "state": state, "title": title, "note": note,
            "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    line = json.dumps(rec, ensure_ascii=False)
     try:
-        if LOCAL:
-            with open(RESULTS, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        else:
-            ssh(f"printf '%s\\n' {json.dumps(line)} >> {RESULTS}", check=True)
+        append_remote(RESULTS, json.dumps(rec, ensure_ascii=False))
     except Exception as e:
         log(f"  could not post result for {entry_id}: {e}")
 
@@ -281,6 +299,210 @@ def process(entry, fast):
     return True
 
 
+# ---------------------------------------------------------------------------
+# Fault reports
+#
+# Someone in the room taps the flag in the player and says this song is wrong.
+# That has caught two mismatched recordings and a library-wide clipping bug,
+# each of which every automatic check we have called fine -- one of the
+# mismatches was graded "good". Until now the reports sat in a file nobody
+# read.
+# ---------------------------------------------------------------------------
+
+
+def pending_reports():
+    seen = set(remote_lines(REPORTS_SEEN))
+    out = []
+    for line in remote_lines(REPORTS):
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue                      # a mangled line must not stall the queue
+        if e.get("id") and e["id"] not in seen:
+            out.append(e)
+    return out
+
+
+# A version hint is a few words -- "Mohammad Aziz", "Need hemant Kumar
+# version". A complaint is a sentence: Ilahi was reported as "lyrics are right,
+# the audio is a different song", which names no version at all and would go to
+# YouTube as nine words of prose. Every real hint so far is 2-4 words, every
+# real complaint longer, so the line goes here.
+HINT_WORDS = 6
+
+
+def usable_hint(note):
+    note = field(note)
+    return bool(note) and len(note.split()) <= HINT_WORDS
+
+
+def note_fault(rec, outcome):
+    """Write the report somewhere a person will actually look.
+
+    A checklist rather than a log: the log is append-only and thousands of
+    lines long, so a report in it is findable only if you already know it
+    exists. Tick the box when the song is fixed."""
+    when = (rec.get("at") or "").replace("T", " ")[:16]
+    note = (rec.get("note") or "").strip()
+    line = (f"- [ ] {when}  {rec.get('song') or rec.get('dir')} "
+            f"(`{rec.get('dir')}`) — {rec.get('reason')}"
+            + (f' — "{note}"' if note else " — no note")
+            + f" — reported by {rec.get('who') or 'someone'}\n"
+            f"      → {outcome}\n")
+    try:
+        os.makedirs(os.path.dirname(FAULTS), exist_ok=True)
+        fresh = not os.path.exists(FAULTS)
+        with open(FAULTS, "a", encoding="utf-8") as f:
+            if fresh:
+                f.write("# BeatznBox faults\n\n"
+                        "Reported from the player by whoever was listening, and\n"
+                        "appended here by watch-requests.py. Tick a box once the\n"
+                        "song is fixed; nothing here is ever removed by a script.\n\n")
+            f.write(line)
+    except Exception as e:
+        log(f"    could not write {FAULTS}: {e}")
+
+
+def clear_stale_meta(name):
+    """Forget the hand-set title of a recording we just replaced.
+
+    record_meta refuses to overwrite an existing title, on the rule that a
+    hand-corrected name outranks LRCLIB. That rule inverts here: the name
+    described the recording the room just told us was the wrong one."""
+    try:
+        with open(META, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return
+    entry = meta.get(name)
+    if not isinstance(entry, dict):
+        return
+    dropped = [k for k in ("title", "singers", "film") if entry.pop(k, None)]
+    if not dropped:
+        return
+    tmp = META + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, META)
+    log(f"    cleared stale metadata: {', '.join(dropped)}")
+
+
+def retry_wrong_song(rec, fast):
+    """Re-fetch a song the room says is the wrong recording.
+
+    The note is the entire point. "Use Mohammad Aziz version" is the only new
+    information anyone has given us, and without it a retry re-runs the
+    identical search and downloads the identical wrong video -- so a report
+    with no note is surfaced and left alone.
+
+    The note goes into the YouTube search ONLY. Gluing an artist onto the
+    LRCLIB query is what broke lyrics matching for classic Hindi songs, so the
+    title stays clean and the artist field stays empty.
+
+    The search is built from the DIRECTORY name, not the title we recorded.
+    The recorded title came from matching the wrong download -- Hai apna Dil to
+    awara is filed as 'Hai Apna Dil Toh Awara (From "The Xpose")' -- and
+    searching with it pins the retry to exactly the version being complained
+    about. The directory is what a person typed when they asked for the song,
+    and nothing since has touched it.
+    """
+    name = rec["dir"]
+    d = os.path.join(STEMS, name)
+    note = field(rec.get("note"))
+    title = name.replace("_", " ")
+    search = f"{title} {note}"
+
+    backup = None
+    if os.path.exists(d):
+        backup = f"{d}.replaced-{time.strftime('%Y%m%d-%H%M%S')}"
+        # The dot and the dash in that name are load-bearing: prepare-web.sh
+        # publishes only directories matching [A-Za-z0-9_], so the old copy
+        # cannot come back as a second song in the player.
+        os.rename(d, backup)
+    log(f"    re-fetching {name}: {search!r}")
+
+    manifest = os.path.join(REPO, ".report-manifest.txt")
+    with open(manifest, "w", encoding="utf-8") as f:
+        f.write(f"{name} | {search} | {title} |\n")
+    cmd = ["./scripts/add-songs.sh", manifest]
+    if fast:
+        cmd.append("--fast")
+    r = run(cmd, capture_output=True, text=True)
+    os.remove(manifest)
+    log("    add-songs: " + " / ".join((r.stdout or "").strip().splitlines()[-3:]))
+
+    if not os.path.exists(os.path.join(d, "vocals.wav")):
+        # Put the old song back. A failed retry must not leave a hole in the
+        # library: the wrong recording is still better than no recording, and
+        # the report stays open in faults.md either way.
+        shutil.rmtree(d, ignore_errors=True)
+        if backup:
+            os.rename(backup, d)
+        return False, f"retry failed, kept the old recording — try `{search}` by hand"
+
+    # Everything published for the old recording is now wrong: its MP3s, its
+    # words and its timings. Drop the whole published copy so prepare-web
+    # rebuilds it, rather than letting the old lyrics survive a download that
+    # happened to come with none.
+    shutil.rmtree(os.path.join(REPO, "web/stems", name), ignore_errors=True)
+    clear_stale_meta(name)
+    real, artist, album = resolved_title(name)
+    record_meta(name, real, artist, album)
+    kept = os.path.basename(backup) if backup else "nothing"
+    return True, f"re-fetched as {real or title!r}; old stems kept at {kept}"
+
+
+def handle_reports(fast):
+    """Announce every new report, and act on the ones we can. Returns True if
+    the library changed and needs publishing."""
+    reports = pending_reports()
+    if not reports:
+        return False
+    log(f"{len(reports)} fault report(s) from the player")
+
+    # Collapse repeats before doing anything. Three people reporting the same
+    # song -- or one person tapping flag three times, which is what actually
+    # happened to My Name Is Lakhan -- must cost one re-download, not three.
+    # The last note wins: it is the most specific thing anyone has said.
+    retry_for = {}
+    if RETRY:
+        for r in reports:
+            if r.get("reason") == "wrong-song" and usable_hint(r.get("note")):
+                retry_for[r["dir"]] = r["id"]
+
+    changed = False
+    for r in reports:
+        rid, name = r["id"], r.get("dir") or "?"
+        log(f"  {r.get('reason')}: {r.get('song') or name}"
+            + (f" — {r['note']}" if r.get("note") else "")
+            + f"  (from {r.get('who') or 'someone'})")
+        if retry_for.get(name) == rid:
+            try:
+                ok, outcome = retry_wrong_song(r, fast)
+                changed = changed or ok
+            except Exception as e:
+                outcome = f"retry errored: {e}"
+        elif name in retry_for:
+            outcome = "same song as a later report — folded into that retry"
+        elif r.get("reason") == "wrong-song" and not usable_hint(r.get("note")):
+            # Ordered before the --no-retry case on purpose: this is a fact
+            # about the report, not about how the watcher is configured.
+            outcome = ("no version to search with — needs someone to say which"
+                       " recording" if field(r.get("note")) else
+                       "no note, so nothing new to search with — needs someone to"
+                       " say which version")
+        elif not RETRY:
+            outcome = "needs a person (--no-retry)"
+        else:
+            outcome = "needs a person"
+        log(f"    -> {outcome}")
+        note_fault(r, outcome)
+        # Seen either way. Leaving a failed retry unmarked would re-download it
+        # every minute forever; it stays open in faults.md instead.
+        mark_report_seen(rid)
+    return changed
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true")
@@ -291,22 +513,31 @@ def main():
                     help="read the queue from DIR instead of over SSH (testing)")
     ap.add_argument("--no-publish", action="store_true",
                     help="process but skip prepare-web/deploy (testing)")
+    ap.add_argument("--no-retry", action="store_true",
+                    help="announce fault reports but never re-fetch a song")
     a = ap.parse_args()
 
-    global LOCAL, NO_PUBLISH, QUEUE, DONE, DROP, RESULTS, META
+    global LOCAL, NO_PUBLISH, RETRY, QUEUE, DONE, DROP, RESULTS
+    global REPORTS, REPORTS_SEEN, FAULTS, META
     META = os.path.join(REPO, "data/songs-meta.json")
     NO_PUBLISH = a.no_publish
+    RETRY = not a.no_retry
     if a.local:
         LOCAL = True
         QUEUE = os.path.join(a.local, "requests.jsonl")
         DONE = os.path.join(a.local, "done.txt")
         DROP = os.path.join(a.local, "lyrics")
         RESULTS = os.path.join(a.local, "results.jsonl")
+        REPORTS = os.path.join(a.local, "reports.jsonl")
+        REPORTS_SEEN = os.path.join(a.local, "reports-seen.txt")
+        FAULTS = os.path.join(a.local, "faults.md")
 
     where = QUEUE if LOCAL else f"{HOST}:{QUEUE}"
     log(f"watching {where} every {a.interval}s "
         f"({'htdemucs_ft' if a.full else 'htdemucs --fast'})"
-        + ("  [no-publish]" if NO_PUBLISH else ""))
+        + ("  [no-publish]" if NO_PUBLISH else "")
+        + ("  [no-retry]" if not RETRY else ""))
+    log(f"faults go to {FAULTS}")
     while True:
         try:
             drops = lyrics_drops()
@@ -330,6 +561,18 @@ def main():
                         mark_done(entry["id"])
                 except Exception as e:
                     log(f"  error on {entry.get('id')}: {e}")
+
+            if handle_reports(fast=not a.full) and not NO_PUBLISH:
+                if (run(["./scripts/prepare-web.sh"], capture_output=True,
+                        text=True).returncode == 0
+                        and run(["./scripts/deploy-web.sh"], capture_output=True,
+                                text=True).returncode == 0):
+                    sync_r2()
+                    log("  published the re-fetched song(s)")
+                else:
+                    log("  publish FAILED after a retry — the library has the new"
+                        " song, the player does not; run prepare-web.sh and"
+                        " deploy-web.sh by hand")
         except Exception as e:
             log(f"poll failed: {e}")
         if a.once:
