@@ -13,6 +13,17 @@ noticed by playing the song:
            confidence score, because Whisper is happily confident about it.
   crushed  the aligner must place every line in order, so a line the singer
            never sang collapses to near-zero width and flashes past.
+  rushed   the same fault a size larger, and invisible to `crushed`. When the
+           words carry a whole section the recording does not sing, alignment
+           cannot drop it -- it packs the surplus into the nearest instrumental
+           break and drags the neighbouring lines seconds ahead of the singer.
+           Nakkadwale disco hid 17 unsung lines this way and graded `good` for
+           two days: only three of its lines were under CRUSHED_SEC, because a
+           line can be a comfortable 0.74s wide and still hold six words. Rate,
+           not width, is the tell -- and it has to be read against the song's
+           own median, since Kala Chashma sings faster throughout than
+           Nakkadwale did at its worst. A contiguous RUN is what separates a
+           mis-aligned block from a genuinely fast couplet.
   gap      one line covering 20s+ means the aligner lost the thread and spread
            a line across a passage it does not belong to.
   prelude  the opening line was force-fit onto the intro, so the highlight
@@ -33,6 +44,14 @@ MIN_LINES      = 8
 CRUSHED_SEC    = 0.35
 CRUSHED_PCT    = 15
 LONG_LINE_SEC  = 20
+# 3x the song's own median, never below RUSHED_FLOOR, sustained over
+# RUSHED_RUN lines. Measured over 125 songs: this flags 7, and takes
+# Nakkadwale disco from a run of 7 before its unsung lines were cut to 1 after.
+# The floor stops a slow ghazal, whose median is 0.8 w/s, reporting ordinary
+# singing at 2.4 as a rushed block.
+RUSHED_MULT    = 3.0
+RUSHED_FLOOR   = 3.5     # words/second
+RUSHED_RUN     = 4       # consecutive lines
 LEAD_MARGIN    = 3.0     # score points below the song median; measured, see below
 
 
@@ -48,6 +67,27 @@ def script_of(text):
         elif 0x600 <= o <= 0x6FF or 0x750 <= o <= 0x77F: counts["arabic"] += 1
         else:                            counts["other"] += 1
     return max(counts, key=counts.get)
+
+
+def rushed_run(entries):
+    """Longest run of consecutive lines sung impossibly fast for this song."""
+    rates = []
+    for e in entries:
+        words = e.get("words") or []
+        dur = e.get("end", 0) - e.get("start", 0)
+        rates.append(len(words) / dur if words and dur > 0 else None)
+    known = [r for r in rates if r]
+    if len(known) < MIN_LINES:
+        return 0
+    limit = max(RUSHED_MULT * statistics.median(known), RUSHED_FLOOR)
+    best = run = 0
+    for r in rates:
+        # A line with no word timings breaks the run rather than extending it:
+        # the run is meant to be evidence of a packed block, and an unknown
+        # line is not evidence.
+        run = run + 1 if r and r > limit else 0
+        best = max(best, run)
+    return best
 
 
 def grade(song_dir):
@@ -87,6 +127,9 @@ def grade(song_dir):
 
     if pct > CRUSHED_PCT:
         return "check", f"{pct:.0f}% crushed lines"
+    run = rushed_run(entries)
+    if run >= RUSHED_RUN:
+        return "check", f"{run} lines rushed"
     if longest > LONG_LINE_SEC:
         return "check", f"{longest:.0f}s line"
     return "good", "devanagari" if sc == "devanagari" else ""
