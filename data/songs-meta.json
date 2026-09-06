@@ -997,5 +997,49 @@
     ],
     "film": "",
     "year": null
+  },
+  "Pyaar_humein_kis_mod": {
+    "title": "Pyar Hamen Kis Mod Pe",
+    "singers": [
+      "Gulshan Bawra",
+      "Bhupinder Singh",
+      "R.D. Burman",
+      "Kishore Kumar",
+      "Sapan Chakraborty"
+    ],
+    "film": "Satte Pe Satta",
+    "year": null
+  },
+  "Ae_kaash_humko": {
+    "title": "Ae Kash Ke Hum",
+    "singers": [
+      "Kumar Sanu"
+    ],
+    "film": "Kabhi Haan Kabhi Naa",
+    "year": null
+  },
+  "Tu_jaane_na": {
+    "title": "Tu Jaane Na",
+    "singers": [
+      "Atif Aslam"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Ik_kudi": {
+    "title": "Ikk Kudi",
+    "singers": [
+      "Amit Trivedi"
+    ],
+    "film": "Udta Punjab",
+    "year": null
+  },
+  "Kya_mujhe_pyaar_hai": {
+    "title": "Kya Mujhe Pyar Hai",
+    "singers": [
+      "KK"
+    ],
+    "film": "Woh Lamhe",
+    "year": null
   }
 }
