@@ -566,11 +566,12 @@
             font-size: 15px;
         }
 
-        /* Lyric-quality marker in the song list. Red means the words on screen
-           are wrong or missing — Whisper garbage, or a four-line stub. Amber
-           means the words are right but the timing wanders: crushed lines, or
-           one line stretched over a whole passage. No dot means it is fine.
-           Graded by scripts/check-lyrics-quality.py into songs.json. */
+        /* Lyric-quality marker in the song list. Red means you cannot follow
+           this song: no words at all, Whisper garbage, or a highlight that is
+           wrong for long enough to lose the singer — twelve lines racing past,
+           or one line parked for half a minute. Amber means a rough patch you
+           can sing through. No dot means it is fine. Graded by
+           scripts/check-lyrics-quality.py into songs.json. */
         .lyric-dot {
             display: inline-block;
             width: 8px;
@@ -1628,9 +1629,10 @@
                 // A dot rather than a word: the list is scanned, not read, and
                 // the point is to stop re-discovering a bad song mid-performance.
                 const dot = song.lyrics === 'bad'
-                    ? `<span class="lyric-dot bad" title="Lyrics unusable — ${song.lyricsNote || ''}"></span>`
+                    ? `<span class="lyric-dot bad" title="${song.lyricsFault === 'words'
+                        ? 'No usable words' : 'Cannot follow the words'} — ${song.lyricsNote || ''}"></span>`
                     : song.lyrics === 'check'
-                    ? `<span class="lyric-dot check" title="Lyrics need checking — ${song.lyricsNote || ''}"></span>`
+                    ? `<span class="lyric-dot check" title="Rough patch — ${song.lyricsNote || ''}"></span>`
                     : '';
                 return `<div class="song-item ${isActive ? 'active' : ''}" onclick="selectSong(${globalIdx})">
                     <div style="flex:1">
@@ -2199,10 +2201,14 @@
                 box.style.display = 'block';
                 if (hint) hint.hidden = true;
                 document.getElementById('pasteSummary').textContent =
-                    song.lyrics === 'good' ? '+ Replace the lyrics'
-                                           : '+ Paste lyrics for this song';
-                // Open it unprompted only when the words are known to be wrong.
-                document.getElementById('pastePanel').open = (song.lyrics === 'bad');
+                    song.lyricsFault === 'words' ? '+ Paste lyrics for this song'
+                                                 : '+ Replace the lyrics';
+                // Open it unprompted only when the WORDS are wrong. A red dot no
+                // longer means that on its own: a song whose words are right and
+                // whose highlight parks for 42s is also red, and opening the box
+                // there asks someone to retype a lyric that is already correct.
+                document.getElementById('pastePanel').open =
+                    (song.lyricsFault === 'words');
                 document.getElementById('pasteNote').textContent = '';
             }
             timedLyrics = null;
