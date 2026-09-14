@@ -361,6 +361,11 @@
         }
         .tempo-btn:hover { background: #E0F2F1; }
         .tempo-btn.active { background: #00897B; color: white; }
+        /* Wide enough for "Original", so the − and + do not shift sideways
+           under a finger when the label shrinks to "−2". */
+        .tempo-btn.key-value { min-width: 5.6em; }
+        .tempo-btn.key-step { min-width: 2.6em; font-size: 15px; line-height: 1; }
+        .tempo-btn:disabled { opacity: 0.35; cursor: default; }
 
         /* Up next */
         .up-next {
@@ -809,6 +814,13 @@
             background: #00897B; color: white; border-color: #00897B;
         }
         body.big-screen .tempo-label { color: #4A5453; font-size: var(--bs-chrome); }
+        /* The stage's .tempo-btn rule outranks the key row's own sizing, so it
+           is restated here: a fixed-width value so − and + stay put under a
+           finger, and glyphs big enough to tell apart across a room. */
+        body.big-screen .tempo-btn.key-value { min-width: 5.6em; }
+        body.big-screen .tempo-btn.key-step {
+            min-width: 2.8em; font-size: calc(var(--bs-chrome) * 1.35); line-height: 1;
+        }
         /* Forced open, and allowed to wrap: the mixer is a collapsible section
            whose .section-content rule would otherwise win on specificity. Four
            faders sit in a row on a wide sheet and stack on a phone. */
@@ -1348,6 +1360,13 @@
         let tempoNode = null;
         let tempoReady = false;
         let pendingTempo = null;  // a saved setup restored before the worklet loaded
+        // Key, in semitones from the recording. Rides the same shifter as the
+        // speed control, which is why it costs nothing extra: that node already
+        // corrects every playback back to the original key, and this only moves
+        // where "back" is. Belongs to the song, not the session -- a singer who
+        // drops Mere Rashke Qamar by three does not want the next song dropped.
+        const KEY_MIN = -6, KEY_MAX = 6;
+        let keyShift = 0;
         let songs = [];
         let filteredSongs = [];
         let currentPreset = 'karaoke';
@@ -1804,6 +1823,12 @@
                     <span class="tempo-label">Speed</span>
                     ${TEMPOS.map((t) => `<button class="tempo-btn" data-tempo="${t}" onclick="setTempo(${t})">${Math.round(t * 100) + '%'}</button>`).join('')}
                 </div>
+                <div class="tempo-row" id="keyRow" style="display:none">
+                    <span class="tempo-label">Key</span>
+                    <button class="tempo-btn key-step" onclick="setKey(keyShift - 1)" aria-label="Lower the key">&minus;</button>
+                    <button class="tempo-btn key-value" id="keyValue" onclick="setKey(0)" title="Back to the original key">Original</button>
+                    <button class="tempo-btn key-step" onclick="setKey(keyShift + 1)" aria-label="Raise the key">+</button>
+                </div>
                 <div class="up-next" id="upNext">
                     <span class="label">Up next:</span>
                     <span class="next-name" id="nextSongName"></span>
@@ -2113,6 +2138,10 @@
             } else {
                 applyPreset('singalong');
             }
+            // The key follows the song even when the mix is carried: a key
+            // saved for this song is the singer's range, not a room setting.
+            const savedSetup = sessionPresets[presetKey];
+            setKey(savedSetup && savedSetup.key ? savedSetup.key : 0);
 
             setTransportEnabled(true);
             if (opts.autoplay) startPlayback();
@@ -2709,7 +2738,7 @@
                 if (audioCtx !== ctx || !masterGain) return;
                 tempoNode = new AudioWorkletNode(ctx, 'tempo-processor', {
                     numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
-                    processorOptions: { pitch: 1 / tempo }
+                    processorOptions: { pitch: shifterRatio() }
                 });
                 masterGain.disconnect();
                 masterGain.connect(tempoNode);
@@ -2744,7 +2773,7 @@
             if (t === tempo) return;
             const pos = songPosition();
             tempo = t;
-            if (tempoNode) tempoNode.port.postMessage({ pitch: 1 / t });
+            if (tempoNode) tempoNode.port.postMessage({ pitch: shifterRatio() });
             if (isPlaying) {
                 for (const stem of STEM_NAMES) {
                     const src = sourceNodes[stem];
@@ -2766,6 +2795,38 @@
             row.querySelectorAll('.tempo-btn').forEach((b) => {
                 b.classList.toggle('active', parseFloat(b.dataset.tempo) === tempo);
             });
+            renderKey();
+        }
+
+        /* What the shifter has to do: undo the slowing (1/tempo), then move to
+         * the chosen key. At normal speed in the original key this is exactly
+         * 1, and the worklet passes the audio through untouched. */
+        function shifterRatio() {
+            return Math.pow(2, keyShift / 12) / tempo;
+        }
+
+        function setKey(n) {
+            n = Math.max(KEY_MIN, Math.min(KEY_MAX, Math.round(n)));
+            if (n === keyShift) { renderKey(); return; }
+            keyShift = n;
+            // Before the worklet exists there is nothing to tell: it is built
+            // from shifterRatio(), so it starts in this key.
+            if (tempoNode) tempoNode.port.postMessage({ pitch: shifterRatio() });
+            renderKey();
+        }
+
+        function renderKey() {
+            const row = document.getElementById('keyRow');
+            if (!row) return;
+            // Without the worklet a key change is impossible, same as speed.
+            row.style.display = tempoReady ? 'flex' : 'none';
+            const v = document.getElementById('keyValue');
+            v.textContent = keyShift === 0 ? 'Original'
+                          : (keyShift > 0 ? '+' : '−') + Math.abs(keyShift);
+            v.classList.toggle('active', keyShift !== 0);
+            const [down, , up] = row.querySelectorAll('.tempo-btn');
+            down.disabled = keyShift <= KEY_MIN;
+            up.disabled = keyShift >= KEY_MAX;
         }
 
         function startPlayback() {
@@ -3459,6 +3520,7 @@
                 volumes: {},
                 preset: currentPreset,
                 tempo: tempo,
+                key: keyShift,
                 tag: tag
             };
             for (const stem of STEM_NAMES) {
@@ -3488,6 +3550,7 @@
                 }
             }
             if (preset.tempo) setTempo(preset.tempo);
+            setKey(preset.key || 0);
             if (preset.position > 0) {
                 pauseOffset = preset.position * songDuration;
                 const seekBar = document.getElementById('seekBar');
