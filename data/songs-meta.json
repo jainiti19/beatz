@@ -1041,5 +1041,45 @@
     ],
     "film": "Woh Lamhe",
     "year": null
+  },
+  "Teri_Yaadon_Mein": {
+    "title": "Teri Yaadon Mein",
+    "singers": [
+      "KK Shreya Ghoshal"
+    ],
+    "film": "The Killer",
+    "year": null
+  },
+  "Khamoshiyan": {
+    "title": "Khamoshiyan",
+    "singers": [
+      "Ajay Jameson"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Aaj_jaane_ki_jidd": {
+    "title": "Aaj Jaane Ki Zid Na Karo",
+    "singers": [
+      "Farida Khanum"
+    ],
+    "film": "Monsoon Wedding",
+    "year": null
+  },
+  "NADAAN_parinde": {
+    "title": "Nadaan Parinde",
+    "singers": [
+      "A.R. Rahman"
+    ],
+    "film": "Rockstar",
+    "year": null
+  },
+  "TUMHE_DILLAGI": {
+    "title": "Tumhe Dillagi",
+    "singers": [
+      "Nusrat Fateh Ali Khan"
+    ],
+    "film": "Nusrat Fateh Ali Khan – Eternal Qawwali & Sufi Classics",
+    "year": null
   }
 }
