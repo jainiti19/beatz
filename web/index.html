@@ -1341,7 +1341,10 @@
         // find the line, quiet enough to sing over.
         const PRESETS = {
             singalong: { vocals: 20, drums: 100, bass: 100, other: 100 },
-            karaoke:   { vocals: 0,  drums: 80, bass: 80, other: 80 },
+            // Iti, 15 Sep, after the live test through the KEF speakers: the
+            // band well back and the harmony furthest, so a live voice on the
+            // mic sits on top. Every new song starts here.
+            karaoke:   { vocals: 0,  drums: 50, bass: 50, other: 25 },
             unplugged: { vocals: 0,  drums: 0,  bass: 80, other: 80 },
             jamming:   { vocals: 0,  drums: 70, bass: 80, other: 40 },
         };
@@ -1371,7 +1374,8 @@
         let keyShift = 0;
         let songs = [];
         let filteredSongs = [];
-        let currentPreset = 'karaoke';
+        const DEFAULT_PRESET = 'karaoke';
+        let currentPreset = DEFAULT_PRESET;
 
         // Playlists (stored in localStorage)
         // Playlists are shared across everyone's devices now: the server holds
@@ -2141,7 +2145,7 @@
             } else if (savedSetup) {
                 restoreSetup(savedSetup);
             } else {
-                applyPreset('singalong');
+                applyPreset(DEFAULT_PRESET);
             }
             // The key follows the song even when the mix is carried: a key
             // saved for this song is the singer's range, not a room setting.
