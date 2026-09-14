@@ -11,8 +11,10 @@ and recover from. Nothing here processes a song; it only records the ask.
 
 Usage: queue-service.py [--port 8931] [--queue /opt/beatznbox/queue/requests.jsonl]
 """
-import argparse, base64, hashlib, hmac, json, os, re, time
+import argparse, base64, hashlib, hmac, json, os, re, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PRESETS_LOCK = threading.Lock()
 
 # Signs the short-lived tokens that let the R2 Worker serve audio from the
 # edge. Read at every mint rather than cached, so rotating the file takes
@@ -241,12 +243,81 @@ class Handler(BaseHTTPRequestHandler):
         os.replace(tmp, self._playlists_path())     # atomic: no half-written file
         return self._json(200, {'ok': True, 'playlists': clean, 'rev': rev})
 
+    # ---- saved song setups -------------------------------------------
+    # "Save Setup" lived in each browser's localStorage, so a mix saved on a
+    # laptop was missing on the NUC driving the speakers. One shared file, like
+    # playlists. Unlike playlists, a write carries ONE setup rather than the
+    # whole map: two people saving different songs at once is the normal case
+    # here, and neither should need to know about the other's.
+    def _presets_path(self):
+        return os.path.join(os.path.dirname(self.queue_path), 'presets.json')
+
+    def _read_presets(self):
+        try:
+            with open(self._presets_path(), encoding='utf-8') as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    def get_presets(self):
+        return self._json(200, {'ok': True, 'presets': self._read_presets()})
+
+    def post_presets(self):
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        key = data.get('key')
+        # "<playlist or all>::<song dir>", as the player builds it.
+        # Only the song half is checked for path characters: it names a stems
+        # directory. The playlist half is a name someone typed ("80s/90s").
+        song_dir = key.rsplit('::', 1)[-1] if isinstance(key, str) else ''
+        if (not isinstance(key, str) or '::' not in key or len(key) > 200 or not song_dir
+                or '/' in song_dir or '\\' in song_dir or '..' in song_dir):
+            return self._json(400, {'error': 'bad key'})
+        setup = data.get('setup')
+        clean = None
+        if setup is not None:
+            if not isinstance(setup, dict):
+                return self._json(400, {'error': 'setup must be an object'})
+
+            def num(v, lo, hi, default):
+                return min(hi, max(lo, v)) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+            vols = setup.get('volumes') if isinstance(setup.get('volumes'), dict) else {}
+            clean = {
+                'position': num(setup.get('position'), 0, 1, 0),
+                'volumes': {s: int(num(vols.get(s), 0, 100, 80))
+                            for s in ('vocals', 'drums', 'bass', 'other') if s in vols},
+                'preset': str(setup.get('preset') or '')[:20],
+                'tempo': num(setup.get('tempo'), 0.25, 2, 1),
+                'key': int(num(setup.get('key'), -12, 12, 0)),
+                'tag': str(setup.get('tag') or '')[:40],
+                'saved': int(time.time() * 1000),
+            }
+        # Read-modify-write under a lock: the server is threaded, and two saves
+        # landing together would otherwise each write a map missing the other.
+        with PRESETS_LOCK:
+            presets = self._read_presets()
+            if clean is None:
+                presets.pop(key, None)
+            else:
+                if key not in presets and len(presets) >= 5000:
+                    return self._json(400, {'error': 'too many saved setups'})
+                presets[key] = clean
+            tmp = self._presets_path() + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(presets, f, ensure_ascii=False)
+            os.replace(tmp, self._presets_path())
+        return self._json(200, {'ok': True, 'setup': clean})
+
     def do_POST(self):
         path = self.path.rstrip('/')
         if path == '/api/lyrics':
             return self.post_lyrics()
         if path == '/api/playlists':
             return self.post_playlists()
+        if path == '/api/presets':
+            return self.post_presets()
         if path == '/api/report':
             return self.post_report()
         if path != '/api/request':
@@ -367,6 +438,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {'ok': True, 'pending': self._pending()})
         if path == '/api/playlists':
             return self.get_playlists()
+        if path == '/api/presets':
+            return self.get_presets()
         if path == '/api/stem-token':
             token, exp = mint_stem_token()
             if not token:

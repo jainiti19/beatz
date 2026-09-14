@@ -1383,8 +1383,11 @@
         const deletedPlaylists = new Set();
         let selectedPlaylist = null;
 
-        // Session presets (stored in localStorage)
-        let sessionPresets = JSON.parse(localStorage.getItem('beatznbox_presets') || '{}');
+        // Saved song setups. The server holds them (so a mix saved on a phone is
+        // there on the NUC driving the speakers); localStorage is the offline
+        // copy, same arrangement as playlists.
+        let sessionPresets = {};
+        try { sessionPresets = JSON.parse(localStorage.getItem('beatznbox_presets') || '{}'); } catch (e) {}
 
         // ===== Song List =====
 
@@ -2130,17 +2133,16 @@
             // A mix carried over from the previous song wins: it is what the
             // room was just listening to. Otherwise this song's own saved
             // setup, and failing that the default.
-            const presetKey = (selectedPlaylist || 'all') + '::' + song.dir;
+            const savedSetup = setupFor(song.dir);
             if (carriedMix) {
                 applyMix(carriedMix);
-            } else if (sessionPresets[presetKey]) {
-                restoreSetup(sessionPresets[presetKey]);
+            } else if (savedSetup) {
+                restoreSetup(savedSetup);
             } else {
                 applyPreset('singalong');
             }
             // The key follows the song even when the mix is carried: a key
             // saved for this song is the singer's range, not a room setting.
-            const savedSetup = sessionPresets[presetKey];
             setKey(savedSetup && savedSetup.key ? savedSetup.key : 0);
 
             setTransportEnabled(true);
@@ -3527,18 +3529,89 @@
                 const sl = document.getElementById('sl-' + stem);
                 sessionPresets[key].volumes[stem] = sl ? parseInt(sl.value) : 80;
             }
-            localStorage.setItem('beatznbox_presets', JSON.stringify(sessionPresets));
+            sessionPresets[key].saved = Date.now();
+            storePresetsLocally();
             showPresetIndicator(tag);
+            pushSetup(key, sessionPresets[key]);
         }
 
         function clearSetup() {
             if (currentSongIndex < 0) return;
             const song = songs[currentSongIndex];
-            const key = (selectedPlaylist || 'all') + '::' + song.dir;
-            delete sessionPresets[key];
-            localStorage.setItem('beatznbox_presets', JSON.stringify(sessionPresets));
+            // Every copy for this song, whichever playlist it was saved from:
+            // a setup is looked up by song, so leaving one behind would bring
+            // it straight back.
+            for (const key of Object.keys(sessionPresets)) {
+                if (key.endsWith('::' + song.dir)) {
+                    delete sessionPresets[key];
+                    pushSetup(key, null);
+                }
+            }
+            storePresetsLocally();
             document.getElementById('presetIndicator').textContent = '';
             document.getElementById('clearSetupBtn').style.display = 'none';
+        }
+
+        /* A song's setup, whichever playlist it was saved from. Iti's call on
+         * 14 Sep: a saved mix belongs to the song. Keys stay
+         * "<playlist>::<dir>" so older saves still resolve; the newest wins. */
+        function setupFor(dir) {
+            let best = null;
+            for (const [key, s] of Object.entries(sessionPresets)) {
+                if (!key.endsWith('::' + dir)) continue;
+                if (!best || (s.saved || 0) > (best.saved || 0)) best = s;
+            }
+            return best;
+        }
+
+        function storePresetsLocally() {
+            try { localStorage.setItem('beatznbox_presets', JSON.stringify(sessionPresets)); } catch (e) {}
+        }
+
+        async function pushSetup(key, setup) {
+            try {
+                const r = await fetch('/api/presets', { method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key, setup }) });
+                // A 400 is a setup the server will never accept; retrying it on
+                // every page load would only stall the migration forever.
+                if (r.status === 400) { console.warn('setup refused by the server', key); return true; }
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return true;
+            } catch (e) {
+                console.warn('setup kept on this device only', e);
+                return false;
+            }
+        }
+
+        async function loadPresets() {
+            let server;
+            try {
+                const r = await fetch('/api/presets', { cache: 'no-store', credentials: 'include' });
+                if (!r.ok) return;
+                server = (await r.json()).presets || {};
+            } catch (e) {
+                console.warn('setups: using the local copy', e);
+                return;
+            }
+            // Setups saved before the server held them exist only in this
+            // browser. Send them up once; after that the server is the record,
+            // or a setup cleared elsewhere would be resurrected by every device
+            // still holding an old copy.
+            let migrated = false;
+            try { migrated = localStorage.getItem('beatznbox_presets_migrated') === '1'; } catch (e) {}
+            if (!migrated) {
+                const pending = Object.entries(sessionPresets).filter(([k]) => !(k in server));
+                const sent = await Promise.all(pending.map(([k, s]) => pushSetup(k, s)));
+                if (sent.every(Boolean)) {
+                    pending.forEach(([k, s]) => { server[k] = s; });
+                    try { localStorage.setItem('beatznbox_presets_migrated', '1'); } catch (e) {}
+                } else {
+                    return;   // try again next load rather than drop them
+                }
+            }
+            sessionPresets = server;
+            storePresetsLocally();
         }
 
         function restoreSetup(preset) {
@@ -3593,6 +3666,7 @@
         // Init
         loadSongList();
         loadPlaylists();
+        loadPresets();
         initOffline();
         renderBell();
         pollRequests();
