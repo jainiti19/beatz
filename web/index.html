@@ -1360,12 +1360,14 @@
         let tempoNode = null;
         let tempoReady = false;
         let pendingTempo = null;  // a saved setup restored before the worklet loaded
-        // Key, in semitones from the recording. Rides the same shifter as the
+        // Key, in semitones from the recording, in half-semitone steps -- Karan's
+        // ask on 15 Sep: a whole semitone overshoots a singer's comfortable
+        // pitch, and a quarter tone costs nothing extra. Rides the same shifter as the
         // speed control, which is why it costs nothing extra: that node already
         // corrects every playback back to the original key, and this only moves
         // where "back" is. Belongs to the song, not the session -- a singer who
         // drops Mere Rashke Qamar by three does not want the next song dropped.
-        const KEY_MIN = -6, KEY_MAX = 6;
+        const KEY_MIN = -6, KEY_MAX = 6, KEY_STEP = 0.5;
         let keyShift = 0;
         let songs = [];
         let filteredSongs = [];
@@ -1828,9 +1830,9 @@
                 </div>
                 <div class="tempo-row" id="keyRow" style="display:none">
                     <span class="tempo-label">Key</span>
-                    <button class="tempo-btn key-step" onclick="setKey(keyShift - 1)" aria-label="Lower the key">&minus;</button>
+                    <button class="tempo-btn key-step" onclick="setKey(keyShift - KEY_STEP)" aria-label="Lower the key">&minus;</button>
                     <button class="tempo-btn key-value" id="keyValue" onclick="setKey(0)" title="Back to the original key">Original</button>
-                    <button class="tempo-btn key-step" onclick="setKey(keyShift + 1)" aria-label="Raise the key">+</button>
+                    <button class="tempo-btn key-step" onclick="setKey(keyShift + KEY_STEP)" aria-label="Raise the key">+</button>
                 </div>
                 <div class="up-next" id="upNext">
                     <span class="label">Up next:</span>
@@ -2808,7 +2810,7 @@
         }
 
         function setKey(n) {
-            n = Math.max(KEY_MIN, Math.min(KEY_MAX, Math.round(n)));
+            n = Math.max(KEY_MIN, Math.min(KEY_MAX, Math.round(n / KEY_STEP) * KEY_STEP));
             if (n === keyShift) { renderKey(); return; }
             keyShift = n;
             // Before the worklet exists there is nothing to tell: it is built

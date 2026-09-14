@@ -290,7 +290,7 @@ class Handler(BaseHTTPRequestHandler):
                             for s in ('vocals', 'drums', 'bass', 'other') if s in vols},
                 'preset': str(setup.get('preset') or '')[:20],
                 'tempo': num(setup.get('tempo'), 0.25, 2, 1),
-                'key': int(num(setup.get('key'), -12, 12, 0)),
+                'key': round(num(setup.get('key'), -12, 12, 0) * 2) / 2,   # half-semitone steps
                 'tag': str(setup.get('tag') or '')[:40],
                 'saved': int(time.time() * 1000),
             }
