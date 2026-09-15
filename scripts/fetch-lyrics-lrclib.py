@@ -105,6 +105,33 @@ def script_of(text):
     return "singable" if singable * 2 > len(letters) else "other"
 
 
+# LRCLIB carries TRANSLATIONS under the song's own name. Tadap Tadap Ke's only
+# entry is a Spanish rendering ("Este corazón muerto se desperto por tu amor"),
+# and it sailed through every gate: right title, right artist, right length,
+# twelve honest-looking lines. Nobody can sing from it. These are words common
+# in Spanish, Portuguese and French lyrics and vanishingly rare in romanised
+# Hindi, so a handful of them over a whole lyric means the wrong language --
+# not the odd borrowed word ("dil", "amore", "mi" appear in Hindi songs too,
+# which is why the threshold is a SHARE of the text, not a single hit.)
+FOREIGN_WORDS = {
+    "que", "para", "por", "con", "los", "las", "una", "eres", "este", "esta",
+    "corazon", "corazón", "amor", "siempre", "porque", "cuando", "nada",
+    "vida", "tambien", "también", "muerto", "pero", "como", "sobre", "estoy",
+    "je", "suis", "vous", "nous", "pour", "avec", "dans", "toujours", "jamais",
+    "não", "você", "coração", "sempre", "muito", "meu", "minha",
+}
+
+
+def looks_foreign(text):
+    """True when the lyric reads as Spanish/Portuguese/French rather than
+    Hindi. Returns the share of tokens that are telltale, so callers can log
+    it."""
+    toks = [w for w in re.findall(r"[^\W\d_]+", text.lower()) if len(w) > 1]
+    if len(toks) < 20:
+        return 0.0
+    return sum(1 for w in toks if w in FOREIGN_WORDS) / len(toks)
+
+
 COVER_MARKERS = ("version", "cover", "remix", " mix", "lofi", "slowed",
                  "reverb", "mashup", "instrumental")
 
@@ -443,6 +470,19 @@ def main():
             print(" ", describe(h))
         return
 
+    # How long this song usually is, so the downloader can tell a clip from the
+    # song. Dil Chahta Hai arrived as 2:31 of a 5:08 song and every one of
+    # LRCLIB's twenty versions was then rejected on duration -- the song looked
+    # to have no lyrics at all, when what was wrong was the audio. Median over
+    # the singable, non-cover hits; prints nothing when there is no basis.
+    if args[0] == "--expect-duration":
+        hits = [h for h in search(" ".join(args[1:])) if not is_cover(h)]
+        secs = sorted(h["duration"] for h in hits
+                      if h.get("duration") and script_of(h.get("plainLyrics") or "") == "singable")
+        if len(secs) >= 3:
+            print(int(secs[len(secs) // 2]))
+        return
+
     query, out = args[0], args[1]
     artist = duration = yt_title = None
     rest = args[2:]
@@ -481,6 +521,12 @@ def main():
         if not belongs_to_audio(b, yt_title, query):
             tried.append(f"{cand!r} matched {b.get('trackName')!r}, "
                          f"not the song in the video title")
+            continue
+        foreign = looks_foreign(b.get("plainLyrics") or "")
+        if foreign > 0.04:
+            tried.append(f"{cand!r} matched {b.get('trackName')!r}, but its "
+                         f"words look like a translation ({foreign:.0%} "
+                         f"Spanish/Portuguese/French)")
             continue
         best, used = b, cand
         break

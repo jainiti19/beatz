@@ -99,10 +99,63 @@ while IFS='|' read -r NAME YT LYR ART <&3; do
       ??????????? )                    YTREF="https://www.youtube.com/watch?v=$YT" ;;
       *)                               YTREF="ytsearch1:$YT" ;;
     esac
-    "$VENV/yt-dlp" --js-runtimes node --no-playlist --skip-download \
-      --print "%(id)s" --print "%(title)s" "$YTREF" > "$WORK/yt.txt" 2>/dev/null || true
-    YTID=$(sed -n 1p "$WORK/yt.txt")
-    YTTITLE=$(sed -n 2p "$WORK/yt.txt")
+    # A search takes the first hit, and the first hit is often a clip: Dil
+    # Chahta Hai arrived as 2:31 of a 5:08 song, Abhi Mujh Mein Kahin cut off
+    # before its last verse. Nothing downstream notices -- the lyrics then fail
+    # the duration gate and the song looks to have no words, which is the
+    # opposite of what is wrong. So look at five hits and ask LRCLIB how long
+    # this song usually is. A pinned id or URL skips all of this by design.
+    case "$YTREF" in
+      ytsearch1:*)
+        EXPECT=$("$VENV/python" "$SCRIPT_DIR/fetch-lyrics-lrclib.py" \
+                   --expect-duration "${LYR:-$YT}" 2>/dev/null | head -1)
+        "$VENV/yt-dlp" --js-runtimes node --flat-playlist \
+          --print "%(id)s|%(duration)s|%(title)s" "ytsearch5:$YT" \
+          > "$WORK/cands.txt" 2>/dev/null || true
+        PICK=$("$VENV/python" - "$WORK/cands.txt" "${EXPECT:-0}" <<'PYPICK'
+import sys
+rows = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    vid, _, rest = line.strip().partition("|")
+    dur, _, title = rest.partition("|")
+    try: dur = float(dur)
+    except ValueError: dur = 0.0
+    if vid: rows.append((vid, dur, title))
+expect = float(sys.argv[2] or 0)
+if rows:
+    # Rank order is YouTube's own relevance, so keep it and take the first hit
+    # whose length agrees. 20% covers a fade or a tacked-on intro; it does not
+    # cover half a song.
+    best = rows[0]
+    if expect > 0:
+        fit = [r for r in rows if r[1] and abs(r[1] - expect) <= 0.2 * expect]
+        if fit: best = fit[0]
+    print(f"{best[0]}|{int(best[1])}|{best[2]}")
+PYPICK
+)
+        YTID=${PICK%%|*}
+        YTREST=${PICK#*|}
+        YTDUR=${YTREST%%|*}
+        YTTITLE=${YTREST#*|}
+        FIRSTID=$(head -1 "$WORK/cands.txt" | cut -d'|' -f1)
+        if [ -n "$EXPECT" ] && [ "$YTID" != "$FIRSTID" ]; then
+          echo "        skipped the top hit: ${YTDUR}s fits the usual ${EXPECT}s better"
+        elif [ -n "$EXPECT" ] && [ -n "$YTDUR" ]; then
+          "$VENV/python" -c "
+import sys
+d, e = float('${YTDUR:-0}'), float('$EXPECT')
+if d and e and abs(d - e) > 0.2 * e:
+    print(f'        WARNING: this upload is {int(d)}s but the song is usually {int(e)}s')
+"
+        fi
+        ;;
+      *)
+        "$VENV/yt-dlp" --js-runtimes node --no-playlist --skip-download \
+          --print "%(id)s" --print "%(title)s" "$YTREF" > "$WORK/yt.txt" 2>/dev/null || true
+        YTID=$(sed -n 1p "$WORK/yt.txt")
+        YTTITLE=$(sed -n 2p "$WORK/yt.txt")
+        ;;
+    esac
     if [ -z "$YTID" ]; then
       echo "  FAIL: nothing found on YouTube for '$YT'"; failed=$((failed+1)); continue
     fi

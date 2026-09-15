@@ -1105,5 +1105,57 @@
     ],
     "film": "",
     "year": null
+  },
+  "Mere_Naam_Tu": {
+    "title": "Mere Naam Tu (From \"Zero\")",
+    "singers": [
+      "Abhay Jodhpurkar",
+      "Ajay-Atul"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Ek_Din_Aap_Yun_Humko": {
+    "title": "Ek Din Aap (From \"Yes Boss\")",
+    "singers": [
+      "The Kumar Sanu Official"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Tujh_mein_rab_dikhta_hai": {
+    "title": "Tujh Mein Rab Dikhta Hai",
+    "singers": [
+      "Salim–Sulaiman",
+      "Roop Kumar Rathod",
+      "Jaideep Sahni"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Scientist": {
+    "title": "The Scientist",
+    "singers": [
+      "Coldplay"
+    ],
+    "film": "Warm Rock Ballads",
+    "year": null
+  },
+  "Kaise_mujhe_tu": {
+    "title": "Kaise Mujhe",
+    "singers": [
+      "Benny Dayal",
+      "Shreya Ghoshal"
+    ],
+    "film": "The Underrated Bollywood Gems Part 1",
+    "year": null
+  },
+  "Tadap_tadap": {
+    "title": "Tadap Tadap Ke Is Dil",
+    "singers": [
+      "Kavita Krishnamurthy"
+    ],
+    "film": "Madno...maashooka....dilbaro",
+    "year": null
   }
 }
