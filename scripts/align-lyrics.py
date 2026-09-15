@@ -272,10 +272,11 @@ def correct_repeat_counts(waveform, lines, segments, seconds_per_frame):
     count. Once the count is right the alignment itself places the repetitions —
     that is what forced alignment is good at, given the correct text.
 
-    Returns the new line list, or None when nothing changed.
+    Returns [(lo, hi, k)] proposals -- run lines[lo:hi] sung k times. They are
+    only proposals: verify_repeat_counts() decides which the audio supports.
     """
     if len(segments) != len(lines):
-        return None                        # a line dropped out; indices unreliable
+        return []                          # a line dropped out; indices unreliable
 
     runs, start = [], 0
     for i in range(1, len(segments) + 1):
@@ -286,7 +287,7 @@ def correct_repeat_counts(waveform, lines, segments, seconds_per_frame):
 
     repeated = [(lo, hi) for lo, hi in runs if hi - lo >= 2]
     if not repeated:
-        return None
+        return []
 
     voiced = voiced_mask(waveform)
 
@@ -307,7 +308,7 @@ def correct_repeat_counts(waveform, lines, segments, seconds_per_frame):
 
     confident = sorted(x for x in raw if x)
     if not confident:
-        return None
+        return []
     fallback = confident[len(confident) // 2]
 
     # A given line takes the same time every time it is sung, so pool the estimates
@@ -325,30 +326,91 @@ def correct_repeat_counts(waveform, lines, segments, seconds_per_frame):
         for (lo, hi), est in zip(repeated, raw)
     ]
 
-    out, changed = [], False
-    ri = 0
-    for lo, hi in runs:
+    proposals = []
+    for ri, (lo, hi) in enumerate(repeated):
         n = hi - lo
-        line = lines[lo]
-        if n < 2:
-            out.append(line)
-            continue
-
         t0, t1 = spans[ri]
         period = periods[ri] or fallback
-        ri += 1
         v = voiced_seconds(t0, t1)
         k = max(1, round(v / period))
         # Refuse wild rewrites — a 10x jump means the period or the span is wrong.
         if k > 4 * n or k < n / 4:
             k = n
         if k != n:
-            changed = True
-            print(f"    repeat count {n} -> {k}  ({t0:.1f}-{t1:.1f}s, {v:.1f}s voiced, "
-                  f"period {period:.2f}s) {line['text'][:34]!r}")
-        out.extend([line] * k)
+            print(f"    repeat count {n} -> {k}?  ({t0:.1f}-{t1:.1f}s, {v:.1f}s voiced, "
+                  f"period {period:.2f}s) {lines[lo]['text'][:34]!r}")
+            proposals.append((lo, hi, k))
+    return proposals
 
-    return out if changed else None
+
+def verify_repeat_counts(lines, segments, proposals, build_segments):
+    """Keep only the count changes the alignment itself agrees with.
+
+    The period estimate is a guess about the music, and it guesses wrong in a
+    recognisable way: it locks onto HALF a sung line (most lines have two musical
+    halves) and doubles the count. Bahon Ke Darmiyan's pairs are sung twice and
+    were rewritten to four; Tu Pyar Hai Kisi Aur Ka had the same doubling five
+    times. The surplus copies have no singing to sit on, so the aligner packs them
+    into the nearest gap and drags the real lines early -- the exact fault the
+    count was meant to cure.
+
+    So each proposed change is tried on its own, and kept only if that run aligns
+    no worse than with the lyrics' own count: its mean score may not fall by more
+    than 0.15, it may not gain a crushed line, and no line may go past 2x the song's
+    median singing rate (or its old peak, if that was already higher).
+
+    The raw Viterbi path score was tried first and does not work: fewer words
+    always score better, because the star unit absorbs anything, so it would
+    reject every added repeat including Chaiyya Chaiyya's, which are real.
+
+    Tested 15 Sep 2026 on eight songs: keeps Chaiyya Chaiyya's added hooks,
+    rejects all four Bahon doublings, and rejects the big jumps (Daaru 3->10,
+    Ghar Kab Aaoge 4->13, Phoolon 2->8, Kun Faya Kun 2->7) whose extra copies
+    landed crushed or racing.
+    """
+    if not proposals or len(segments) != len(lines):
+        return None
+
+    rates = sorted(len(s["words"]) / max(s["end"] - s["start"], 0.05) for s in segments)
+    med_rate = rates[len(rates) // 2] or 1.0
+
+    def stats(segs, lo, hi):
+        rows = segs[lo:hi]
+        r = [len(s["words"]) / max(s["end"] - s["start"], 0.05) for s in rows]
+        return (sum(s["score"] for s in rows) / len(rows),
+                sum(1 for x, s in zip(r, rows)
+                    if x > 3 * med_rate or s["end"] - s["start"] < 0.5),
+                max(r) / med_rate)
+
+    kept = []
+    for lo, hi, k in proposals:
+        trial = lines[:lo] + [lines[lo]] * k + lines[hi:]
+        tsegs = build_segments(trial)
+        if len(tsegs) != len(trial):
+            continue                       # a line dropped out; cannot judge
+        b_score, b_crushed, b_peak = stats(segments, lo, hi)
+        t_score, t_crushed, t_peak = stats(tsegs, lo, lo + k)
+        ok = (t_score >= b_score - 0.15 and t_crushed <= b_crushed
+              and t_peak <= max(2.0, b_peak))
+        print(f"    repeat count {hi - lo} -> {k} {'kept' if ok else 'rejected'}: "
+              f"score {b_score:.2f} -> {t_score:.2f}, crushed {b_crushed} -> {t_crushed}, "
+              f"peak rate {b_peak:.1f}x -> {t_peak:.1f}x")
+        if ok:
+            kept.append((lo, hi, k))
+
+    if not kept:
+        return None
+    counts = {lo: (hi, k) for lo, hi, k in kept}
+    out, i = [], 0
+    while i < len(lines):
+        if i in counts:
+            hi, k = counts[i]
+            out.extend([lines[i]] * k)
+            i = hi
+        else:
+            out.append(lines[i])
+            i += 1
+    return out
 
 
 def redistribute_repeats(segments):
@@ -575,9 +637,10 @@ def process_song(stems_dir, force=False, int8=False):
         segments = build_segments(lines)
         # The audio, not the lyrics source, decides how many times a line repeats.
         # Re-aligning is cheap here: the model forward is done, this is Viterbi only.
-        corrected = correct_repeat_counts(
+        proposals = correct_repeat_counts(
             waveform, lines, segments, seconds_per_frame
         )
+        corrected = verify_repeat_counts(lines, segments, proposals, build_segments)
         if corrected:
             lines = corrected
             segments = build_segments(lines)
