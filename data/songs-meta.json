@@ -1089,5 +1089,21 @@
     ],
     "film": "Ultimate 2000s Romance",
     "year": null
+  },
+  "Yeh_hai_Mumbai_Meri_jaan": {
+    "title": "Yeh Hai Bombay Meri Jaan (From \"C.I.D\")",
+    "singers": [
+      "Mohammed Rafi"
+    ],
+    "film": "Bollywood Confidential - The Golden Days, Vol. 3 (The Original Soundtrack)",
+    "year": null
+  },
+  "Dil_diyan_gallan": {
+    "title": "Dil Diyan Gallan",
+    "singers": [
+      "Abhijeet Srivastava"
+    ],
+    "film": "",
+    "year": null
   }
 }
