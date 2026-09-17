@@ -30,7 +30,7 @@ done
 
 VENV=~/demucs-env/bin
 SRC=~/Music/karaoke/htdemucs
-WORK=~/Music/beatz_pipeline
+WORK=${BEATZ_WORK:-~/Music/beatz_pipeline}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 mkdir -p "$WORK" "$SRC"

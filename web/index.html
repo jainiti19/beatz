@@ -2999,8 +2999,11 @@
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
                 note.textContent = `Got ${data.lines} lines. You'll see it under Requests when timed.`;
+                // The server's own clock, not this device's: the check below
+                // compares it against a Last-Modified from the same server.
                 addReq({ song: song.name + ' (lyrics)', title: song.name + ' (lyrics)',
-                         state: 'queued', seen: true });
+                         state: 'queued', seen: true, lyricsFor: song.dir,
+                         since: resp.headers.get('Date') || new Date().toUTCString() });
                 document.getElementById('pasteText').value = '';
             } catch (e) {
                 note.textContent = 'Could not send: ' + e.message;
@@ -3084,9 +3087,40 @@
             }).join('');
         }
 
+        /* A pasted lyric has no queue id -- it is a file drop, not a request --
+         * so pollRequests() never had anything to ask about and the entry sat
+         * at "queued" for ever. It misled Iti twice into thinking the watcher
+         * was dead when the words were already live. There is no status
+         * endpoint to add without touching the server, but there is a plain
+         * fact on disk: the song's lyrics file gets rewritten when the
+         * alignment lands. So compare its Last-Modified against the moment the
+         * paste was accepted, both being the server's own clock. */
+        async function checkPastedLyrics(list) {
+            const open = list.filter(r => r.lyricsFor && (!r.state || r.state === 'queued'));
+            if (!open.length) return false;
+            let changed = false;
+            await Promise.all(open.map(async (r) => {
+                try {
+                    const resp = await fetch(`${STEMS_BASE_URL}/${encodeURIComponent(r.lyricsFor)}/lyrics_timed.json`,
+                                             { method: 'HEAD', cache: 'no-store' });
+                    if (!resp.ok) return;
+                    const lm = Date.parse(resp.headers.get('Last-Modified') || '');
+                    const since = Date.parse(r.since || '');
+                    if (!lm || !since || lm <= since) return;
+                    r.state = 'done';
+                    r.seen = false;
+                    changed = true;
+                } catch (e) {}
+            }));
+            return changed;
+        }
+
         // Ask only about things still in flight; a finished request never changes.
         async function pollRequests() {
             const list = myReqs();
+            if (await checkPastedLyrics(list)) {
+                saveReqs(list); renderBell(); loadSongList();
+            }
             const open = list.filter(r => r.id && (!r.state || r.state === 'queued'));
             if (!open.length) return;
             try {
