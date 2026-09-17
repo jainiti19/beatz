@@ -555,6 +555,38 @@ def reanchor_outliers(segments, max_gap=6.0, min_span=12.0):
     return segments
 
 
+def clamp_held_words(segments):
+    """Stop ONE word from holding a line lit across an outro.
+
+    reanchor_outliers() moves a word that landed on the wrong side of a gap,
+    but the stall it cannot see is inside a single word: Abhi Na Jao Chhodkar's
+    closing "nahin" was given 214.9s-240.3s, so the last line stayed lit for 32
+    seconds while the outro played. Viterbi has to consume every frame, and the
+    final word is where the leftovers go.
+
+    A sung note really can be held for several seconds, so the cap is relative
+    to the song's own words -- 8x the median and at least 6s -- and only the
+    word's END moves, which can shorten a line but never reorder anything.
+    """
+    durs = sorted(w["end"] - w["start"]
+                  for seg in segments for w in (seg.get("words") or []))
+    if not durs:
+        return segments
+    med = durs[len(durs) // 2] or 0.3
+    cap = max(6.0, 8 * med)
+    keep = max(1.5, 4 * med)
+
+    for seg in segments:
+        words = seg.get("words") or []
+        for w in words:
+            if w["end"] - w["start"] > cap:
+                w["end"] = round(w["start"] + keep, 2)
+        if words:
+            seg["end"] = max(w["end"] for w in words)
+            seg["start"] = min(w["start"] for w in words)
+    return segments
+
+
 def reapply_roman(stems_dir):
     """Re-lay <stems>/roman.json over a freshly written lyrics_timed.json."""
     job = os.path.join(stems_dir, "roman.json")
@@ -654,6 +686,11 @@ def process_song(stems_dir, force=False, int8=False):
 
     segments = redistribute_repeats(segments)
     segments = reanchor_outliers(segments)
+    # Clamp first, then re-anchor again: capping a held word often EXPOSES the
+    # gap that reanchor_outliers looks for. Abhi Na Jao Chhodkar's closing line
+    # held one "nahin" for 25s and then had a last word out at 240s; only the
+    # two passes together bring the line back to the singing.
+    segments = reanchor_outliers(clamp_held_words(segments))
 
     # Monotonicity is guaranteed by Viterbi, but guard against zero/negative spans.
     for seg in segments:
@@ -697,6 +734,7 @@ def repair_song(stems_dir):
 
     before = max(s["end"] - s["start"] for s in segments)
     segments = reanchor_outliers(segments)
+    segments = reanchor_outliers(clamp_held_words(segments))
     after = max(s["end"] - s["start"] for s in segments)
 
     if after < before - 0.05:
