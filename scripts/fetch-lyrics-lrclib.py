@@ -231,6 +231,16 @@ _LRC_TIME = re.compile(r"^\s*(?:\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]\s*)+")
 _LRC_TAG = re.compile(r"^\s*\[[a-z]{2,}:[^\]]*\]\s*$", re.I)
 
 
+# Structure markers and credit headers that some uploads carry, Genius-style.
+# They are not sung, and forced alignment cannot drop a line it cannot hear --
+# it force-fits them onto the intro and drags the first real lines early.
+# Gehra Hua arrived with 'Arijit Singh & Armaan Khan "Gehra Hua" के बोल]' and
+# "[Verse 1: Arijit Singh]" sitting on its first 22 seconds.
+_SECTION = re.compile(r"^\s*[\[(](verse|chorus|intro|outro|bridge|refrain|hook|pre-chorus|"
+                      r"interlude|instrumental)\b[^\]\)]*[\])]\s*$", re.I)
+_CREDIT = re.compile(r"(के बोल|\blyrics\b\s*[:\]]|\bparoles\b)", re.I)
+
+
 def strip_lrc(text):
     """Plain words only, whatever the contributor actually uploaded."""
     out = []
@@ -238,8 +248,11 @@ def strip_lrc(text):
         if _LRC_TAG.match(line):
             continue
         line = _LRC_TIME.sub("", line).rstrip()
-        if line.strip():
-            out.append(line)
+        if not line.strip():
+            continue
+        if _SECTION.match(line) or _CREDIT.search(line):
+            continue
+        out.append(line)
     return "\n".join(out)
 
 

@@ -250,6 +250,31 @@ def sync_r2():
                                         " until sync-stems-r2.sh is re-run)"))
 
 
+def romanize(name):
+    """Give a new Devanagari song readable romanised spellings.
+
+    The `A` toggle shows one romanised word per aligned word, and uroman's
+    version of those reads "mujhako itanaa bataae koii". Every song in the
+    library was fixed by hand, and then every new song arrived in the machine
+    spelling again -- Iti hit that twice in a week. scripts/romanize-new.py
+    asks the model for the spellings and validates the token count itself, so
+    the worst case is the song keeps uroman's.
+
+    Best effort, like sync_r2: this runs BEFORE prepare-web so the spellings
+    reach the player in the same publish, but a failure must never hold one up.
+    """
+    try:
+        r = run([sys.executable, "scripts/romanize-new.py",
+                 os.path.join(STEMS, name)], capture_output=True, text=True,
+                timeout=600)
+    except Exception as e:
+        log(f"  romanise: skipped ({type(e).__name__})")
+        return
+    tail = [l for l in (r.stdout or "").strip().splitlines() if l.strip()]
+    if tail and "nothing to do" not in tail[-1] and "skip 1" not in tail[-1]:
+        log(f"  romanise: {tail[-1]}")
+
+
 def process(entry, fast):
     name = entry["name"]
     title = field(entry.get("song"))
@@ -289,6 +314,7 @@ def process(entry, fast):
     # typed one and only corrected it when the NEXT song happened to be added.
     real, artist, album = resolved_title(name)
     record_meta(name, real, artist, album)
+    romanize(name)
     if run(["./scripts/prepare-web.sh"], capture_output=True, text=True).returncode != 0:
         log("  prepare-web failed"); return False
     if run(["./scripts/deploy-web.sh"], capture_output=True, text=True).returncode != 0:
@@ -548,6 +574,10 @@ def main():
                 except Exception as e:
                     log(f"  lyrics drop {fname} failed: {e}")
             if changed and not NO_PUBLISH:
+                # A paste replaces the words, so whatever spellings existed are
+                # for the old text; romanize-new.py re-dumps and refills.
+                for fname in drops:
+                    romanize(os.path.splitext(os.path.basename(fname))[0])
                 run(["./scripts/prepare-web.sh"], capture_output=True, text=True)
                 run(["./scripts/deploy-web.sh"], capture_output=True, text=True)
                 log("  published pasted lyrics")
