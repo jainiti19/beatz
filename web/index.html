@@ -2725,7 +2725,12 @@
         // Coming back to the tab re-takes the lock, since the browser released
         // it on the way out.
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && isPlaying) keepScreenAwake();
+            // A save wants the screen awake for the same reason playback does:
+            // the browser dropped the lock on the way out, and a throttled tab
+            // downloads 3.6GB at a crawl.
+            if (document.visibilityState === 'visible' && (isPlaying || offlineBusy)) {
+                keepScreenAwake();
+            }
         });
 
         /* Stems -> masterGain -> tempo shifter -> speakers.
@@ -3314,10 +3319,75 @@
         // Which songs are held locally. Kept as a set so filterSongs() can ask
         // synchronously -- it runs on every keystroke and cannot await a cache.
         let offlineDirs = new Set();
+        // dir -> how many of its stems are held, so a part-saved song can be
+        // priced at what it still needs rather than at a whole song.
+        let offlineStems = new Map();
         let savedOnly = false;
         const MB_PER_SONG = 22;              // measured mean across the library
         const CONFIRM_OVER = 25;             // songs, before asking twice
+        const SAVE_STALL_MS = 25000;         // same rule the song loader uses
         let offlineBusy = false, offlineCancel = false, offlineArmed = false;
+
+        /* Fetch one file for the cache, giving up if it stops arriving.
+         *
+         * The save loop used a plain fetch with no timeout, so one stem whose
+         * body stopped yielding hung the whole download: the counter sat at
+         * N/164 for ever, Stop did nothing (the loop never reached its cancel
+         * check), and the only way out was reloading the page. Iti hit exactly
+         * that trying to save the library on wifi before a session.
+         *
+         * Two things are needed, the same two selectSong() needed on 4 Sep. The
+         * body has to be read HERE rather than handed to cache.put(), because
+         * progress is the only thing that tells slow apart from dead and
+         * cache.put() consumes the stream where we cannot watch it. And the
+         * abort has to be raced explicitly -- a read that has stopped yielding
+         * does not reliably reject when the signal fires. */
+        async function fetchForCache(url) {
+            const ctl = new AbortController();
+            let lastAt = Date.now();
+            const timer = setInterval(() => {
+                if (Date.now() - lastAt >= SAVE_STALL_MS) {
+                    ctl.abort(new Error(`nothing arrived for ${SAVE_STALL_MS / 1000}s`));
+                }
+            }, 2000);
+            const aborted = new Promise((_, reject) => {
+                if (ctl.signal.aborted) return reject(ctl.signal.reason);
+                ctl.signal.addEventListener('abort',
+                    () => reject(ctl.signal.reason), { once: true });
+            });
+            aborted.catch(() => {});      // never an unhandled rejection
+            try {
+                const r = await Promise.race([fetch(url, { signal: ctl.signal }), aborted]);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                // A cache hit and a very old browser both land here; there is no
+                // stream to watch, so the fetch timeout above is all we get.
+                if (!r.body || !r.body.getReader) return r;
+                const reader = r.body.getReader();
+                const chunks = [];
+                let got = 0;
+                try {
+                    for (;;) {
+                        const { done, value } = await Promise.race([reader.read(), aborted]);
+                        if (done) break;
+                        chunks.push(value);
+                        got += value.length;
+                        lastAt = Date.now();
+                    }
+                } catch (e) {
+                    try { await reader.cancel(); } catch (_) {}
+                    throw e;
+                }
+                const body = new Uint8Array(got);
+                let off = 0;
+                for (const c of chunks) { body.set(c, off); off += c.length; }
+                // Rebuilt, not replayed: a Response whose body has been read
+                // cannot be cached. The headers come along so a cached hit still
+                // says audio/mpeg and still carries its week of Cache-Control.
+                return new Response(body, { status: r.status, headers: r.headers });
+            } finally {
+                clearInterval(timer);
+            }
+        }
 
         async function initOffline() {
             if (CACHE_OFF && window.caches) {
@@ -3351,6 +3421,12 @@
                     await navigator.serviceWorker.register('sw.js');
                 } else if (window.caches) {
                     for (const k of await caches.keys()) {
+                        // NOT the stem cache. This sweep exists to clear what the
+                        // old worker left behind, and it ran on every load -- so
+                        // it deleted the songs "Save offline" had just saved, and
+                        // the feature silently undid itself one reload later. Iti
+                        // lost 37 songs and five minutes of wifi to this.
+                        if (k === STEM_CACHE_NAME) continue;
                         if (k.startsWith('beatz-')) await caches.delete(k);
                     }
                 }
@@ -3393,7 +3469,29 @@
                 per.set(dir, (per.get(dir) || 0) + 1);
             }
             offlineDirs = new Set([...per].filter(([, n]) => n >= STEM_NAMES.length).map(([d]) => d));
+            // Kept as well as the set of whole songs: a song stopped half way
+            // through still holds most of its bytes, and the estimate has to
+            // say so or it reads as "download all of that again".
+            offlineStems = per;
             return offlineDirs;
+        }
+
+        /* Stems still to fetch for these songs, and what that is in MB. Counting
+         * whole songs said 92 songs / ~2GB when 92 songs were merely INCOMPLETE
+         * -- most of their audio was already on the phone. The unit that gets
+         * downloaded is a stem, so that is the unit to count. */
+        function offlineRemaining(list) {
+            let stems = 0;
+            for (const song of list) {
+                stems += Math.max(0, STEM_NAMES.length - (offlineStems.get(song.dir) || 0));
+            }
+            return { stems, mb: Math.round(stems * MB_PER_SONG / STEM_NAMES.length) };
+        }
+
+        // A set list is MB; the whole library is GB, and "~2024 MB" is a number
+        // nobody can feel.
+        function offlineSize(mb) {
+            return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
         }
 
         async function offlineHeld(list) {
@@ -3422,14 +3520,23 @@
                 offlineArmed = false;
                 return;
             }
-            const est = Math.round(missing * MB_PER_SONG);
+            // What is left to fetch, not what is left to finish: a song with
+            // three of its four stems costs a quarter of a song, not a whole one.
+            const { mb: est } = offlineRemaining(list);
+            const size = offlineSize(est);
             const needsConfirm = missing > CONFIRM_OVER;
             const label = (needsConfirm && !offlineArmed)
-                ? `Save ${scope} offline (~${est} MB)`
-                : `Save ${missing} song${missing === 1 ? '' : 's'} (~${est} MB)`;
+                ? `Save ${scope} offline (~${size})`
+                : `Save ${missing} song${missing === 1 ? '' : 's'} (~${size})`;
+            // "92 already saved" next to "Save 92 songs" read as though the 92
+            // had to be fetched again. Saying it as a total out of a total is
+            // the thing that was actually wanted: how far along am I.
+            const progress = held
+                ? ` <span class="offline-note">${held} of ${list.length} saved</span>`
+                : '';
             el.innerHTML = `<button class="offline-btn${offlineArmed ? ' armed' : ''}" onclick="saveOffline()">`
-                + (offlineArmed ? `Tap again to download ~${est} MB` : label) + `</button>`
-                + (held ? ` <span class="offline-note">${held} already saved</span>` : '');
+                + (offlineArmed ? `Tap again to download ~${size}` : label) + `</button>`
+                + progress;
         }
 
         async function saveOffline() {
@@ -3442,6 +3549,12 @@
                 offlineArmed = true; renderOffline(); return;
             }
             offlineArmed = false; offlineBusy = true; offlineCancel = false;
+            // A set list is ~20 songs and several hundred MB, the whole library
+            // 3.6GB, fetched one stem at a time. The screen used to sleep well
+            // before that finished, and a backgrounded tab is throttled to a
+            // crawl -- so a save left alone to run never got there. The lock was
+            // only ever taken for playback; saving needs it just as much.
+            keepScreenAwake();
             // Without this Chrome treats the whole library as evictable, which is
             // exactly what it was already doing mid-session.
             let persisted = false;
@@ -3460,15 +3573,18 @@
                     for (const stem of STEM_NAMES) {
                         const u = audioUrl(song.dir, stem);
                         if (await c.match(u)) continue;
-                        const r = await fetch(u);
-                        if (r.ok) await c.put(u, r); else throw new Error('HTTP ' + r.status);
+                        await c.put(u, await fetchForCache(u));
+                        // Checked between stems as well as between songs: a song
+                        // is ~22MB, so waiting for the whole four made Stop feel
+                        // broken on a slow connection.
+                        if (offlineCancel) break;
                     }
                     // Lyrics are tiny and useless to omit -- a saved song that
                     // cannot show its words is not saved for a sing-along.
                     for (const f of ['lyrics_timed.json', 'lyrics.txt']) {
                         const u = stemUrl(song.dir, f);
                         if (!(await c.match(u))) {
-                            try { const r = await fetch(u); if (r.ok) await c.put(u, r); } catch (e) {}
+                            try { await c.put(u, await fetchForCache(u)); } catch (e) {}
                         }
                     }
                 } catch (e) {
@@ -3479,6 +3595,9 @@
                 paint(done);
             }
             offlineBusy = false;
+            // Playback may have been running throughout, and it wants the lock
+            // for itself -- only the save's own claim goes back.
+            if (!isPlaying) releaseScreenAwake();
             await refreshOfflineDirs();
             renderPlaylistChips();
             if (failed) {

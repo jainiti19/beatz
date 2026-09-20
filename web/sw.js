@@ -21,6 +21,11 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
     e.waitUntil((async () => {
         for (const k of await caches.keys()) {
+            // Everything this worker's predecessor made, but NOT beatz-stems-v1:
+            // that one is the app's own "Save offline" store, written by the page
+            // and read by the page, and nothing to do with the worker that broke.
+            // Sweeping it up deleted a whole saved set list on the next load.
+            if (k === 'beatz-stems-v1') continue;
             if (k.startsWith('beatz-')) await caches.delete(k);
         }
         await self.registration.unregister();
