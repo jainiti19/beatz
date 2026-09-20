@@ -1259,5 +1259,177 @@
       "Lata Mangeshkar"
     ],
     "year": 1965
+  },
+  "Main_yahaan_hoon": {
+    "title": "Main Yahaan Hoon",
+    "singers": [
+      "Udit Narayan"
+    ],
+    "film": "Fan",
+    "year": null
+  },
+  "Main_shayar_to_nahi": {
+    "title": "Main Shayar To Nahin",
+    "singers": [
+      "Kunal Bojewar"
+    ],
+    "film": "Popular Covers - Saregama & Pehchan Music",
+    "year": null
+  },
+  "Bedardi_raja": {
+    "title": "Bedardi Raja",
+    "singers": [
+      "Ram Sampath"
+    ],
+    "film": "Delhi Belly",
+    "year": null
+  },
+  "Yeh_raatein_yeh_mausum": {
+    "title": "Yeh Raaten Yeh Mausam (From \"Dilli Ka Thug\")",
+    "singers": [
+      "Kishore Kumar/Asha Bhosle"
+    ],
+    "film": "One Man Many Roles - Kishore Kumar",
+    "year": null
+  },
+  "Aaj_se_meri_saari": {
+    "title": "Aaj Se Teri",
+    "singers": [
+      "Amit Trivedi",
+      "Arijit Singh"
+    ],
+    "film": "Romantic Drive Mix",
+    "year": null
+  },
+  "Main_tainu_samjhawan": {
+    "title": "Samjhawan",
+    "singers": [
+      "Jawad Ahmad",
+      "Shaarib Toshi",
+      "Arijit Singh",
+      "Shreya Ghoshal"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Mitwa": {
+    "title": "Mitwa",
+    "singers": [
+      "A. R. Rahman"
+    ],
+    "film": "The Very Best Bollywood Songs II",
+    "year": null
+  },
+  "banke_tera_jogi": {
+    "title": "Banke Tera Jogi",
+    "singers": [
+      "Jatin-Lalit feat. Alka Yagnik & Sonu Nigam"
+    ],
+    "film": "Phir Bhi Dil Hai Hindustani (Original Motion Picture Soundtrack)",
+    "year": null
+  },
+  "Bheegi_Bheegi": {
+    "title": "bheegi bheegi",
+    "singers": [
+      "james pritam deepanshu ruhela"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Dil_Hai_Chhota_Sa": {
+    "title": "Chhoti Si Aasha",
+    "singers": [
+      "A. R. Rahman feat. Minmini"
+    ],
+    "film": "Welcome to Bollywood",
+    "year": null
+  },
+  "Phir_Aur_Kya_Chahiye": {
+    "title": "Phir Aur Kya Chahiye Relived",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Aashiq_Banaya_Aapne": {
+    "title": "AASHIQ BANAYA AAPNE",
+    "singers": [
+      "HIMESH RESHAMMIYA | SHREYA GHOSHAL"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Mehbooba": {
+    "title": "Mehbooba ft. DYSTINCT",
+    "singers": [
+      "F1rstman feat. DYSTINCT"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Ek_din_aap_yun": {
+    "title": "Ek Din Aap (From \"Yes Boss\")",
+    "singers": [
+      "The Kumar Sanu Official"
+    ],
+    "film": "",
+    "year": null
+  },
+  "O_mitwa": {
+    "title": "Mitwa",
+    "singers": [
+      "A.R. Rahman"
+    ],
+    "film": "A.R. Rahman Greatest Hits",
+    "year": null
+  },
+  "Yeh_Mera_deewanapan": {
+    "title": "Yeh Mera Diwanapan Hai",
+    "singers": [
+      "Mukesh"
+    ],
+    "film": "Mukesh Greatest Hits",
+    "year": null
+  },
+  "Mujhe_neend_na_aaye": {
+    "title": "Mujhe Neend Na Aaye (From \"Dil\")",
+    "singers": [
+      "Anuradha Paudwal"
+    ],
+    "film": "Flash Back 90'S Romantic Songs",
+    "year": null
+  },
+  "Manwa_lage": {
+    "title": "Manwa Laage",
+    "singers": [
+      "Shreya Ghoshal & Arijit Singh"
+    ],
+    "film": "Happy New Year (2014)",
+    "year": null
+  },
+  "We_will_rock_you": {
+    "title": "Queen - We Will Rock You 2003(Acapella)",
+    "singers": [
+      "Queen - We Will Rock You 2003(Acapella)"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Love_is_open_door": {
+    "title": "Love is An Open Door",
+    "singers": [
+      "Evynne Hollens"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Love_is_an_open_door": {
+    "title": "Love Is an Open Door",
+    "singers": [
+      "Frozen"
+    ],
+    "film": "Frozen OST",
+    "year": null
   }
 }

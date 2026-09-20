@@ -523,6 +523,7 @@
             font-size: 17px; line-height: 1; cursor: pointer; padding: 4px 8px;
             color: #17604a; border-radius: 6px; min-width: 30px; text-align: center;
         }
+        button.add-pl { border: none; background: none; }
         .add-pl:hover { background: #e8f3ee; }
         .up-next { display: none; }
         .up-next.is-on { display: flex; }
@@ -746,7 +747,6 @@
         body.big-screen #playerContent {
             display: flex; flex-direction: column; gap: calc(var(--bs-pad) * 0.65);
         }
-        body.big-screen .player-head,
         body.big-screen .player-title,
         body.big-screen .save-row,
         body.big-screen .preset-indicator,
@@ -758,10 +758,13 @@
         /* loadLyrics() still sets pasteBox inline, and "Replace the lyrics"
            has no business on a wall. */
         body.big-screen #pasteBox { display: none !important; }
-        /* A fault form has no business on a wall. The expand button DOES
-           stay: on the stage it becomes the way back, in the same place, so
-           the one control toggles between the two views. */
-        body.big-screen .report-box { display: none !important; }
+        /* The + and the flag ride along into the sheet, so the two views
+           offer the same things (asked for 19 Sep: reporting or filing a song
+           meant leaving the lyrics first). The sheet is only up on a tap, so
+           neither reaches the wall. The title stays hidden -- the topbar
+           already says it. The expand button also stays: on the stage it
+           becomes the way back, in the same place. */
+        body.big-screen .player-head { justify-content: flex-end; }
         body.big-screen .btn-expand {
             width: 40px; height: 40px; font-size: 15px;
             background: #37474F; color: #B0BEC5;
@@ -1790,6 +1793,10 @@
             document.getElementById('playerContent').innerHTML = `
                 <div class="player-head">
                     <div class="player-title">${song.name}</div>
+                    <!-- The same + the song list has, so filing the song you
+                         are singing does not mean going back to find it. -->
+                    <button class="add-pl" onclick="addToPlaylist(${index})"
+                            title="Add to a playlist" aria-label="Add to a playlist">+</button>
                     <button class="flag-btn" id="flagBtn" onclick="toggleReport()"
                             title="Report a problem with this song"
                             aria-label="Report a problem with this song">&#9873;</button>
@@ -1819,7 +1826,7 @@
                 <div class="transport">
                     <button class="btn btn-stop" id="stopBtn" onclick="stopPlayback()">&#9632;</button>
                     <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
-                    <button class="btn btn-expand" onclick="toggleBigScreen()"
+                    <button class="btn btn-expand" onclick="expandButton()"
                             title="Lyrics view" aria-label="Lyrics view">&#127908;</button>
                 </div>
                 <div class="presets">
@@ -2406,7 +2413,10 @@
             if (!document.body.classList.contains('big-screen')) return;
             // A tap on the controls themselves is use, not dismissal: keep them
             // up and restart the clock, or the sheet vanishes mid-fader.
-            if (e.target.closest('.panel-center') || e.target.closest('.topbar')) {
+            // The playlist picker hangs off <body>, outside the sheet, but
+            // ticking a playlist is still use.
+            if (e.target.closest('.panel-center') || e.target.closest('.topbar')
+                || e.target.closest('.pp-backdrop')) {
                 showStageControls();
                 return;
             }
@@ -2508,7 +2518,7 @@
             const ex = document.querySelector('.btn-expand');
             if (ex) {
                 ex.textContent = on ? '\u2630' : '\uD83C\uDFA4';
-                ex.title = on ? 'Playlist' : 'Lyrics view';
+                ex.title = on ? 'Songs' : 'Lyrics view';
                 ex.setAttribute('aria-label', ex.title);
             }
             if (on) showStageControls(); else hideStageControls();
@@ -2521,6 +2531,17 @@
             lastWordKey = '';
             if (timedLyrics) updateLyricsHighlight();
             try { localStorage.setItem('bigScreen', on ? '1' : '0'); } catch (e) {}
+        }
+
+        /* On the stage the ☰ used to land on the player, and the songs were one
+         * more tap away on the Library button -- found at the 18 Sep session
+         * with Karan and Sumedha, where every "next song" took both taps. It
+         * now goes straight to the list; the song keeps playing, and tapping it
+         * there returns to the player. Escape still means "back to the player". */
+        function expandButton() {
+            const leaving = document.body.classList.contains('big-screen');
+            toggleBigScreen();
+            if (leaving) document.body.classList.add('view-library');
         }
 
         document.addEventListener('keydown', (e) => {
