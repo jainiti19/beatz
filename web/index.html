@@ -130,6 +130,25 @@
             padding: 9px 12px; font-size: 12px; color: #aaa;
             border-bottom: 1px solid #333;
         }
+        /* Exit door: the way out of the browser's own login. Hidden until
+           /api/whoami names a login, so a local copy never shows it. */
+        .logout-btn {
+            background: transparent; border: 1px solid rgba(255,255,255,.35);
+            color: #fff; border-radius: 6px; cursor: pointer;
+            width: 30px; height: 28px; padding: 0;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
+        .logout-btn:hover { border-color: #fff; }
+        .logout-btn[hidden] { display: none; }
+        .top-actions { display: flex; align-items: center; gap: 6px; }
+        .top-actions .bell-btn { margin-right: 0; }
+        body.big-screen .logout-btn { display: none; }
+        .logout-note {
+            position: fixed; top: 60px; right: 12px; z-index: 70;
+            width: min(300px, 88vw); padding: 10px 12px; border-radius: 8px;
+            background: #1e1e1e; border: 1px solid #333; color: #ccc; font-size: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.5);
+        }
         .bell-head button {
             background: none; border: none; color: #00897B; cursor: pointer; font-size: 11px;
         }
@@ -897,7 +916,8 @@
                 text-overflow: ellipsis; white-space: nowrap;
             }
             .topbar .lib-btn  { grid-column: 3; grid-row: 1; margin-right: 0; }
-            .topbar .bell-btn { grid-column: 4; grid-row: 1; margin-right: 0; }
+            .topbar .top-actions { grid-column: 4; grid-row: 1; }
+            .topbar .bell-btn { margin-right: 0; }
             .topbar .now-playing {
                 grid-column: 1 / -1;
                 grid-row: 2;
@@ -1178,9 +1198,17 @@
         <span class="now-playing" id="nowPlaying">Select a song to start</span>
         <button class="lib-btn" id="libBtn" onclick="toggleLibrary()"
                 title="Back to the song list">Library</button>
+        <div class="top-actions">
         <button class="bell-btn" id="bellBtn" onclick="toggleBell()" title="Your requests">
             <span>Requests</span><span class="bell-badge" id="bellBadge" hidden>0</span>
         </button>
+        <button class="logout-btn" id="logoutBtn" onclick="logOut()" hidden
+                title="Log out" aria-label="Log out"><svg width="16" height="16"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"><path
+                d="M13 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h7"/><path d="M13 4v16"/><path
+                d="M16 12h6"/><path d="M19 9l3 3-3 3"/></svg></button>
+        </div>
         <!-- Asking for a song and fixing its words both used to live down the
              page: the request form under the song list, the paste box in the
              player. Neither could be found without first picking a song, which
@@ -1493,11 +1521,57 @@
                 // Karan's controls in between.
                 if (r.status === 404) { setRole('admin'); return; }
                 if (!r.ok) return;
-                setRole((await r.json()).role);
+                const who = await r.json();
+                setRole(who.role);
+                showLogin(who.user);
             } catch (e) {
                 // Offline: keep whatever this device last knew.
                 console.warn('whoami: offline, keeping', role, e);
             }
+        }
+
+        /* ===== Logging out =====
+         *
+         * The site's login is the browser's own (basic auth, in Caddy), and
+         * browsers offer no way out of that: the login stays until every
+         * window is closed, and on a phone often longer. Karan had no way to
+         * hand the device over or switch to the testers' login (22 Sep).
+         *
+         * The known way out: send one request with a deliberately wrong login.
+         * The server refuses it, and Chrome and Firefox then keep the wrong
+         * login in place of the real one, so the reload that follows asks
+         * again. Safari does not always play along, so a flag survives the
+         * reload: if the page comes back still signed in, say what to do
+         * instead of silently looking like nothing happened.
+         */
+        function showLogin(user) {
+            const btn = document.getElementById('logoutBtn');
+            if (!btn) return;
+            btn.hidden = !user;
+            btn.title = user ? 'Log out (signed in as ' + user + ')' : 'Log out';
+            let tried = null;
+            try { tried = sessionStorage.getItem('beatznbox_logout'); } catch (e) {}
+            if (tried && user) {
+                const note = document.createElement('div');
+                note.className = 'logout-note';
+                note.textContent = 'This browser kept the login. To sign in as someone '
+                    + 'else, close every window of it, or use a private tab.';
+                note.onclick = () => note.remove();
+                document.body.appendChild(note);
+                setTimeout(() => note.remove(), 10000);
+            }
+            try { sessionStorage.removeItem('beatznbox_logout'); } catch (e) {}
+        }
+
+        function logOut() {
+            try {
+                localStorage.removeItem('beatznbox_role');
+                sessionStorage.setItem('beatznbox_logout', '1');
+            } catch (e) {}
+            const x = new XMLHttpRequest();
+            x.open('GET', '/api/whoami?logout=' + Date.now(), true, 'logged-out', 'x');
+            x.onloadend = () => location.reload();
+            x.send();
         }
 
         /* The server said no to a shared write: this login is a viewer, even
@@ -2494,7 +2568,12 @@
         // and splits hyphenates ("khud-garzi" -> "khud","garzi"). So walk the display
         // words and the aligned words together, matching on normalized form, and
         // leave any display word without a match untimed rather than forcing a pairing.
-        const DEVANAGARI = /[\u0900-\u097F]/;
+        // Named for the script nearly every song uses, but it has to cover them
+        // all: Lover arrived in Gurmukhi with a full set of romanised words,
+        // and a Devanagari-only test hid both the A toggle and the echo, so
+        // the spellings were unreachable (reported 16 Sep). Urdu through
+        // Malayalam -- any script the room may not read.
+        const DEVANAGARI = /[\u0600-\u06FF\u0900-\u0D7F]/;
 
         // The aligned token is uroman's rule-based transliteration, which reads
         // "mujhako itanaa bataae koii" for a line everyone spells "mujhko itna
@@ -2749,7 +2828,7 @@
             }
         }
 
-        // Only worth offering when the words are actually in Devanagari AND the
+        // Only worth offering when the words are in an Indian script AND the
         // aligner left romanised tokens to swap in.
         function syncScriptToggle() {
             const btn = document.getElementById('scriptToggle');
