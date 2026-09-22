@@ -317,6 +317,12 @@
             background: #ECEFF1; color: #455A64; font-size: 15px;
         }
         .btn-expand:hover { background: #CFD8DC; }
+        /* A pop-out window means a second screen to drag it onto -- a laptop
+           driving a TV. A phone opens it as a tab over the player, which is
+           worse than the stage it already has, and on the stage the lyrics
+           are already here. */
+        body.big-screen .btn-popout { display: none; }
+        @media (max-width: 820px), (pointer: coarse) { .btn-popout { display: none; } }
 
         .presets {
             display: flex;
@@ -1979,6 +1985,13 @@
                     <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
                     <button class="btn btn-expand" onclick="expandButton()"
                             title="Lyrics view" aria-label="Lyrics view">&#127908;</button>
+                    <button class="btn btn-expand btn-popout" onclick="popOutLyrics()"
+                            title="Lyrics in their own window, for a TV"
+                            aria-label="Pop out lyrics"><svg width="16" height="16"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                            style="display:block;margin:auto"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path
+                            d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>
                 </div>
                 <div class="presets">
                     <button class="preset-btn" id="pre-singalong" onclick="applyPreset('singalong')">Sing along</button>
@@ -2754,6 +2767,154 @@
                 `<div class="lyrics-line upcoming" id="lyric-${i}">${line}</div>`
             ).join('');
         }
+
+        /* ===== Lyrics in their own window =====
+         *
+         * For a laptop with the TV as a second screen: the controls stay on
+         * the laptop, the room reads the TV. The window carries no script and
+         * no audio of its own -- this page keeps rendering and highlighting
+         * lyrics into its (hidden) #lyricsContent exactly as it always has,
+         * and an observer copies each change across. So play, seek, speed,
+         * the A toggle and song changes all follow with nothing new to keep
+         * in step. A full copy only when the lines are replaced; after that,
+         * class changes alone, by id, so the colour transitions still run.
+         */
+        let lyricsWin = null;
+        let lyricsObserver = null;
+
+        const POPOUT_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Lyrics</title><style>
+html, body { margin: 0; height: 100%; }
+body {
+    background: #0E1413; color: #E6EDEC; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex; flex-direction: column;
+    --bs-now:   clamp(20px, min(7.2vh, 8.5vw), 96px);
+    --bs-line:  clamp(13px, min(4.2vh, 5vw), 52px);
+    --bs-roman: clamp(11px, min(3.1vh, 3.8vw), 38px);
+    --bs-title: clamp(12px, min(3vh, 3.6vw), 34px);
+    --bs-pad:   clamp(8px, 2.2vh, 30px);
+}
+:fullscreen body, body:fullscreen { cursor: none; }
+#title {
+    flex: 0 0 auto; text-align: center; color: #6E8B87;
+    font-size: var(--bs-title); padding: var(--bs-pad) var(--bs-pad) 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#lyrics {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none;
+    padding: 45vh calc(var(--bs-pad) * 1.4);
+    display: flex; flex-direction: column; gap: calc(var(--bs-pad) * 0.55);
+}
+#lyrics::-webkit-scrollbar { display: none; }
+.lyrics-line {
+    font-size: var(--bs-line); line-height: 1.25; color: #4A5453;
+    text-align: center; overflow-wrap: break-word;
+    transition: color 0.3s ease;
+}
+.lyrics-line.past { color: #2B3534; }
+.lyrics-line.active { font-size: var(--bs-now); line-height: 1.2; color: #4DB6AC; font-weight: 600; }
+.lyrics-word { transition: color 0.12s linear; }
+.lyrics-line.active .lyrics-word { color: #7aa8a3; }
+.lyrics-line.active .lyrics-word.sung { color: #80CBC4; }
+.lyrics-line.active .lyrics-word.singing { color: #B2DFDB; }
+.lyric-roman { display: none; }
+.lyrics-line.active .lyric-roman {
+    display: block; font-size: var(--bs-roman); line-height: 1.4;
+    font-weight: 400; color: #6E8B87; margin-top: 0.35em; letter-spacing: 0.4px;
+}
+.no-lyrics { color: #4A5453; font-style: italic; text-align: center; font-size: var(--bs-line); }
+#hint {
+    position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%);
+    background: #1C2625; color: #9FB5B1; padding: 10px 18px; border-radius: 8px;
+    font-size: 15px; transition: opacity 0.6s; pointer-events: none;
+}
+#hint.gone { opacity: 0; }
+</style></head><body>
+<div id="title"></div>
+<div id="lyrics"></div>
+<div id="hint">Drag this window to the TV, then double-click for full screen</div>
+</body></html>`;
+
+        function popOutLyrics() {
+            if (lyricsWin && !lyricsWin.closed) { lyricsWin.focus(); return; }
+            // Named, so it can never stack a second window on the TV.
+            lyricsWin = window.open('', 'beatzLyrics', 'popup,width=1280,height=720');
+            if (!lyricsWin) return;
+            const d = lyricsWin.document;
+            d.open(); d.write(POPOUT_HTML); d.close();
+
+            d.addEventListener('dblclick', () => {
+                if (d.fullscreenElement) d.exitFullscreen();
+                else d.documentElement.requestFullscreen().catch(() => {});
+            });
+            d.addEventListener('fullscreenchange', () =>
+                d.getElementById('hint').classList.add('gone'));
+            setTimeout(() => {
+                const h = lyricsWin && !lyricsWin.closed && d.getElementById('hint');
+                if (h) h.classList.add('gone');
+            }, 12000);
+
+            copyLyricsAcross();
+            if (lyricsObserver) lyricsObserver.disconnect();
+            lyricsObserver = new MutationObserver(onLyricsMutated);
+            lyricsObserver.observe(document.getElementById('lyricsContent'),
+                { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+            lyricsObserver.observe(document.getElementById('nowPlaying'), { childList: true });
+        }
+
+        function popoutAlive() {
+            if (lyricsWin && !lyricsWin.closed) return true;
+            if (lyricsObserver) { lyricsObserver.disconnect(); lyricsObserver = null; }
+            lyricsWin = null;
+            return false;
+        }
+
+        function copyLyricsAcross() {
+            if (!popoutAlive()) return;
+            const d = lyricsWin.document;
+            const song = songs[currentSongIndex];
+            const name = song ? song.name : '';
+            d.getElementById('title').textContent = name;
+            d.title = name ? name + ' — lyrics' : 'Lyrics';
+            const dst = d.getElementById('lyrics');
+            dst.innerHTML = song ? document.getElementById('lyricsContent').innerHTML
+                                 : '<div class="no-lyrics">Pick a song on the laptop</div>';
+            centreActiveLine(false);
+        }
+
+        function onLyricsMutated(records) {
+            if (!popoutAlive()) return;
+            // A new song, or the A toggle re-rendering the lines: copy the lot.
+            if (records.some(r => r.type === 'childList')) { copyLyricsAcross(); return; }
+            const d = lyricsWin.document;
+            let lineMoved = false;
+            for (const r of records) {
+                const src = r.target;
+                if (!src.id) continue;
+                const dst = d.getElementById(src.id);
+                if (!dst) continue;
+                dst.className = src.className;
+                if (src.id.startsWith('lyric-') && src.classList.contains('active')) lineMoved = true;
+            }
+            if (lineMoved) centreActiveLine(true);
+        }
+
+        function centreActiveLine(smooth) {
+            const d = lyricsWin.document;
+            const box = d.getElementById('lyrics');
+            const el = box.querySelector('.lyrics-line.active');
+            if (!el) { if (!smooth) box.scrollTop = 0; return; }
+            box.scrollTo({
+                top: el.offsetTop - box.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2,
+                behavior: smooth ? 'smooth' : 'auto',
+            });
+        }
+
+        // The window has nothing to show without this page behind it.
+        window.addEventListener('pagehide', () => {
+            if (lyricsWin && !lyricsWin.closed) lyricsWin.close();
+        });
 
         function startLyricsSync() {
             if (lyricsInterval) clearInterval(lyricsInterval);
