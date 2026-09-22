@@ -238,7 +238,9 @@ _LRC_TAG = re.compile(r"^\s*\[[a-z]{2,}:[^\]]*\]\s*$", re.I)
 # "[Verse 1: Arijit Singh]" sitting on its first 22 seconds.
 _SECTION = re.compile(r"^\s*[\[(](verse|chorus|intro|outro|bridge|refrain|hook|pre-chorus|"
                       r"interlude|instrumental)\b[^\]\)]*[\])]\s*$", re.I)
-_CREDIT = re.compile(r"(के बोल|\blyrics\b\s*[:\]]|\bparoles\b)", re.I)
+# "-uploadedbyDKK" opened Aaj Jaane Ki Zid Na Karo's LRCLIB entry 34407489 and
+# was aligned onto the first seven seconds of singing.
+_CREDIT = re.compile(r"(के बोल|\blyrics\b\s*[:\]]|\bparoles\b|uploaded\s*by)", re.I)
 
 
 def strip_lrc(text):
@@ -556,18 +558,38 @@ def main():
     with open(out, "w", encoding="utf-8") as f:
         f.write(lyrics + "\n")
 
+    # The contributor's own timestamps, kept beside the words when LRCLIB has
+    # them. They are NOT used for display -- lyrics_timed.json still comes from
+    # align-lyrics.py against our audio -- but for two songs checked on 21 Sep
+    # 2026 they matched our upload to under a second, which makes them the best
+    # available check that the WORDS are the right rendition: a synced line that
+    # lands on silence in our vocals stem is a line our singer never sang.
+    # pick-lyrics.py reads this file to rank candidates.
+    song_dir = os.path.dirname(os.path.abspath(out))
+    synced = (best.get("syncedLyrics") or "").strip()
+    synced_path = os.path.join(song_dir, "lyrics_synced.lrc")
+    try:
+        if synced:
+            with open(synced_path, "w", encoding="utf-8") as sf:
+                sf.write(synced + "\n")
+        elif os.path.exists(synced_path):
+            os.remove(synced_path)      # stale timings from an earlier fetch
+    except Exception:
+        pass
+
     # What LRCLIB actually matched, saved next to the words. The request queue
     # only ever knew what the person typed - "tu kisi raii si" - and that string
     # became the directory and therefore the title. This is the one point in the
     # pipeline that knows the song's real name, so record it here and let
     # watch-requests.py fold it into data/songs-meta.json.
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(out)), "match.json"),
-                  "w", encoding="utf-8") as mf:
+        with open(os.path.join(song_dir, "match.json"), "w", encoding="utf-8") as mf:
             json.dump({"trackName":  best.get("trackName"),
                        "artistName": best.get("artistName"),
                        "albumName":  best.get("albumName"),
                        "duration":   best.get("duration"),
+                       "lrclibId":   best.get("id"),
+                       "synced":     bool(synced),
                        "query":      used,
                        "ytTitle":    yt_title},
                       mf, ensure_ascii=False, indent=1)

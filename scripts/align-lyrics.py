@@ -294,6 +294,27 @@ def correct_repeat_counts(waveform, lines, segments, seconds_per_frame):
     def voiced_seconds(t0, t1):
         return voiced[int(t0 / 0.02):int(t1 / 0.02)].sum() * 0.02
 
+    # Yardsticks for judging one aligned copy against the rest of the song.
+    scores = sorted(s["score"] for s in segments)
+    med_score = scores[len(scores) // 2]
+    rates = sorted(len(s["words"]) / max(s["end"] - s["start"], 0.05) for s in segments)
+    med_rate = rates[len(rates) // 2] or 1.0
+
+    def is_sung(seg):
+        """Is someone actually singing these words where this copy landed?
+
+        A surplus copy — one the lyrics list but the singer never sang — gives
+        itself away in one of three ways: it sits on silence or an instrumental
+        gap, it is crammed into a fraction of the phrase beside the copy that is
+        real, or the words simply are not there and Viterbi scores it far below
+        the rest of the song. A copy that shows none of the three has singing
+        under it and must not be thrown away.
+        """
+        span = max(seg["end"] - seg["start"], 0.05)
+        return (voiced_seconds(seg["start"], seg["end"]) / span >= 0.5
+                and len(seg["words"]) / span <= 2 * med_rate
+                and seg["score"] >= med_score - 1.0)
+
     spans = [(segments[lo]["start"], segments[hi - 1]["end"]) for lo, hi in repeated]
 
     # Each repeated line has its own natural length — a nine-word verse line does
@@ -336,6 +357,18 @@ def correct_repeat_counts(waveform, lines, segments, seconds_per_frame):
         # Refuse wild rewrites — a 10x jump means the period or the span is wrong.
         if k > 4 * n or k < n / 4:
             k = n
+        # Never drop a copy that has singing under it. The period estimate can come
+        # out LONG as easily as short: Yeh Raatein's verse period measured 9.5s
+        # against a 4.3s sung line, so each verse's 13.7s of voiced audio read as
+        # one repetition and the FIRST of two genuinely sung copies was deleted —
+        # all three verses then lit ~9.5s late, and the only cure was a hack in
+        # lyrics.txt (a double space) to stop the two copies matching as a run.
+        # Nothing downstream catches this: verify_repeat_counts() only asks whether
+        # the copies it KEEPS still align well, and keeping fewer lines always
+        # scores at least as well as keeping more. Counting up is left alone —
+        # Chaiyya Chaiyya's sources under-count and must be free to go up.
+        if k < n:
+            k = max(k, sum(1 for i in range(lo, hi) if is_sung(segments[i])))
         if k != n:
             print(f"    repeat count {n} -> {k}?  ({t0:.1f}-{t1:.1f}s, {v:.1f}s voiced, "
                   f"period {period:.2f}s) {lines[lo]['text'][:34]!r}")
@@ -362,6 +395,12 @@ def verify_repeat_counts(lines, segments, proposals, build_segments):
     The raw Viterbi path score was tried first and does not work: fewer words
     always score better, because the star unit absorbs anything, so it would
     reject every added repeat including Chaiyya Chaiyya's, which are real.
+
+    That same asymmetry is why this test cannot police a count going DOWN — a
+    dropped copy never makes the survivors score worse, so every reduction would
+    pass. Reductions are screened where the evidence lives instead, by
+    correct_repeat_counts(), which refuses to propose dropping a copy that has
+    singing under it.
 
     Tested 15 Sep 2026 on eight songs: keeps Chaiyya Chaiyya's added hooks,
     rejects all four Bahon doublings, and rejects the big jumps (Daaru 3->10,
