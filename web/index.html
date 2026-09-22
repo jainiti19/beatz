@@ -79,6 +79,22 @@
             margin-left: 6px; opacity: 0.75; font-weight: 700;
         }
         .chip-del:hover { opacity: 1; }
+        /* Viewers -- the shared `beatz` login -- can play every playlist but
+           not change one (23 Sep, for Music Night on the 25th: Karan's medley
+           playlists and clips are shared, and testers in Hong Kong and
+           elsewhere use the same site). So the controls that would write the
+           shared set are hidden rather than left to fail: new playlist,
+           delete cross, add-to-playlist +, and Set start / Set end / Clear on
+           a clip. body.viewer is set from /api/whoami; the server refuses
+           these writes regardless, so this is presentation, not the lock. */
+        body.viewer .chip-new,
+        body.viewer .chip-del,
+        body.viewer .add-pl,
+        body.viewer .clip-edit,
+        body.viewer .clip-clear { display: none !important; }
+        .viewer-note { display: none; font-size: 11px; color: #999; padding: 6px 12px 0; }
+        body.viewer .viewer-note { display: block; }
+        body.big-screen .viewer-note { display: none; }
         /* Requests bell. The laptop processes a song minutes after it is asked
            for, so the person who asked needs somewhere to find out what became
            of it without shouting across the room. */
@@ -366,6 +382,15 @@
         .tempo-btn.key-value { min-width: 5.6em; }
         .tempo-btn.key-step { min-width: 2.6em; font-size: 15px; line-height: 1; }
         .tempo-btn:disabled { opacity: 0.35; cursor: default; }
+        /* The clip row carries a summary as well as two buttons, which is
+           more than a phone's width holds -- so it wraps, summary underneath,
+           rather than squeezing "Set start" into two lines. */
+        .clip-row { flex-wrap: wrap; row-gap: 4px; }
+        .clip-summary { font-size: 12px; color: #00897B; padding-left: 4px; }
+        .clip-clear, .clip-mine-clear {
+            border: none; background: none; padding: 0; cursor: pointer;
+            color: #00897B; text-decoration: underline; font: inherit;
+        }
 
         /* Up next */
         .up-next {
@@ -817,6 +842,9 @@
             background: #00897B; color: white; border-color: #00897B;
         }
         body.big-screen .tempo-label { color: #4A5453; font-size: var(--bs-chrome); }
+        body.big-screen .clip-row { flex-wrap: wrap; }
+        body.big-screen .clip-summary,
+        body.big-screen .clip-clear, body.big-screen .clip-mine-clear { color: #6E8B87; font-size: var(--bs-chrome); }
         /* The stage's .tempo-btn rule outranks the key row's own sizing, so it
            is restated here: a fixed-width value so − and + stay put under a
            finger, and glyphs big enough to tell apart across a room. */
@@ -1063,7 +1091,7 @@
         .song-item.active { background: var(--accent); color: #fff; }
         .song-item.active:hover { background: #00796B; }
         .song-item .song-playlists { color: var(--accent-lt); }
-        .song-count { color: var(--text-faint); }
+        .song-count, .viewer-note { color: var(--text-faint); }
 
         .player-title { color: var(--accent-lt); }
         .loading { color: var(--text-dim); }
@@ -1200,6 +1228,9 @@
                 <div class="bs-song" id="bsSong">—</div>
             </div>
             <div class="playlist-chips" id="playlistChips"></div>
+            <!-- Shown only to viewers (body.viewer). Says why there is no +
+                 or delete cross, before anyone goes looking for one. -->
+            <div class="viewer-note" id="viewerNote">Playlists and clips are set by the hosts. Setups you save stay on this device.</div>
             <div class="song-count" id="songCount"></div>
             <div class="offline-row" id="offlineRow" hidden></div>
             <div class="song-list" id="songList"></div>
@@ -1345,9 +1376,10 @@
         const PRESETS = {
             singalong: { vocals: 20, drums: 100, bass: 100, other: 100 },
             // Iti, 15 Sep, after the live test through the KEF speakers: the
-            // band well back and the harmony furthest, so a live voice on the
-            // mic sits on top. Every new song starts here.
-            karaoke:   { vocals: 0,  drums: 50, bass: 50, other: 25 },
+            // band well back, so a live voice on the mic sits on top. Every new
+            // song starts here. The harmony was at 25 then; Iti raised it to
+            // match drums and bass on 22 Sep, before Music Night.
+            karaoke:   { vocals: 0,  drums: 50, bass: 50, other: 50 },
             unplugged: { vocals: 0,  drums: 0,  bass: 80, other: 80 },
             jamming:   { vocals: 0,  drums: 70, bass: 80, other: 40 },
         };
@@ -1397,6 +1429,94 @@
         // copy, same arrangement as playlists.
         let sessionPresets = {};
         try { sessionPresets = JSON.parse(localStorage.getItem('beatznbox_presets') || '{}'); } catch (e) {}
+
+        // Playlist clips: a start and an end for a song in ONE playlist, so a
+        // set runs like a DJ's -- 0:00-1:52, fade, next song in at 0:25, and so
+        // on without anyone touching the laptop (asked for 22 Sep, for the
+        // 25 Sep night). Kept apart from saved setups on purpose: a setup
+        // belongs to the song wherever it plays (Iti, 14 Sep), and a song
+        // trimmed for one set has to stay full length in every other.
+        // "<playlist>::<dir>" -> {start, end|null}, in song seconds. The server
+        // holds them; localStorage is the offline copy, same as setups.
+        let clips = {};
+        try { clips = JSON.parse(localStorage.getItem('beatznbox_clips') || '{}'); } catch (e) {}
+        // Fade length, in SONG seconds -- at 80% speed a fade lasts 6.25s on
+        // the wall clock, the same stretch of music as at full speed.
+        const CLIP_FADE = 5;
+        // Fade in even when a clip starts at 0:00. Iti's call, 22 Sep: every
+        // song in a set comes in the same way. Set false to let a clip that
+        // starts at the top play its own intro in at full level.
+        const CLIP_FADE_IN_FROM_ZERO = true;
+        // What the playing song's clip is doing right now:
+        // {start, end|null, fadeIn}. end is null when it is not armed -- no
+        // clip end, or the playhead was already past it (a seek past the end
+        // just plays on). null altogether means plain playback at full level.
+        let clipRun = null;
+
+        // ===== Who is signed in =====
+        // Two logins from 23 Sep, for Music Night on the 25th. `admin` (Iti
+        // and Karan) changes the shared set: playlists, saved setups, clips.
+        // `beatz` (everyone else, testers in Hong Kong included) plays,
+        // mixes, changes key and speed, requests, reports and pastes lyrics
+        // -- everything except editing what everyone shares, so nobody's
+        // practice can move a clip Karan timed by ear. The server enforces
+        // it (a 403 on those writes); this only decides what to show.
+        //
+        // Remembered in localStorage so the page opens the right way with no
+        // signal at the venue. With nothing remembered, the shared-edit
+        // controls start hidden; playback never waits on this.
+        let role = 'viewer';
+        try { if (localStorage.getItem('beatznbox_role') === 'admin') role = 'admin'; } catch (e) {}
+        document.body.classList.toggle('viewer', role !== 'admin');
+
+        function isAdmin() { return role === 'admin'; }
+
+        function setRole(r) {
+            role = r === 'admin' ? 'admin' : 'viewer';
+            try { localStorage.setItem('beatznbox_role', role); } catch (e) {}
+            document.body.classList.toggle('viewer', role !== 'admin');
+            renderClip();
+        }
+
+        async function loadWhoami() {
+            try {
+                const r = await fetch('/api/whoami', { cache: 'no-store', credentials: 'include' });
+                // 404 is a queue service from before roles existed: it lets
+                // every login write, so show every control, exactly as before.
+                // This lets the page ship ahead of the server without hiding
+                // Karan's controls in between.
+                if (r.status === 404) { setRole('admin'); return; }
+                if (!r.ok) return;
+                setRole((await r.json()).role);
+            } catch (e) {
+                // Offline: keep whatever this device last knew.
+                console.warn('whoami: offline, keeping', role, e);
+            }
+        }
+
+        /* The server said no to a shared write: this login is a viewer, even
+         * if the page thought otherwise (a role remembered from an admin
+         * login on this device, say). Switch to the viewer view and say so
+         * once, in the place the person was looking -- no error dialog. */
+        function readOnlyRefused(where) {
+            if (isAdmin()) setRole('viewer');
+            console.info('read-only login: ' + where + ' kept on this device');
+        }
+
+        // A viewer's own setups and clips, for practice. Kept apart from the
+        // shared copies above -- those are replaced wholesale by every load
+        // from the server -- and never sent anywhere. Only consulted while
+        // signed in as a viewer: an admin sees exactly the shared set.
+        let mySetups = {};
+        try { mySetups = JSON.parse(localStorage.getItem('beatznbox_my_presets') || '{}'); } catch (e) {}
+        let myClips = {};
+        try { myClips = JSON.parse(localStorage.getItem('beatznbox_my_clips') || '{}'); } catch (e) {}
+        function storeMine() {
+            try {
+                localStorage.setItem('beatznbox_my_presets', JSON.stringify(mySetups));
+                localStorage.setItem('beatznbox_my_clips', JSON.stringify(myClips));
+            } catch (e) {}
+        }
 
         // ===== Song List =====
 
@@ -1514,9 +1634,18 @@
         }
 
         function deletePlaylist(name) {
+            // The playlist edits below are hidden from viewers; these guards
+            // are for a tap that lands before /api/whoami has answered.
+            if (!isAdmin()) return;
             if (!confirm(`Delete the playlist "${name}"? The songs stay in the library.`)) return;
             delete playlists[name];
             deletedPlaylists.add(name);
+            // Its clips go with it, or a new playlist given the same name
+            // would inherit timings nobody set for it.
+            for (const key of Object.keys(clips)) {
+                if (key.slice(0, key.lastIndexOf('::')) === name) { delete clips[key]; pushClip(key, null); }
+            }
+            storeClipsLocally();
             if (selectedPlaylist === name) selectedPlaylist = null;
             savePlaylists();
             renderPlaylistChips();
@@ -1536,7 +1665,8 @@
                      +  (on ? `<span class="chip-del" onclick="event.stopPropagation();deletePlaylist('${esc(name)}')" title="Delete playlist">&times;</span>` : '')
                      +  `</span>`;
             }
-            html += `<span class="chip" onclick="createPlaylist()">+</span>`;
+            // chip-new: hidden for viewers (body.viewer), see the CSS.
+            html += `<span class="chip chip-new" onclick="createPlaylist()">+</span>`;
             // Only offered once something is actually saved, or it reads as a
             // filter that always empties the list.
 
@@ -1552,9 +1682,14 @@
             savedOnly = false;
             renderPlaylistChips();
             filterSongs();
+            // Clips belong to the playlist, so the row and the running fade
+            // follow the chip. Picking the set mid-song arms its clip end.
+            renderClip();
+            if (isPlaying) { armClip(songPosition(), true); scheduleClipGain(); }
         }
 
         function createPlaylist() {
+            if (!isAdmin()) return;
             const name = prompt('New playlist name:');
             if (name && name.trim()) {
                 playlists[name.trim()] = [];
@@ -1603,6 +1738,19 @@
                     playlistRev = d.rev || 0;
                     r = await fetch('/api/playlists', { method: 'POST', credentials: 'include',
                         headers: { 'Content-Type': 'application/json' }, body: body() });
+                }
+                if (r.status === 403) {
+                    // A viewer login (see "Who is signed in"). Unlike setups
+                    // and clips there is no device-only playlist: the list
+                    // is one shared map, replaced whole by every load, and a
+                    // private copy would fight that. So put the shared one
+                    // back and say why, in the note under the chips.
+                    readOnlyRefused('playlist change');
+                    deletedPlaylists.clear();
+                    await loadPlaylists();
+                    const note = document.getElementById('viewerNote');
+                    if (note) note.textContent = 'Playlists are set by the hosts, so that change was not saved.';
+                    return;
                 }
                 if (r.ok) {
                     const d = await r.json();
@@ -1684,6 +1832,7 @@
            old code only acted when the string matched a key. It also could only
            add, so removing meant going into edit mode on the playlist. */
         function addToPlaylist(songIdx) {
+            if (!isAdmin()) return;
             const song = songs[songIdx];
             closePlaylistPicker();
             const names = Object.keys(playlists);
@@ -1716,6 +1865,7 @@
         }
 
         function togglePlaylistMember(songIdx, name) {
+            if (!isAdmin()) return;
             const song = songs[songIdx];
             const list = playlists[name];
             if (!list) return;
@@ -1727,6 +1877,7 @@
         }
 
         function newPlaylistFor(songIdx) {
+            if (!isAdmin()) return;
             const name = prompt('New playlist name:');
             closePlaylistPicker();
             if (!name || !name.trim()) return;
@@ -1824,7 +1975,7 @@
                     <span class="time" id="totalTime">0:00</span>
                 </div>
                 <div class="transport">
-                    <button class="btn btn-stop" id="stopBtn" onclick="stopPlayback()">&#9632;</button>
+                    <button class="btn btn-stop" id="stopBtn" onclick="stopPlayback(); cueClipStart()">&#9632;</button>
                     <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
                     <button class="btn btn-expand" onclick="expandButton()"
                             title="Lyrics view" aria-label="Lyrics view">&#127908;</button>
@@ -1844,6 +1995,20 @@
                     <button class="tempo-btn key-step" onclick="setKey(keyShift - KEY_STEP)" aria-label="Lower the key">&minus;</button>
                     <button class="tempo-btn key-value" id="keyValue" onclick="setKey(0)" title="Back to the original key">Original</button>
                     <button class="tempo-btn key-step" onclick="setKey(keyShift + KEY_STEP)" aria-label="Raise the key">+</button>
+                </div>
+                <!-- Only while a playlist is picked: a clip belongs to a song
+                     in one set, so outside a playlist there is nothing to set.
+                     A tempo-row so the stage sheet styles it like its
+                     neighbours with no rules of its own. -->
+                <div class="tempo-row clip-row" id="clipRow" style="display:none">
+                    <span class="tempo-label">Clip</span>
+                    <!-- clip-edit: hidden for viewers, whose clips are the
+                         hosts' (see body.viewer in the CSS). -->
+                    <button class="tempo-btn clip-edit" onclick="setClipPoint('start')"
+                            title="Start this song here in this playlist">Set start</button>
+                    <button class="tempo-btn clip-edit" onclick="setClipPoint('end')"
+                            title="End this song here in this playlist (fades out over the 5s before)">Set end</button>
+                    <span class="clip-summary" id="clipSummary"></span>
                 </div>
                 <div class="up-next" id="upNext">
                     <span class="label">Up next:</span>
@@ -2157,6 +2322,12 @@
             // The key follows the song even when the mix is carried: a key
             // saved for this song is the singer's range, not a room setting.
             setKey(savedSetup && savedSetup.key ? savedSetup.key : 0);
+
+            // A clip's start beats a setup's saved position: in a set, where
+            // the song comes in is the whole point of the clip. The setup's
+            // mix, speed and key above still apply -- those are the song's.
+            cueClipStart();
+            renderClip();
 
             setTransportEnabled(true);
             if (opts.autoplay) startPlayback();
@@ -2814,6 +2985,9 @@
                     if (src) src.playbackRate.setValueAtTime(t, audioCtx.currentTime);
                 }
                 startTime = audioCtx.currentTime - pos / t;
+                // The fades are pinned to wall-clock times worked out at the
+                // old speed. Re-place them, or a clip end lands early or late.
+                scheduleClipGain();
             } else {
                 pauseOffset = pos;
             }
@@ -2884,6 +3058,12 @@
             document.getElementById('playBtn').innerHTML = '&#10074;&#10074;';
             seekInterval = setInterval(updateSeek, 200);
 
+            // Fades are scheduled on the audio clock, not driven by a timer,
+            // so they stay smooth when the tab is backgrounded and timers drop
+            // to once a second.
+            armClip(pauseOffset, false);
+            scheduleClipGain();
+
             // Auto-next on end — only if song actually finished naturally
             const firstStem = STEM_NAMES.find(s => sourceNodes[s]);
             if (firstStem) {
@@ -2912,6 +3092,7 @@
             sourceNodes = {};
             isPlaying = false;
             releaseScreenAwake();
+            clearClipFade();       // resuming mid-song starts at full level
             document.getElementById('playBtn').innerHTML = '&#9654;';
             clearInterval(seekInterval);
         }
@@ -2926,6 +3107,7 @@
                 releaseScreenAwake();
                 clearInterval(seekInterval);
             }
+            clearClipFade();
             pauseOffset = 0;
             const seekBar = document.getElementById('seekBar');
             const curTime = document.getElementById('currentTime');
@@ -2947,6 +3129,9 @@
                 isPlaying = false;
                 clearInterval(seekInterval);
             }
+            // startPlayback below re-arms from the new position: past the
+            // clip's end it plays on, before the fade it fades as normal.
+            clearClipFade();
             pauseOffset = frac * songDuration;
             document.getElementById('currentTime').textContent = formatTime(pauseOffset);
             userScrolledAt = 0;   // an explicit seek should snap the lyrics, grace period or not
@@ -2956,6 +3141,15 @@
         function updateSeek() {
             if (!isPlaying || !songDuration) return;
             const cur = songPosition();
+            // The clip's end. The audio is already silent by now -- the fade
+            // ran on the audio clock -- so this tick only has to move on, and
+            // being up to a second late in a background tab costs nothing
+            // audible. Same path as a song ending on its own.
+            if (clipRun && clipRun.end !== null && cur >= clipRun.end) {
+                stopPlayback();
+                playNext({ autoplay: true, inheritMix: true });
+                return;
+            }
             document.getElementById('seekBar').value = (cur / songDuration) * 1000;
             document.getElementById('currentTime').textContent = formatTime(cur);
         }
@@ -3697,7 +3891,7 @@
             const tag = prompt('Tag name (e.g. Chorus, Hook):') || '';
             const key = (selectedPlaylist || 'all') + '::' + song.dir;
             const seekBar = document.getElementById('seekBar');
-            sessionPresets[key] = {
+            const setup = {
                 position: seekBar ? seekBar.value / 1000 : 0,
                 volumes: {},
                 preset: currentPreset,
@@ -3707,12 +3901,35 @@
             };
             for (const stem of STEM_NAMES) {
                 const sl = document.getElementById('sl-' + stem);
-                sessionPresets[key].volumes[stem] = sl ? parseInt(sl.value) : 80;
+                setup.volumes[stem] = sl ? parseInt(sl.value) : 80;
             }
-            sessionPresets[key].saved = Date.now();
+            setup.saved = Date.now();
+            if (!isAdmin()) {
+                // A viewer's setup is for their own practice: kept on this
+                // device, never sent, and labelled so. The shared map is not
+                // touched, so the hosts' setup for this song survives intact.
+                keepSetupHere(key, setup);
+                return;
+            }
+            sessionPresets[key] = setup;
             storePresetsLocally();
             showPresetIndicator(tag);
-            pushSetup(key, sessionPresets[key]);
+            pushSetup(key, setup);
+        }
+
+        /* Keep a setup as this device's own (see mySetups). Called when a
+         * viewer saves, and when the server refuses a save the page thought
+         * was an admin's -- in that case the shared map already holds the
+         * refused setup, so it comes out; the next load from the server puts
+         * back whatever the hosts had saved there. */
+        function keepSetupHere(key, setup) {
+            mySetups[key] = Object.assign({}, setup, { local: true });
+            storeMine();
+            if (sessionPresets[key] === setup) {
+                delete sessionPresets[key];
+                storePresetsLocally();
+            }
+            showPresetIndicator(setup.tag, true);
         }
 
         function clearSetup() {
@@ -3721,6 +3938,19 @@
             // Every copy for this song, whichever playlist it was saved from:
             // a setup is looked up by song, so leaving one behind would bring
             // it straight back.
+            if (!isAdmin()) {
+                // A viewer clears only what is theirs. If the hosts saved a
+                // setup for this song, say so -- it still applies next load.
+                for (const key of Object.keys(mySetups)) {
+                    if (key.endsWith('::' + song.dir)) delete mySetups[key];
+                }
+                storeMine();
+                const shared = setupFor(song.dir);
+                if (shared) { showPresetIndicator(shared.tag, false); return; }
+                document.getElementById('presetIndicator').textContent = '';
+                document.getElementById('clearSetupBtn').style.display = 'none';
+                return;
+            }
             for (const key of Object.keys(sessionPresets)) {
                 if (key.endsWith('::' + song.dir)) {
                     delete sessionPresets[key];
@@ -3735,8 +3965,17 @@
         /* A song's setup, whichever playlist it was saved from. Iti's call on
          * 14 Sep: a saved mix belongs to the song. Keys stay
          * "<playlist>::<dir>" so older saves still resolve; the newest wins. */
-        function setupFor(dir) {
+        function setupFor(dir, sharedOnly) {
             let best = null;
+            // A viewer's own practice setup wins over the shared one on their
+            // device -- it is the one they just chose. Never for an admin.
+            if (!isAdmin() && !sharedOnly) {
+                for (const [key, s] of Object.entries(mySetups)) {
+                    if (!key.endsWith('::' + dir)) continue;
+                    if (!best || (s.saved || 0) > (best.saved || 0)) best = s;
+                }
+                if (best) return best;
+            }
             for (const [key, s] of Object.entries(sessionPresets)) {
                 if (!key.endsWith('::' + dir)) continue;
                 if (!best || (s.saved || 0) > (best.saved || 0)) best = s;
@@ -3748,7 +3987,7 @@
             try { localStorage.setItem('beatznbox_presets', JSON.stringify(sessionPresets)); } catch (e) {}
         }
 
-        async function pushSetup(key, setup) {
+        async function pushSetup(key, setup, migrating) {
             try {
                 const r = await fetch('/api/presets', { method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
@@ -3756,6 +3995,16 @@
                 // A 400 is a setup the server will never accept; retrying it on
                 // every page load would only stall the migration forever.
                 if (r.status === 400) { console.warn('setup refused by the server', key); return true; }
+                if (r.status === 403) {
+                    // A viewer login: keep it on this device instead, and say
+                    // so where "Setup saved" would have appeared.
+                    // Not for the one-off migration of old browser-only
+                    // setups: those predate the 22 Sep wipe and should not
+                    // come back, even on one device.
+                    readOnlyRefused('setup');
+                    if (setup && !migrating) keepSetupHere(key, setup);
+                    return false;
+                }
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 return true;
             } catch (e) {
@@ -3780,15 +4029,21 @@
             // still holding an old copy.
             let migrated = false;
             try { migrated = localStorage.getItem('beatznbox_presets_migrated') === '1'; } catch (e) {}
-            if (!migrated) {
+            // Viewers never send setups up: the server would refuse them, and
+            // the shared set was wiped clean on purpose on 22 Sep. Whatever
+            // this browser still holds from before is replaced below by the
+            // server's copy, as on any device that has already migrated.
+            if (!migrated && isAdmin()) {
                 const pending = Object.entries(sessionPresets).filter(([k]) => !(k in server));
-                const sent = await Promise.all(pending.map(([k, s]) => pushSetup(k, s)));
+                const sent = await Promise.all(pending.map(([k, s]) => pushSetup(k, s, true)));
                 if (sent.every(Boolean)) {
                     pending.forEach(([k, s]) => { server[k] = s; });
                     try { localStorage.setItem('beatznbox_presets_migrated', '1'); } catch (e) {}
-                } else {
+                } else if (isAdmin()) {
                     return;   // try again next load rather than drop them
                 }
+                // else: refused as a viewer (the role flipped mid-way): take
+                // the server's copy below, like any other viewer.
             }
             sessionPresets = server;
             storePresetsLocally();
@@ -3816,14 +4071,236 @@
                 const btn = document.getElementById('pre-' + preset.preset);
                 if (btn) btn.classList.add('active');
             }
-            showPresetIndicator(preset.tag);
+            showPresetIndicator(preset.tag, !!preset.local);
         }
 
-        function showPresetIndicator(tag) {
+        /* `here`: the setup lives only on this device (a viewer's own). The
+         * words say so, because "Setup saved" alone reads as saved for the
+         * room. Clear is offered for an admin, or for a viewer's own setup --
+         * never a viewer's view of a shared one, which is not theirs to clear. */
+        function showPresetIndicator(tag, here) {
             const el = document.getElementById('presetIndicator');
-            if (el) el.textContent = tag ? `Setup saved: "${tag}"` : 'Setup saved';
+            const what = here ? 'Saved on this device only' : 'Setup saved';
+            if (el) el.textContent = tag ? `${what}: "${tag}"` : what;
             const clearBtn = document.getElementById('clearSetupBtn');
-            if (clearBtn) clearBtn.style.display = 'inline-block';
+            if (clearBtn) clearBtn.style.display = (isAdmin() || here) ? 'inline-block' : 'none';
+        }
+
+        // ===== Playlist clips =====
+
+        function clipKey(dir) {
+            return selectedPlaylist ? selectedPlaylist + '::' + dir : null;
+        }
+
+        /* This song's clip in the playlist being played, or null. Only ever
+         * with a playlist picked: from All, or a search, every song plays
+         * whole -- which is how Bheegi Bheegi trimmed for Friday's set stays
+         * full length everywhere else. */
+        function clipFor(dir) {
+            const key = dir ? clipKey(dir) : null;
+            // A viewer's own clip (only ever from a refused save, see
+            // pushClip) plays on their device in place of the shared one.
+            const mine = key && !isAdmin() ? myClips[key] : null;
+            const c = mine || (key ? clips[key] : null);
+            return c && typeof c.start === 'number' ? c : null;
+        }
+
+        /* Put the playhead on the clip's start, if this song has one here.
+         * Used on load and by the Stop button, so Stop-then-Play replays the
+         * way the song comes in -- which is what Karan is tuning by ear. */
+        function cueClipStart() {
+            const clip = clipFor(currentSongDir);
+            if (!clip || !songDuration || isPlaying) return;
+            // A start past the end of the audio is a clip set against a
+            // different recording of the song. Play it from the top.
+            if (clip.start >= songDuration - 1) return;
+            pauseOffset = clip.start;
+            const seekBar = document.getElementById('seekBar');
+            if (seekBar) seekBar.value = (pauseOffset / songDuration) * 1000;
+            const t = document.getElementById('currentTime');
+            if (t) t.textContent = formatTime(pauseOffset);
+        }
+
+        /* Decide what this play of the song's clip does, from position `pos`.
+         *
+         * Fresh (a play press, a seek, the next song starting): fade in only if
+         * we are starting AT the clip start -- resuming after a pause mid-verse
+         * comes back at full level -- and arm the end only if it is still ahead.
+         *
+         * midPlay (Set start / Set end / Clear, or picking the playlist while
+         * the song runs): nothing jumps. A new end is armed only with a full
+         * fade still to go, so pressing "Set end" does not cut the song off
+         * under the finger that pressed it; it takes effect next time through. */
+        function armClip(pos, midPlay) {
+            const prev = clipRun;
+            clipRun = null;
+            const clip = clipFor(currentSongDir);
+            if (!clip) return;
+            const fadeIn = midPlay
+                ? !!(prev && prev.fadeIn && prev.start === clip.start)
+                : (clip.start > 0 || CLIP_FADE_IN_FROM_ZERO) && Math.abs(pos - clip.start) < 0.25;
+            let end = null;
+            if (clip.end !== null && clip.end !== undefined) {
+                const kept = prev && prev.end === clip.end;
+                if (pos < clip.end - (midPlay && !kept ? CLIP_FADE : 0)) end = clip.end;
+            }
+            if (fadeIn || end !== null) clipRun = { start: clip.start, end, fadeIn };
+        }
+
+        /* The gain curve from `pos` onward, as [songSeconds, gain] points to
+         * ramp between linearly. Pure, so it can be checked without audio.
+         * The curve is piecewise linear with corners only at these points, so
+         * ramping straight between them is exact. A clip shorter than two
+         * fades shares its length between them rather than overlapping. */
+        function clipEnvelope(run, pos, duration) {
+            const stop = run.end !== null ? run.end : duration;
+            const fade = Math.max(0.01, Math.min(CLIP_FADE, (stop - run.start) / 2));
+            const gain = (s) => {
+                let g = 1;
+                if (run.fadeIn) g = Math.min(g, (s - run.start) / fade);
+                if (run.end !== null) g = Math.min(g, (run.end - s) / fade);
+                return Math.max(0, Math.min(1, g));
+            };
+            const marks = [pos];
+            if (run.fadeIn) marks.push(run.start + fade);
+            if (run.end !== null) marks.push(run.end - fade, run.end);
+            return [...new Set(marks.filter(s => s >= pos))]
+                .sort((a, b) => a - b).map(s => [s, gain(s)]);
+        }
+
+        /* Lay the curve onto masterGain, on the audio clock. Song seconds
+         * become wall seconds through startTime and tempo, exactly as
+         * songPosition() reads them back. Everything already scheduled is
+         * dropped first, so calling this again (tempo change, clip edit) is
+         * always safe. */
+        function scheduleClipGain() {
+            if (!masterGain || !audioCtx) return;
+            const g = masterGain.gain, now = audioCtx.currentTime;
+            g.cancelScheduledValues(0);
+            if (!clipRun || !isPlaying) { g.setValueAtTime(1, now); return; }
+            const env = clipEnvelope(clipRun, songPosition(), songDuration);
+            g.setValueAtTime(env[0][1], now);
+            for (const [s, v] of env.slice(1)) {
+                g.linearRampToValueAtTime(v, Math.max(now, startTime + s / tempo));
+            }
+        }
+
+        /* Pause, stop and seek all end with the gain back at 1. Left mid-ramp,
+         * the next song -- which may have no clip at all -- would start
+         * silent, and nothing on screen would say why. */
+        function clearClipFade() {
+            clipRun = null;
+            if (!masterGain || !audioCtx) return;
+            masterGain.gain.cancelScheduledValues(0);
+            masterGain.gain.setValueAtTime(1, audioCtx.currentTime);
+        }
+
+        /* "Set start" / "Set end": the current position, like Save Setup takes
+         * the current mix. Rough is fine -- Karan tunes these by ear, and
+         * pressing again just moves the point. */
+        function setClipPoint(which) {
+            // Hidden from viewers; this catches a tap before whoami answers.
+            if (!isAdmin()) return;
+            if (!selectedPlaylist || currentSongIndex < 0 || !songDuration) return;
+            const key = clipKey(currentSongDir);
+            const pos = Math.round(songPosition() * 10) / 10;
+            const cur = clipFor(currentSongDir) || { start: 0, end: null };
+            const next = { start: cur.start, end: cur.end === undefined ? null : cur.end };
+            next[which] = pos;
+            // Refused, not quietly fixed: dropping the old end to make room
+            // for a later start would lose a timing someone set on purpose.
+            if (next.end !== null && next.end <= next.start) {
+                renderClip(which === 'end'
+                    ? `End must come after the start (${formatTime(next.start)})`
+                    : `Start must come before the end (${formatTime(next.end)})`);
+                return;
+            }
+            clips[key] = next;
+            storeClipsLocally();
+            pushClip(key, next);
+            if (isPlaying) { armClip(songPosition(), true); scheduleClipGain(); }
+            renderClip();
+        }
+
+        function clearClip() {
+            const key = clipKey(currentSongDir);
+            if (!isAdmin()) {
+                // A viewer can only drop their own device's clip.
+                if (key && myClips[key]) { delete myClips[key]; storeMine(); renderClip(); }
+                return;
+            }
+            if (!key || !clips[key]) return;
+            delete clips[key];
+            storeClipsLocally();
+            pushClip(key, null);
+            if (isPlaying) { armClip(songPosition(), true); scheduleClipGain(); }
+            renderClip();
+        }
+
+        function renderClip(note) {
+            const row = document.getElementById('clipRow');
+            if (!row) return;
+            row.style.display = selectedPlaylist ? 'flex' : 'none';
+            const out = document.getElementById('clipSummary');
+            if (!out || !selectedPlaylist) return;
+            if (note) { out.textContent = note; return; }
+            const clip = clipFor(currentSongDir);
+            const key = clipKey(currentSongDir);
+            const here = !isAdmin() && key && myClips[key] === clip;
+            out.title = `Only in "${selectedPlaylist}" — elsewhere the song plays whole`;
+            // A viewer's own clip says so, and keeps a Clear (it is theirs);
+            // a viewer sees the hosts' clips as times alone, no Clear.
+            out.innerHTML = clip
+                ? `${formatTime(clip.start)} &rarr; ${clip.end !== null ? formatTime(clip.end) : 'end'}`
+                  + (here
+                      ? ` &middot; on this device only &middot; <button class="clip-mine-clear" onclick="clearClip()">Clear</button>`
+                      : isAdmin()
+                      ? ` &middot; <button class="clip-clear" onclick="clearClip()">Clear</button>`
+                      : '')
+                : 'Whole song';
+        }
+
+        function storeClipsLocally() {
+            try { localStorage.setItem('beatznbox_clips', JSON.stringify(clips)); } catch (e) {}
+        }
+
+        async function pushClip(key, clip) {
+            try {
+                const r = await fetch('/api/clips', { method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key, clip }) });
+                if (r.status === 403) {
+                    // A viewer login the page took for an admin. A set point
+                    // is kept as this device's own clip, labelled so; a
+                    // Clear is simply undone. Either way the shared clips come
+                    // back from the server, untouched.
+                    readOnlyRefused('clip');
+                    if (clip) { myClips[key] = clip; storeMine(); }
+                    await loadClips();
+                    renderClip(clip ? undefined : 'Clips are set by the hosts, so that was not cleared.');
+                    return;
+                }
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+            } catch (e) {
+                console.warn('clip kept on this device only', e);
+            }
+        }
+
+        // Once per page load, like setups and playlists -- never polled, for
+        // the reason given at the bottom of this script (a stray 401 reopens
+        // the Sign in box, and a poll turns that into a loop).
+        async function loadClips() {
+            try {
+                const r = await fetch('/api/clips', { cache: 'no-store', credentials: 'include' });
+                if (!r.ok) return;
+                clips = (await r.json()).clips || {};
+                storeClipsLocally();
+                renderClip();
+            } catch (e) {
+                // Offline at the venue: the local copy already loaded above
+                // still runs the set.
+                console.warn('clips: using the local copy', e);
+            }
         }
 
         // ===== Helpers =====
@@ -3846,7 +4323,11 @@
         // Init
         loadSongList();
         loadPlaylists();
-        loadPresets();
+        // Setups wait for whoami: whether this browser may send up its old
+        // setups (the one-off migration) depends on the login. Nothing else
+        // waits -- playlists, clips and playback load as before.
+        loadWhoami().then(loadPresets);
+        loadClips();
         initOffline();
         renderBell();
         pollRequests();

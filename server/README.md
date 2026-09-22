@@ -24,6 +24,30 @@ Caddy is shared with five other sites, so **always**
     @audio path *.mp3
     header @audio Cache-Control public,max-age=604800
 
+A third, from 23 Sep (Music Night, 25 Sep): an `admin` login beside `beatz`,
+and the login name passed to the queue service. Applied by
+`enable-admin-login.sh` (scp to `/opt/beatznbox/`, then
+`ssh -t root@46.224.176.48 bash /opt/beatznbox/enable-admin-login.sh`;
+`--rollback` undoes it):
+
+    basic_auth @needsauth {
+        beatz <hash>
+        admin <hash>
+    }
+    reverse_proxy /api/* 127.0.0.1:8931 {
+        header_up X-Beatz-User {http.auth.user.id}
+    }
+
+Only admin logins may POST `/api/playlists`, `/api/presets`, `/api/clips`;
+everyone else gets `403 {"error":"read-only","role":"viewer"}`. Admin logins
+are `admin` unless `BEATZ_ADMINS=a,b` is set in the unit or
+`/opt/beatznbox/admins.txt` lists them one per line. A call straight to
+127.0.0.1:8931 from the box (no X-Beatz-User, no X-Forwarded-For) is trusted
+as admin, as before. **Order: the Caddy edit before the new
+`queue-service.py`; undo in reverse.** Without the `header_up` line Caddy
+passes a browser's own X-Beatz-User through, and the new service would
+believe it.
+
 Deliberately not `immutable`: `prepare-web.sh` re-encodes to the *same*
 filename when a song is reprocessed, so a year-long entry would pin stale audio
 with no way to bust it.
