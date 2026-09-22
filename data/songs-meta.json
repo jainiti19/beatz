@@ -1244,13 +1244,12 @@
     "year": 1995
   },
   "Raah_Mein_Unse_Mulaqat": {
-    "title": "Raah Mein Unse Mulaqat Ho Gayi",
-    "film": "Vijaypath",
+    "year": 1994,
+    "title": "Raah Mein Unse Mulaqat (From \"Vijaypath\")",
     "singers": [
-      "Kumar Sanu",
-      "Alka Yagnik"
+      "Kumar Sanu feat. Alka Yagnik & Anu Malik"
     ],
-    "year": 1994
+    "film": "Tu Dharti Pe Chahe Jahan Bhi - Love Songs"
   },
   "Piya_Tose_Naina_Lage": {
     "title": "Piya Tose Naina Laage Re",
@@ -1345,12 +1344,12 @@
     "year": null
   },
   "Phir_Aur_Kya_Chahiye": {
-    "title": "Phir Aur Kya Chahiye Relived",
+    "title": "Phir Aur Kya Chahiye",
     "singers": [
       "Arijit Singh"
     ],
-    "film": "",
-    "year": null
+    "film": "Zara Hatke Zara Bachke",
+    "year": 2023
   },
   "Aashiq_Banaya_Aapne": {
     "title": "AASHIQ BANAYA AAPNE",
@@ -1430,6 +1429,64 @@
       "Frozen"
     ],
     "film": "Frozen OST",
+    "year": null
+  },
+  "Suno_Na": {
+    "title": "Suno Na",
+    "singers": [
+      "Vishal-Shekhar"
+    ],
+    "film": "Jhankaar Beats",
+    "year": null
+  },
+  "Jiyein_Kyun": {
+    "title": "Jiyein Kyun",
+    "singers": [
+      "Papon"
+    ],
+    "film": "Dum Maaro Dum",
+    "year": null
+  },
+  "Maar_daala": {
+    "title": "Maar Daala",
+    "singers": [
+      "Kavita Krishnamurthy",
+      "KK"
+    ],
+    "film": "Devdas",
+    "year": 2002
+  },
+  "Tumse_milke": {
+    "title": "Tumse Milke",
+    "singers": [
+      "Asha Bhosle"
+    ],
+    "film": "Parinda",
+    "year": null
+  },
+  "Zinda": {
+    "title": "Zinda",
+    "singers": [
+      "Amit Trivedi"
+    ],
+    "film": "Lootera",
+    "year": null
+  },
+  "Pehla_Nasha": {
+    "title": "Pehla Nasha",
+    "singers": [
+      "Udit Narayan",
+      "Sadhana Sargam"
+    ],
+    "film": "Jo Jeeta Wohi Sikandar (Original Motion Picture Soundtrack)",
+    "year": null
+  },
+  "Naam_Adaa_Likhna": {
+    "title": "Naam Adaa Likhna",
+    "singers": [
+      "Shantanu Moitra"
+    ],
+    "film": "Yahaan (Original Motion Picture Soundtrack)",
     "year": null
   }
 }
