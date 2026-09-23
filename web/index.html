@@ -90,6 +90,7 @@
         body.viewer .chip-new,
         body.viewer .chip-del,
         body.viewer .add-pl,
+        body.viewer .pl-move,
         body.viewer .clip-edit,
         body.viewer .clip-clear { display: none !important; }
         .viewer-note { display: none; font-size: 11px; color: #999; padding: 6px 12px 0; }
@@ -203,6 +204,12 @@
         .chip.active { background: #00897B; color: white; }
         .chip:hover { background: #E0F2F1; }
         .chip.active:hover { background: #00796B; }
+        .pl-mode {
+            display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+            font-size: 12px; color: #666; border-bottom: 1px solid #eee; flex-shrink: 0;
+        }
+        .pl-mode[hidden] { display: none; }
+        .pl-mode select { font: inherit; color: inherit; background: transparent; padding: 3px 4px; border-radius: 6px; }
 
         .song-list {
             flex: 1;
@@ -574,6 +581,15 @@
             color: #17604a; border-radius: 6px; min-width: 30px; text-align: center;
         }
         button.add-pl { border: none; background: none; }
+        .pl-move { display: flex; flex-direction: column; gap: 2px; margin-right: 2px; }
+        .pl-move-btn {
+            border: none; background: none; cursor: pointer; color: #17604a;
+            font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 6px;
+        }
+        .pl-move-btn:hover:not(:disabled) { background: #e8f3ee; }
+        .pl-move-btn:disabled { opacity: 0.25; cursor: default; }
+        .song-item.active .pl-move-btn { color: #fff; }
+        .song-item.active .pl-move-btn:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
         .add-pl:hover { background: #e8f3ee; }
         .up-next { display: none; }
         .up-next.is-on { display: flex; }
@@ -1262,6 +1278,7 @@
                 <div class="bs-song" id="bsSong">—</div>
             </div>
             <div class="playlist-chips" id="playlistChips"></div>
+            <div class="pl-mode" id="playlistMode" hidden></div>
             <!-- Shown only to viewers (body.viewer). Says why there is no +
                  or delete cross, before anyone goes looking for one. -->
             <div class="viewer-note" id="viewerNote">Playlists and clips are set by the hosts. Setups you save stay on this device.</div>
@@ -1510,6 +1527,7 @@
             try { localStorage.setItem('beatznbox_role', role); } catch (e) {}
             document.body.classList.toggle('viewer', role !== 'admin');
             renderClip();
+            renderPlaylistMode();
         }
 
         async function loadWhoami() {
@@ -1726,6 +1744,11 @@
                 if (key.slice(0, key.lastIndexOf('::')) === name) { delete clips[key]; pushClip(key, null); }
             }
             storeClipsLocally();
+            if (sessionPresets[name + '::*']) {
+                delete sessionPresets[name + '::*'];
+                pushSetup(name + '::*', null);
+                storePresetsLocally();
+            }
             if (selectedPlaylist === name) selectedPlaylist = null;
             savePlaylists();
             renderPlaylistChips();
@@ -1751,6 +1774,60 @@
             // filter that always empties the list.
 
             el.innerHTML = html;
+            renderPlaylistMode();
+        }
+
+        // ===== Playlist mode =====
+        // Iti, 24 Sep: the mode (Karaoke, Jamming...) is set for a whole
+        // playlist, and a song only differs where a setup was saved for it IN
+        // that playlist. Kept with the setups under "<playlist>::*" -- no song
+        // dir is "*" -- so it needs nothing new from the server.
+        const MODE_NAMES = { singalong: 'Sing along', karaoke: 'Karaoke', unplugged: 'Unplugged', jamming: 'Jamming' };
+
+        function playlistMode(name = selectedPlaylist) {
+            const s = name ? sessionPresets[name + '::*'] : null;
+            return s && PRESETS[s.preset] ? s.preset : null;
+        }
+
+        function renderPlaylistMode() {
+            const el = document.getElementById('playlistMode');
+            if (!el) return;
+            const mode = playlistMode();
+            // Viewers see the set's mode, if it has one, but cannot change it.
+            el.hidden = !selectedPlaylist || (!isAdmin() && !mode);
+            if (el.hidden) return;
+            if (!isAdmin()) { el.textContent = `Mode: ${MODE_NAMES[mode]}`; return; }
+            el.innerHTML = `<label for="plModeSel">Mode for this playlist</label>
+                <select id="plModeSel" onchange="setPlaylistMode(this.value)">
+                    <option value="">Per song</option>
+                    ${Object.entries(MODE_NAMES).map(([k, t]) =>
+                        `<option value="${k}" ${k === mode ? 'selected' : ''}>${t}</option>`).join('')}
+                </select>`;
+        }
+
+        function setPlaylistMode(name) {
+            if (!isAdmin() || !selectedPlaylist) return;
+            const key = selectedPlaylist + '::*';
+            if (name && PRESETS[name]) {
+                const setup = { preset: name, volumes: Object.assign({}, PRESETS[name]), saved: Date.now() };
+                sessionPresets[key] = setup;
+                pushSetup(key, setup);
+            } else {
+                delete sessionPresets[key];
+                pushSetup(key, null);
+            }
+            storePresetsLocally();
+            // The song on now follows at once, unless it has its own setup here.
+            const song = songs[currentSongIndex];
+            if (name && song && !ownPlaylistSetup(song.dir)) applyPreset(name);
+        }
+
+        /* The setup saved for this song in the picked playlist -- the only
+         * thing that overrides the playlist's mode. */
+        function ownPlaylistSetup(dir) {
+            if (!selectedPlaylist) return null;
+            const k = selectedPlaylist + '::' + dir;
+            return (!isAdmin() && mySetups[k]) || sessionPresets[k] || null;
         }
 
         function selectPlaylist(name) {
@@ -1881,6 +1958,13 @@
                 return;
             }
 
+            // Move up/down only on a whole playlist: with a search or Saved
+            // narrowing it, the neighbour on screen is not the neighbour in
+            // the set, and a move would jump over songs you cannot see.
+            const query = document.getElementById('searchInput').value.trim();
+            const canMove = !!selectedPlaylist && !query && !savedOnly;
+            const last = filteredSongs.length - 1;
+
             el.innerHTML = filteredSongs.map((song, i) => {
                 const globalIdx = songs.indexOf(song);
                 const isActive = globalIdx === currentSongIndex;
@@ -1901,9 +1985,28 @@
                             : ''}
                         ${songPlaylists.length ? `<div class="song-playlists">${songPlaylists.join(', ')}</div>` : ''}
                     </div>
+                    ${canMove ? `<span class="pl-move">
+                        <button class="pl-move-btn" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move up" onclick="event.stopPropagation();moveInPlaylist(${i}, -1)">&#9650;</button>
+                        <button class="pl-move-btn" ${i === last ? 'disabled' : ''} title="Move down" aria-label="Move down" onclick="event.stopPropagation();moveInPlaylist(${i}, 1)">&#9660;</button>
+                    </span>` : ''}
                     <span class="add-pl" title="Add to a playlist" aria-label="Add to a playlist" onclick="event.stopPropagation();addToPlaylist(${globalIdx})">+</span>
                 </div>`;
             }).join('');
+        }
+
+        /* Swap a song with its neighbour in the picked playlist. `i` is its
+         * place in the list on screen, which canMove keeps equal to its place
+         * in the playlist (bar songs no longer in the library, hence by dir). */
+        function moveInPlaylist(i, delta) {
+            if (!isAdmin() || !selectedPlaylist) return;
+            const list = playlists[selectedPlaylist];
+            const a = filteredSongs[i], b = filteredSongs[i + delta];
+            if (!list || !a || !b) return;
+            const ia = list.indexOf(a.dir), ib = list.indexOf(b.dir);
+            if (ia < 0 || ib < 0) return;
+            [list[ia], list[ib]] = [list[ib], list[ia]];
+            savePlaylists();
+            filterSongs();
         }
 
         /* Picking, not typing. This used to be prompt() with the names listed
@@ -2398,8 +2501,18 @@
             // A mix carried over from the previous song wins: it is what the
             // room was just listening to. Otherwise this song's own saved
             // setup, and failing that the default.
+            // In a playlist, a setup saved for the song in THAT playlist beats
+            // everything, then the playlist's mode -- both beat the carried
+            // mix, being what the set was planned with. The song's All setup
+            // still brings its speed and key under a playlist mode.
             const savedSetup = setupFor(song.dir);
-            if (carriedMix) {
+            const plMode = playlistMode();
+            if (ownPlaylistSetup(song.dir)) {
+                restoreSetup(savedSetup);
+            } else if (plMode) {
+                if (savedSetup) restoreSetup(savedSetup);
+                applyPreset(plMode);
+            } else if (carriedMix) {
                 applyMix(carriedMix);
             } else if (savedSetup) {
                 restoreSetup(savedSetup);
@@ -2409,6 +2522,10 @@
             // The key follows the song even when the mix is carried: a key
             // saved for this song is the singer's range, not a room setting.
             setKey(savedSetup && savedSetup.key ? savedSetup.key : 0);
+            // Speed too, and back to 100% when nothing is saved: in a
+            // playlist playing straight through, the next song used to keep
+            // the last one's speed and ignore its own.
+            setTempo(savedSetup && savedSetup.tempo ? savedSetup.tempo : 1);
 
             // A clip's start beats a setup's saved position: in a set, where
             // the song comes in is the whole point of the clip. The setup's
@@ -3214,7 +3331,8 @@ body {
         function setTempo(t) {
             // A restored setup can ask for a speed before the worklet exists.
             // Dropping it would silently ignore what the singer saved.
-            if (!tempoReady && t !== 1) { pendingTempo = t; return; }
+            // And a later 1x replaces an earlier song's pending speed.
+            if (!tempoReady) { pendingTempo = t === 1 ? null : t; return; }
             if (t === tempo) return;
             const pos = songPosition();
             tempo = t;
@@ -4175,52 +4293,65 @@ body {
         function clearSetup() {
             if (currentSongIndex < 0) return;
             const song = songs[currentSongIndex];
-            // Every copy for this song, whichever playlist it was saved from:
-            // a setup is looked up by song, so leaving one behind would bring
-            // it straight back.
+            // Which copies go: see clearsKey.
             if (!isAdmin()) {
                 // A viewer clears only what is theirs. If the hosts saved a
                 // setup for this song, say so -- it still applies next load.
                 for (const key of Object.keys(mySetups)) {
-                    if (key.endsWith('::' + song.dir)) delete mySetups[key];
+                    if (clearsKey(key, song.dir)) delete mySetups[key];
                 }
                 storeMine();
-                const shared = setupFor(song.dir);
-                if (shared) { showPresetIndicator(shared.tag, false); return; }
-                document.getElementById('presetIndicator').textContent = '';
-                document.getElementById('clearSetupBtn').style.display = 'none';
-                return;
-            }
-            for (const key of Object.keys(sessionPresets)) {
-                if (key.endsWith('::' + song.dir)) {
-                    delete sessionPresets[key];
-                    pushSetup(key, null);
+            } else {
+                for (const key of Object.keys(sessionPresets)) {
+                    if (clearsKey(key, song.dir)) {
+                        delete sessionPresets[key];
+                        pushSetup(key, null);
+                    }
                 }
+                storePresetsLocally();
             }
-            storePresetsLocally();
+            // In a playlist the song's default (saved from All) can still
+            // apply; say so rather than showing nothing.
+            const left = setupFor(song.dir);
+            if (left) { showPresetIndicator(left.tag, !!left.local, left); return; }
             document.getElementById('presetIndicator').textContent = '';
             document.getElementById('clearSetupBtn').style.display = 'none';
         }
 
-        /* A song's setup, whichever playlist it was saved from. Iti's call on
-         * 14 Sep: a saved mix belongs to the song. Keys stay
-         * "<playlist>::<dir>" so older saves still resolve; the newest wins. */
+        /* A song's setup. Iti's call on 24 Sep, replacing the 14 Sep one (a
+         * setup belongs to the song, wherever saved): with a playlist picked,
+         * the setup saved in THAT playlist, so the same song can run at 80% in
+         * one set and full speed in another. Failing that, the one saved from
+         * All -- the song's default -- but never another playlist's. From All,
+         * the newest from anywhere, as before. Keys: "<playlist|all>::<dir>". */
         function setupFor(dir, sharedOnly) {
-            let best = null;
             // A viewer's own practice setup wins over the shared one on their
             // device -- it is the one they just chose. Never for an admin.
             if (!isAdmin() && !sharedOnly) {
-                for (const [key, s] of Object.entries(mySetups)) {
-                    if (!key.endsWith('::' + dir)) continue;
-                    if (!best || (s.saved || 0) > (best.saved || 0)) best = s;
-                }
-                if (best) return best;
+                const mine = pickSetup(mySetups, dir);
+                if (mine) return mine;
             }
-            for (const [key, s] of Object.entries(sessionPresets)) {
+            return pickSetup(sessionPresets, dir);
+        }
+
+        function pickSetup(map, dir) {
+            if (selectedPlaylist) {
+                return map[selectedPlaylist + '::' + dir] || map['all::' + dir] || null;
+            }
+            let best = null;
+            for (const [key, s] of Object.entries(map)) {
                 if (!key.endsWith('::' + dir)) continue;
                 if (!best || (s.saved || 0) > (best.saved || 0)) best = s;
             }
             return best;
+        }
+
+        /* The keys Clear removes: in a playlist, only that playlist's setup
+         * (the song's default and other sets keep theirs); from All, every
+         * copy, or the newest-wins lookup would bring the next one back. */
+        function clearsKey(key, dir) {
+            return selectedPlaylist ? key === selectedPlaylist + '::' + dir
+                                    : key.endsWith('::' + dir);
         }
 
         function storePresetsLocally() {
@@ -4287,6 +4418,7 @@ body {
             }
             sessionPresets = server;
             storePresetsLocally();
+            renderPlaylistMode();
         }
 
         function restoreSetup(preset) {
@@ -4311,19 +4443,26 @@ body {
                 const btn = document.getElementById('pre-' + preset.preset);
                 if (btn) btn.classList.add('active');
             }
-            showPresetIndicator(preset.tag, !!preset.local);
+            showPresetIndicator(preset.tag, !!preset.local, preset);
         }
 
         /* `here`: the setup lives only on this device (a viewer's own). The
          * words say so, because "Setup saved" alone reads as saved for the
          * room. Clear is offered for an admin, or for a viewer's own setup --
          * never a viewer's view of a shared one, which is not theirs to clear. */
-        function showPresetIndicator(tag, here) {
+        function showPresetIndicator(tag, here, setup) {
             const el = document.getElementById('presetIndicator');
-            const what = here ? 'Saved on this device only' : 'Setup saved';
+            // In a playlist with nothing saved there, the song's default from
+            // All is what applies. Clear here would not touch it, so no Clear;
+            // Save Setup makes one for this playlist.
+            const song = songs[currentSongIndex];
+            const fromAll = !!(setup && selectedPlaylist && song)
+                && (setup === sessionPresets['all::' + song.dir] || setup === mySetups['all::' + song.dir]);
+            const what = fromAll ? 'Song setup (from All)'
+                       : here ? 'Saved on this device only' : 'Setup saved';
             if (el) el.textContent = tag ? `${what}: "${tag}"` : what;
             const clearBtn = document.getElementById('clearSetupBtn');
-            if (clearBtn) clearBtn.style.display = (isAdmin() || here) ? 'inline-block' : 'none';
+            if (clearBtn) clearBtn.style.display = !fromAll && (isAdmin() || here) ? 'inline-block' : 'none';
         }
 
         // ===== Playlist clips =====
