@@ -1479,6 +1479,9 @@
         // Names deleted on THIS device, so a merge after someone else's edit
         // does not resurrect them from the server's copy.
         const deletedPlaylists = new Set();
+        // 24 Sep 2026: names this device has edited since its last successful
+        // save. On a 409 only these are carried over — see savePlaylists.
+        const dirtyPlaylists = new Set();
         let selectedPlaylist = null;
 
         // Saved song setups. The server holds them (so a mix saved on a phone is
@@ -1744,6 +1747,7 @@
             if (!confirm(`Delete the playlist "${name}"? The songs stay in the library.`)) return;
             delete playlists[name];
             deletedPlaylists.add(name);
+            dirtyPlaylists.delete(name);
             // Its clips go with it, or a new playlist given the same name
             // would inherit timings nobody set for it.
             for (const key of Object.keys(clips)) {
@@ -1880,7 +1884,7 @@
             const name = prompt('New playlist name:');
             if (name && name.trim()) {
                 playlists[name.trim()] = [];
-                savePlaylists();
+                savePlaylists(name.trim());
                 renderPlaylistChips();
             }
         }
@@ -1908,7 +1912,8 @@
             }
         }
 
-        async function savePlaylists() {
+        async function savePlaylists(touched) {
+            if (touched) dirtyPlaylists.add(touched);
             localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
             const body = () => JSON.stringify({ playlists, rev: playlistRev });
             try {
@@ -1916,10 +1921,19 @@
                     headers: { 'Content-Type': 'application/json' }, body: body() });
                 if (r.status === 409) {
                     // Someone edited from another phone between our load and
-                    // our save. Keep both: their lists, ours winning on names
-                    // we hold, minus whatever we deleted here.
+                    // our save. Take THEIR set, and lay over it only the lists
+                    // this device actually changed.
+                    //
+                    // 24 Sep 2026: this used to be Object.assign({}, theirs, ours),
+                    // which let our whole stale map win on every name we happened
+                    // to hold — so editing one playlist silently reverted all the
+                    // others to whatever this tab loaded. That cost four songs
+                    // across two medleys on 24 Sep.
                     const d = await r.json();
-                    const merged = Object.assign({}, d.playlists || {}, playlists);
+                    const merged = Object.assign({}, d.playlists || {});
+                    for (const n of dirtyPlaylists) {
+                        if (playlists[n]) merged[n] = playlists[n];
+                    }
                     for (const n of deletedPlaylists) delete merged[n];
                     playlists = merged;
                     playlistRev = d.rev || 0;
@@ -1934,6 +1948,7 @@
                     // back and say why, in the note under the chips.
                     readOnlyRefused('playlist change');
                     deletedPlaylists.clear();
+                    dirtyPlaylists.clear();
                     await loadPlaylists();
                     const note = document.getElementById('viewerNote');
                     if (note) note.textContent = 'Playlists are set by the hosts, so that change was not saved.';
@@ -1944,6 +1959,7 @@
                     playlists = d.playlists || {};
                     playlistRev = d.rev || 0;
                     localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
+                    dirtyPlaylists.clear();
                     renderPlaylistChips();
                 }
             } catch (e) {
@@ -2035,7 +2051,7 @@
             const ia = list.indexOf(a.dir), ib = list.indexOf(b.dir);
             if (ia < 0 || ib < 0) return;
             [list[ia], list[ib]] = [list[ib], list[ia]];
-            savePlaylists();
+            savePlaylists(selectedPlaylist);
             filterSongs();
         }
 
@@ -2084,7 +2100,7 @@
             if (!list) return;
             const at = list.indexOf(song.dir);
             if (at >= 0) list.splice(at, 1); else list.push(song.dir);
-            savePlaylists();
+            savePlaylists(name);
             renderSongList();
             addToPlaylist(songIdx);        // reopen, so several can be ticked
         }
@@ -2097,7 +2113,7 @@
             const n = name.trim();
             if (!playlists[n]) playlists[n] = [];
             if (!playlists[n].includes(songs[songIdx].dir)) playlists[n].push(songs[songIdx].dir);
-            savePlaylists();
+            savePlaylists(n);
             renderPlaylistChips();
             renderSongList();
         }
