@@ -89,11 +89,13 @@ def ask_model(job):
     if out.returncode != 0:
         raise RuntimeError(f"claude exited {out.returncode}: {out.stderr.strip()[:200]}")
     text = out.stdout.strip()
-    # Tolerate a code fence even though the prompt forbids one.
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
+    # Tolerate a code fence even though the prompt forbids one. Decode the first
+    # complete array and ignore whatever follows: a greedy \[.*\] ran on to the
+    # last "]" of any trailing note and failed with "Extra data" (Chura, 24 Sep).
+    start = text.find("[")
+    if start < 0:
         raise RuntimeError(f"no JSON in the answer: {text[:200]}")
-    return json.loads(m.group(0))
+    return json.JSONDecoder().raw_decode(text[start:])[0]
 
 
 def romanize(stems_dir, dry_run=False):
