@@ -1235,13 +1235,12 @@
     "year": 2021
   },
   "Tum_Mile_Dil_Khile": {
-    "title": "Tum Mile Dil Khile",
-    "film": "Criminal",
+    "year": 1995,
+    "title": "Tu Mile Dil Khile",
     "singers": [
-      "Kumar Sanu",
-      "Sadhana Sargam"
+      "Kumar Sanu"
     ],
-    "year": 1995
+    "film": "Criminal (Original Motion Picture Soundtrack)"
   },
   "Raah_Mein_Unse_Mulaqat": {
     "year": 1994,
@@ -1421,7 +1420,8 @@
       "Evynne Hollens"
     ],
     "film": "",
-    "year": null
+    "year": null,
+    "hide": true
   },
   "Love_is_an_open_door": {
     "title": "Love Is an Open Door",
@@ -1429,7 +1429,8 @@
       "Frozen"
     ],
     "film": "Frozen OST",
-    "year": null
+    "year": null,
+    "hide": true
   },
   "Suno_Na": {
     "title": "Suno Na",
@@ -1488,5 +1489,251 @@
     ],
     "film": "Yahaan (Original Motion Picture Soundtrack)",
     "year": null
+  },
+  "Chura_liya_hai": {
+    "title": "Chura Liya Hai Tumne Jo Dil Ko",
+    "singers": [
+      "Asha Bhosle",
+      "Mohammed Rafi"
+    ],
+    "film": "Baarishein, Chai Aur Rafi",
+    "year": null,
+    "hide": true
+  },
+  "Lag_ja_gale": {
+    "title": "Lag Ja Gale",
+    "singers": [
+      "Nayan Shankar"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Teri_ore": {
+    "title": "Teri Ore",
+    "singers": [
+      "Ali Khan",
+      "Shreya Ghosal"
+    ],
+    "film": "Pop Hits From New Dheli",
+    "year": null
+  },
+  "Na_Tum_jaano_na_hum": {
+    "title": "Na Tum Jano Na Hum",
+    "singers": [
+      "Lucky Ali",
+      "Ramya"
+    ],
+    "film": "Bollywood: Songs From Popular Indian Cinema",
+    "year": null
+  },
+  "Chand_sifarish": {
+    "title": "Chand Sifarish",
+    "singers": [
+      "Shaan",
+      "Kailash Kher"
+    ],
+    "film": "Shaan, Kailash Kher",
+    "year": null
+  },
+  "Chura_liya_hai_original": {
+    "title": "Chura Liya Hai Tumne Jo Dil Ko",
+    "singers": [
+      "Asha Bhosle",
+      "Mohammed Rafi"
+    ],
+    "film": "Baarishein, Chai Aur Rafi",
+    "year": null,
+    "hide": true
+  },
+  "Kehdoon_tumhe": {
+    "title": "Kehdoon Tumhen (From \"Deewaar\")",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "film": "Happy Birthday Neetu Singh",
+    "year": null
+  },
+  "Tu_tu_hai_vahi": {
+    "title": "Tu Tu Hai Wahi",
+    "singers": [
+      "DJ Aqeel"
+    ],
+    "film": "Ek Haseena Thi ...",
+    "year": null
+  },
+  "Kaanta_laga_remix": {
+    "title": "Kaanta Laga",
+    "singers": [
+      "Samadhi"
+    ],
+    "film": "Kaanta Laga...",
+    "year": null
+  },
+  "Pee_Loon": {
+    "title": "Pee Loon",
+    "singers": [
+      "Mohit Chauhan"
+    ],
+    "film": "Once Upon A Time In Mumbaai",
+    "year": 2010
+  },
+  "Aadat": {
+    "title": "Aadat",
+    "singers": [
+      "Jal"
+    ],
+    "film": "Mithoon",
+    "year": null
+  },
+  "Raabta": {
+    "title": "Raabta (From \"Agent Vinod\")",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "film": "Agent Vinod",
+    "year": null
+  },
+  "Yaaron_Dosti": {
+    "title": "Yaaron",
+    "singers": [
+      "KK"
+    ],
+    "film": "Remembering KK",
+    "year": null
+  },
+  "Raatan_Lambiyan": {
+    "title": "Raataan Lambiyan",
+    "singers": [
+      "Tanishk Bagchi Jubin Nautiyal Asees Kaur"
+    ],
+    "film": "Raataan Lambiyan (From Shershaah)",
+    "year": null
+  },
+  "Main_Jahaan_Rahoon": {
+    "title": "Main Jahaan Rahoon",
+    "singers": [
+      "Krishna & Rahat Fateh Ali Khan"
+    ],
+    "film": "Namastey London (Original Motion Picture Soundtrack)",
+    "year": null
+  },
+  "Behti_Hawa_Sa_Tha_Woh": {
+    "title": "Behti Hawa Sa Tha Woh",
+    "singers": [
+      "SHAAN; Shantanu Moitra"
+    ],
+    "film": "Friends Forever Hindi Hits (2024)",
+    "year": null
+  },
+  "Pyar_Deewana_Hota_Hai": {
+    "title": "Pyar Deewana Hota Hai",
+    "singers": [
+      "Kishore Kumar"
+    ],
+    "film": "Kati Patang",
+    "year": null
+  },
+  "Tinka_Tinka": {
+    "title": "Tinka Tinka (From \"Karam\")",
+    "singers": [
+      "Alisha Chinai"
+    ],
+    "film": "Bollywood Beats By Vishal-Shekhar",
+    "year": null
+  },
+  "Mehbooba_Mehbooba": {
+    "title": "MEHBOOBA MEHBOOBA",
+    "singers": [
+      "R.D.BURMAN"
+    ],
+    "film": "Sholay",
+    "year": null
+  },
+  "Meri_Mehbooba": {
+    "title": "Meri Mehbooba",
+    "singers": [
+      "Kumar Sanu; Alka Yagnik"
+    ],
+    "film": "Pardes (Original Motion Picture Soundtrack)",
+    "year": null
+  },
+  "Tum_To_Thehre_Pardesi_Saath_Kya_Nibhaoge": {
+    "title": "Tum to Thehre Pardesi",
+    "singers": [
+      "Altaf Raja"
+    ],
+    "film": "Khalli Walli (Romantic Qawwalis)",
+    "year": null
+  },
+  "Bahon_mein_chale_aao": {
+    "title": "Baahon Men Chale Aao",
+    "singers": [
+      "Lata Mangeshkar"
+    ],
+    "film": "Anamika",
+    "year": null
+  },
+  "Kaise_hua_kaise_hua_tu_itna": {
+    "title": "Kaise Hua",
+    "singers": [
+      "Kabir Singh (Official Playlist) Full Songs | Shahid Kapoor | Kiara Advani | Sandeep Reddy Vanga | Bhushan Kumar"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Tera_yaar_hoon_main": {
+    "title": "Tera Yaar Hoon Main",
+    "singers": [
+      "Arijit Singh"
+    ],
+    "film": "T-Series Videos",
+    "year": null
+  },
+  "Roop_suhana_lagta_hai": {
+    "title": "Roop Suhana Lagta Hai",
+    "singers": [
+      "K. S. Chithra",
+      "S. P. Balasubramanyam"
+    ],
+    "film": "The Gentleman (Original Motion Picture Soundtrack)",
+    "year": null
+  },
+  "Ek_pyaar_ka_nagma": {
+    "title": "Ek Pyar Ka Naghma Hai",
+    "singers": [
+      "Lata Mangeshkar"
+    ],
+    "film": "Shor (Original Motion Picture Soundtrack)",
+    "year": null
+  },
+  "Fanna": {
+    "hide": true
+  },
+  "Mile_Sur_Mera_tumhara": {
+    "title": "Mile Sur Mera Tumhara",
+    "singers": [
+      "Kausani Ghosh feat. Kaninika Sen Choudhuri",
+      "RiteshwarNahata",
+      "Ankita Manna",
+      "Eeshita Sengupta",
+      "Ipsita Sannyashi",
+      "Jayasmita Chakraborty",
+      "Mousumi Pal",
+      "Shawon Das & Soham Roychowdhury Akankshit"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Chura_Liya_Hai_Tumne": {
+    "hide": true
+  },
+  "Chura_Liya_Hai_Tumne_Jo_Dil_Ko": {
+    "title": "Chura Liya Hai Tumne Jo Dil Ko",
+    "singers": [
+      "Asha Bhosle",
+      "Mohammed Rafi"
+    ],
+    "film": "Yaadon Ki Baaraat",
+    "year": 1973
   }
 }

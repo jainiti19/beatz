@@ -137,6 +137,25 @@ def field(text):
     return re.sub(r"[|\r\n\t]+", " ", (text or "")).strip()
 
 
+# A YouTube link anywhere in a request or a wrong-song note (Iti, 24 Sep:
+# Karan wanted one exact upload of Sandese Aate Hain, and Ek Din Aap before
+# it). Searching can only ever find what YouTube ranks first; a link says
+# which recording outright. music.youtube.com, youtu.be and shorts all carry
+# the same 11-character id, and add-songs.sh takes a plain watch URL as-is.
+YT_LINK = re.compile(r"(?:youtube\.com/(?:watch\?(?:\S*?&)?v=|shorts/)|youtu\.be/)([A-Za-z0-9_-]{11})")
+
+
+def youtube_link(*texts):
+    """(canonical watch URL, texts with the link cut out) -- or (None, texts)."""
+    for t in texts:
+        m = YT_LINK.search(t or "")
+        if m:
+            url = f"https://www.youtube.com/watch?v={m.group(1)}"
+            strip = lambda x: field(re.sub(r"\S*(?:youtube\.com|youtu\.be)\S*", " ", x or ""))
+            return url, [strip(x) for x in texts]
+    return None, list(texts)
+
+
 def append_remote(path, line):
     """Append one line to a queue file. Appending is the whole safety story
     here: the service only ever appends to requests/reports and this only ever
@@ -282,6 +301,11 @@ def process(entry, fast):
     # YouTube wants everything; LRCLIB wants the title alone with the artist
     # passed separately, so the manifest keeps them in different fields.
     search = " ".join(x for x in (title, artist) if x)
+    # A link is the source itself; the title and artist, with it cut out,
+    # still go to LRCLIB for the words.
+    link, (title, artist) = youtube_link(title, artist)
+    if link:
+        search = link
     log(f"processing {name!r} (asked by {entry.get('who') or 'someone'}): {search}")
 
     if os.path.exists(os.path.join(STEMS, name, "vocals.wav")):
@@ -437,6 +461,9 @@ def retry_wrong_song(rec, fast):
     note = field(rec.get("note"))
     title = name.replace("_", " ")
     search = f"{title} {note}"
+    link, _ = youtube_link(note)
+    if link:
+        search = link
 
     backup = None
     if os.path.exists(d):
