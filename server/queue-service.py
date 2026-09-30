@@ -666,12 +666,21 @@ class Handler(BaseHTTPRequestHandler):
         # trusting it there would let anyone on the LAN claim to be admin.
         if DEV:
             return None, 'viewer'
-        user = self.headers.get('X-Beatz-User')
-        if user is None:
-            if self.headers.get('X-Forwarded-For') is None and not DEV:
-                return None, 'admin'
+        user = (self.headers.get('X-Beatz-User') or '').strip()
+        # A name that is not a login name is not a name. With basic_auth gone
+        # from /api/*, Caddy still sends its header_up line UNRESOLVED -- the
+        # literal "{http.auth.user.id}" -- which is truthy, and would otherwise
+        # read as a signed-in viewer: anyone on the internet could have minted
+        # a library token and filed requests. Reject the shape, not the string.
+        if not valid_login(user):
+            user = ''
+        if not user:
+            # No name at all. This used to trust a bare call from the box as an
+            # admin, on the grounds that only the box can reach 127.0.0.1:8931
+            # -- but with the site open, "no name" is also exactly what a
+            # stripped proxy request looks like, so it fails closed. A local
+            # caller who needs a role can send X-Beatz-User itself.
             return None, 'viewer'
-        user = user.strip()
         return user, (role_of(user) or 'viewer')
 
     def _pending(self):

@@ -639,7 +639,21 @@ class PublicDoor(ServiceCase):
                                     {'song': 'Kesariya'}, cookie=cookie)
         self.assertEqual(status, 200, d)
 
-    def test_04_reading_stays_open(self):
+    def test_04_a_name_that_is_not_a_login_is_no_name(self):
+        """Caddy sends its unresolved placeholder as the user header once
+        basic_auth stops matching /api/*. It is truthy, so it must be rejected
+        by SHAPE -- this is the bug that let anonymous visitors mint library
+        tokens for a few minutes on 30 Sep."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('beatz_qs', SERVICE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        for junk in ('{http.auth.user.id}', ' ', 'a b', 'x' * 41, 'naïve'):
+            self.assertFalse(mod.valid_login(junk), junk)
+        for good in ('iti', 'karan', 'beatz', 'TestIJ_2'):
+            self.assertTrue(mod.valid_login(good), good)
+
+    def test_05_reading_stays_open(self):
         for path in ('/api/health', '/api/playlists', '/api/clips', '/api/presets'):
             status, d, _ = self.request('GET', path)
             self.assertEqual(status, 200, (path, d))
