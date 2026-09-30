@@ -1787,6 +1787,10 @@ def main():
     global DEV, WEB_DIR, USERS_FILE, SESSION_KEY_FILE
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8931)
+    # Loopback by default: on the VPS Caddy is the only thing in front, and
+    # nothing else should reach this. --dev testing on a PHONE needs
+    # --host 0.0.0.0 and the laptop's LAN address instead of localhost.
+    ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--queue', default='/opt/beatznbox/queue/requests.jsonl')
     ap.add_argument('--web', default='/opt/beatznbox/web')
     ap.add_argument('--dev', action='store_true',
@@ -1806,7 +1810,7 @@ def main():
     if not SESSION_KEY_FILE:
         SESSION_KEY_FILE = os.path.join(qdir, 'session.key')
     os.makedirs(qdir, exist_ok=True)
-    ThreadingHTTPServer(('127.0.0.1', a.port), Handler).serve_forever()
+    ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
 
 
 if __name__ == '__main__':
