@@ -292,14 +292,23 @@ def read_session(value):
         return None
 
 
-def auth_rate_ok(ip):
-    """False when this IP has made too many signup/login attempts lately."""
+def auth_check(ip):
+    """False when this IP has already failed too many signup/login attempts.
+
+    A check only: failures are counted by auth_record afterwards, so signing
+    in and out while testing never uses up a person's own budget."""
     now = time.time()
     with AUTH_ATTEMPTS_LOCK:
         hits = [t for t in AUTH_ATTEMPTS.get(ip, []) if now - t < AUTH_WINDOW]
-        if len(hits) >= AUTH_MAX:
-            AUTH_ATTEMPTS[ip] = hits
-            return False
+        AUTH_ATTEMPTS[ip] = hits
+        return len(hits) < AUTH_MAX
+
+
+def auth_record(ip):
+    """Count one FAILED attempt against this IP."""
+    now = time.time()
+    with AUTH_ATTEMPTS_LOCK:
+        hits = [t for t in AUTH_ATTEMPTS.get(ip, []) if now - t < AUTH_WINDOW]
         hits.append(now)
         AUTH_ATTEMPTS[ip] = hits
         # Keep the map from growing without bound on a long-running box.
@@ -307,7 +316,6 @@ def auth_rate_ok(ip):
             for k in [k for k, v in AUTH_ATTEMPTS.items()
                       if not [t for t in v if now - t < AUTH_WINDOW]]:
                 AUTH_ATTEMPTS.pop(k, None)
-        return True
 
 
 MAX_BODY = 4096          # a request is a song name, not a payload
@@ -391,11 +399,20 @@ def mint_stem_token():
 class Handler(BaseHTTPRequestHandler):
     queue_path = None
 
-    def _json(self, code, payload):
+    def _json(self, code, payload, cookie=None):
+        """Write a JSON response, optionally with a Set-Cookie header.
+
+        The cookie goes out HERE, after send_response has written the status
+        line. A header sent before that lands in front of "HTTP/1.0 200 OK"
+        in the output and the whole response stops being valid HTTP -- which
+        is what made signup and login fail in every browser with "could not
+        reach the server"."""
         body = json.dumps(payload).encode()
         self.send_response(code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
+        if cookie is not None:
+            self.send_header('Set-Cookie', cookie)
         self.end_headers()
         self.wfile.write(body)
 
@@ -412,20 +429,37 @@ class Handler(BaseHTTPRequestHandler):
                 return v
         return None
 
-    def _set_session_cookie(self, user):
-        val = make_session(user)
-        bits = [f'beatz_session={val}', 'Path=/', 'HttpOnly', 'SameSite=Lax',
-                f'Max-Age={SESSION_TTL}']
+    def _session_cookie(self, user):
+        """The Set-Cookie VALUE for a login, to hand to _json."""
+        bits = [f'beatz_session={make_session(user)}', 'Path=/', 'HttpOnly',
+                'SameSite=Lax', f'Max-Age={SESSION_TTL}']
         if not DEV:
             bits.append('Secure')
-        self.send_header('Set-Cookie', '; '.join(bits))
+        return '; '.join(bits)
 
-    def _clear_session_cookie(self):
+    def _expired_session_cookie(self):
+        """The Set-Cookie VALUE that clears the cookie."""
         bits = ['beatz_session=', 'Path=/', 'HttpOnly', 'SameSite=Lax',
                 'Max-Age=0']
         if not DEV:
             bits.append('Secure')
-        self.send_header('Set-Cookie', '; '.join(bits))
+        return '; '.join(bits)
+
+    def _client_ip(self):
+        """The real client's address, behind Caddy.
+
+        reverse_proxy APPENDS the immediate peer's address to
+        X-Forwarded-For, so the LAST entry is the one Caddy wrote; anything
+        before it came from the browser and is not trustworthy. Without the
+        header (a direct call) the socket peer is right. Keying the auth
+        counter on client_address alone means every request arrives as
+        127.0.0.1 -- one shared budget for the whole site."""
+        xff = self.headers.get('X-Forwarded-For')
+        if xff:
+            last = xff.split(',')[-1].strip()
+            if last:
+                return last
+        return self.client_address[0]
 
     def _who(self):
         """(login, role) for this request; role is 'admin' or 'viewer'.
@@ -457,18 +491,21 @@ class Handler(BaseHTTPRequestHandler):
         """
         # A session cookie wins over the Caddy header: a real account is a
         # stronger statement of who this is than a shared basic-auth login.
+        # It is read in every mode -- --dev included, where it is the only
+        # way in.
+        sess = read_session(self._cookie('beatz_session'))
+        if sess:
+            acct = accounts().get(sess)
+            if acct:
+                return sess, (acct.get('role') if acct.get('role') in ROLES else 'editor')
+            # A cookie for an account that has since been deleted: treat it
+            # as no login at all rather than falling through to the header,
+            # which would silently promote it to a Caddy login.
+            return None, 'viewer'
         # In --dev there is no Caddy, so the header is ignored entirely --
         # trusting it there would let anyone on the LAN claim to be admin.
-        if not DEV:
-            sess = read_session(self._cookie('beatz_session'))
-            if sess:
-                acct = accounts().get(sess)
-                if acct:
-                    return sess, (acct.get('role') if acct.get('role') in ROLES else 'editor')
-                # A cookie for an account that has since been deleted: treat
-                # it as no login at all rather than falling through to the
-                # header, which would silently promote it to a Caddy login.
-                return None, 'viewer'
+        if DEV:
+            return None, 'viewer'
         user = self.headers.get('X-Beatz-User')
         if user is None:
             if self.headers.get('X-Forwarded-For') is None and not DEV:
@@ -885,16 +922,17 @@ class Handler(BaseHTTPRequestHandler):
                          if n != name and role_of(n) == 'admin'}
             if not remaining:
                 return self._json(400, {'error': 'that would leave no admin'})
-        known = self._read_users()
+        # Read-modify-write the WHOLE file, keeping every other key it holds:
+        # users.json also carries the accounts map, and writing a fresh
+        # {"users": ...} over it deleted every signup on the site.
+        d = _read_users_file()
+        known = d.get('users') if isinstance(d.get('users'), dict) else {}
         if data.get('delete'):
             known.pop(name, None)
         else:
             known[name] = {'role': role}
-        tmp = USERS_FILE + '.tmp'
-        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump({'users': known}, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, USERS_FILE)
+        d['users'] = known
+        _write_users(d)     # atomic, and 0600: the file holds password hashes
         return self._json(200, {'ok': True, 'user': name, 'role': role,
                                 'deleted': bool(data.get('delete'))})
 
@@ -918,8 +956,8 @@ class Handler(BaseHTTPRequestHandler):
         return user, pw
 
     def post_signup(self):
-        ip = self.client_address[0]
-        if not auth_rate_ok(ip):
+        ip = self._client_ip()
+        if not auth_check(ip):
             return self._json(429, {'error': 'Too many attempts. Try again later.'})
         user, pw = self._auth_body()
         if user is None:
@@ -938,12 +976,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(500, {'error': 'Server is missing bcrypt; ask the admin to install it.'})
         d[ACCOUNTS_KEY] = accts
         _write_users(d)
-        self._set_session_cookie(user)
-        return self._json(200, {'ok': True, 'user': user, 'role': 'editor'})
+        return self._json(200, {'ok': True, 'user': user, 'role': 'editor'},
+                          cookie=self._session_cookie(user))
 
     def post_login(self):
-        ip = self.client_address[0]
-        if not auth_rate_ok(ip):
+        ip = self._client_ip()
+        if not auth_check(ip):
             return self._json(429, {'error': 'Too many attempts. Try again later.'})
         user, pw = self._auth_body()
         if user is None:
@@ -952,14 +990,14 @@ class Handler(BaseHTTPRequestHandler):
         # One message for "no such user" and "wrong password": telling them
         # apart would let anyone enumerate the accounts.
         if not acct or not check_password(pw, acct.get('pw') or ''):
+            auth_record(ip)
             return self._json(401, {'error': 'Wrong user name or password.'})
         role = acct.get('role') if acct.get('role') in ROLES else 'editor'
-        self._set_session_cookie(user)
-        return self._json(200, {'ok': True, 'user': user, 'role': role})
+        return self._json(200, {'ok': True, 'user': user, 'role': role},
+                          cookie=self._session_cookie(user))
 
     def post_logout(self):
-        self._clear_session_cookie()
-        return self._json(200, {'ok': True})
+        return self._json(200, {'ok': True}, cookie=self._expired_session_cookie())
 
     def get_me(self):
         """Who the caller is, for the player to decide what to show. Distinct

@@ -1593,16 +1593,33 @@
         function isAdmin() { return role === 'admin'; }
 
         function setRole(r) {
-            // An account is an editor: it may change its OWN playlists, setups
-            // and clips, which is what the editing controls are for. The shared
-            // set is admin-only, and the server refuses a shared write from
-            // anyone else, so showing the controls here is safe.
-            if (ME && ME.account) r = ME.canEditOwn ? 'admin' : 'viewer';
+            // Who gets the editing controls: anyone who may edit THEIR OWN
+            // playlists, setups and clips -- an account, or an `editor` login
+            // made with add-user.sh -- as well as an admin. The writes
+            // themselves are scoped by writeScope() below and the server
+            // refuses a shared write from a non-admin, so showing the controls
+            // here is safe. /api/me reports these two flags for every kind of
+            // login; keying off "is this an account" hid them from editors.
+            if (ME) r = (ME.canEditOwn || ME.canEditShared) ? 'admin' : 'viewer';
             role = r === 'admin' ? 'admin' : 'viewer';
             try { localStorage.setItem('beatznbox_role', role); } catch (e) {}
             document.body.classList.toggle('viewer', role !== 'admin');
             renderClip();
             renderPlaylistMode();
+        }
+
+        // Which set this login WRITES. Only an admin may change the shared set
+        // everyone sings from; anyone else with editing rights writes their own
+        // bucket, which the server files under their login.
+        function writeScope() {
+            return (ME && ME.canEditShared) ? 'shared' : 'user';
+        }
+
+        // Which set this login READS. An admin reads the shared set; so does a
+        // viewer -- read-only, but it is what everyone sings from. An editor
+        // (or an account) reads its own bucket, which is the set it can change.
+        function pickSet(shared, mine) {
+            return (ME && ME.canEditOwn && !ME.canEditShared) ? (mine || {}) : (shared || {});
         }
 
         // ---- accounts ------------------------------------------------------------
@@ -1698,10 +1715,11 @@
                 ME = await r.json();
                 setRole(ME.role);
                 showLogin(ME.user);
-                // A Caddy login has no account and needs no screen: Caddy
-                // already asked. An account has one, and nobody at all needs
-                // the screen most of all -- that is the whole point of it.
-                if (ME.user && !ME.account) hideAuthScreen();
+                // Any login at all -- a Caddy one, or an account whose cookie
+                // is still good -- means no screen: Caddy or the cookie has
+                // already asked. Only a request with no identity needs it, and
+                // that is the whole point of it.
+                if (ME.user) hideAuthScreen();
                 else showAuthScreen('login');
             } catch (e) {
                 // Offline: keep whatever this device last knew.
@@ -2054,10 +2072,9 @@
                                       { cache: 'no-store', credentials: 'include' });
                 if (!r.ok) return;
                 const d = await r.json();
-                // An account sees only its own set; a Caddy login sees the
-                // shared one. The server sends both, so the choice is made
-                // here, once.
-                playlists = (ME && ME.account) ? (d.mine || {}) : (d.playlists || {});
+                // The server sends both sets; pickSet decides which one this
+                // login is here for. See its comment for the rule.
+                playlists = pickSet(d.playlists, d.mine);
                 playlistRev = d.rev || 0;
                 localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
                 renderPlaylistChips();
@@ -2075,7 +2092,7 @@
             localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
             const body = () => JSON.stringify({
                 playlists, rev: playlistRev,
-                scope: (ME && ME.account) ? 'user' : 'shared',
+                scope: writeScope(),
             });
             try {
                 let r = await fetch('/api/playlists', { method: 'POST', credentials: 'include',
@@ -4597,7 +4614,7 @@ body {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         key, setup,
-                        scope: (ME && ME.account) ? 'user' : 'shared',
+                        scope: writeScope(),
                     }) });
                 // A 400 is a setup the server will never accept; retrying it on
                 // every page load would only stall the migration forever.
@@ -4626,7 +4643,7 @@ body {
                 const r = await fetch('/api/presets', { cache: 'no-store', credentials: 'include' });
                 if (!r.ok) return;
                 const d = await r.json();
-                server = (ME && ME.account) ? (d.mine || {}) : (d.presets || {});
+                server = pickSet(d.presets, d.mine);
             } catch (e) {
                 console.warn('setups: using the local copy', e);
                 return;
@@ -4894,7 +4911,7 @@ body {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         key, clip,
-                        scope: (ME && ME.account) ? 'user' : 'shared',
+                        scope: writeScope(),
                     }) });
                 if (r.status === 403) {
                     // A viewer login the page took for an admin. A set point
@@ -4921,7 +4938,7 @@ body {
                 const r = await fetch('/api/clips', { cache: 'no-store', credentials: 'include' });
                 if (!r.ok) return;
                 const d = await r.json();
-                clips = (ME && ME.account) ? (d.mine || {}) : (d.clips || {});
+                clips = pickSet(d.clips, d.mine);
                 storeClipsLocally();
                 renderClip();
             } catch (e) {
