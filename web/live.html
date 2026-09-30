@@ -197,6 +197,15 @@ async function poll() {
       renderLines();
       return;
     }
+    if (r.status === 401 || r.status === 403) {
+      // The page itself loaded, so the site is open -- but this device is not
+      // allowed to read the session. Saying so beats a page that waits for
+      // ever, which is what a silent catch looked like.
+      els.title.textContent = 'BeatznBox';
+      els.status.textContent = 'This device needs the site login before the lyrics can load.';
+      document.body.classList.add('stale');
+      return;
+    }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     fetchedAt = performance.now();
