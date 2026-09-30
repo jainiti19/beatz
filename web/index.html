@@ -2108,7 +2108,7 @@
                     // others to whatever this tab loaded. That cost four songs
                     // across two medleys on 24 Sep.
                     const d = await r.json();
-                    const merged = Object.assign({}, d.playlists || {});
+                    const merged = Object.assign({}, pickSet(d.playlists, d.mine));
                     for (const n of dirtyPlaylists) {
                         if (playlists[n]) merged[n] = playlists[n];
                     }
@@ -2133,8 +2133,12 @@
                     return;
                 }
                 if (r.ok) {
+                    // The reply carries BOTH sets, and for an editor or an
+                    // account the one that matters is `mine`: taking d.playlists
+                    // here put the shared (empty) set back and made a playlist
+                    // the user had just made vanish in front of them.
                     const d = await r.json();
-                    playlists = d.playlists || {};
+                    playlists = pickSet(d.playlists, d.mine);
                     playlistRev = d.rev || 0;
                     localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
                     dirtyPlaylists.clear();

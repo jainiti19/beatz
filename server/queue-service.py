@@ -244,7 +244,13 @@ def check_password(pw, hashed):
 
 def session_key():
     """The signing key, generated on first use. Read on every call (like the
-    stem key) so rotating it takes effect without a restart."""
+    stem key) so rotating it takes effect without a restart.
+
+    O_EXCL, not a plain write: the service is threaded, and two requests
+    arriving before the file exists would otherwise each generate a key and
+    each overwrite the other. Cookies signed with the loser's key then fail to
+    verify, which looks exactly like a login silently not sticking. Whoever
+    loses the create reads the winner's key instead."""
     try:
         with open(SESSION_KEY_FILE, 'rb') as f:
             k = f.read().strip()
@@ -254,7 +260,11 @@ def session_key():
         pass
     k = secrets.token_bytes(32)
     os.makedirs(os.path.dirname(SESSION_KEY_FILE), exist_ok=True)
-    fd = os.open(SESSION_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        fd = os.open(SESSION_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        with open(SESSION_KEY_FILE, 'rb') as f:
+            return f.read().strip()
     with os.fdopen(fd, 'wb') as f:
         f.write(k)
     return k
