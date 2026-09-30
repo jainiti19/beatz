@@ -2462,8 +2462,12 @@
                     notePlaylists(`\u201c${d.claimed.name}\u201d from ${d.claimed.owner} was added to Shared with me.`);
                     await loadPresets();
                     await loadClips();
+                } else if (r.status === 400 && d.error === 'that is your own playlist') {
+                    notePlaylists('That link is for your own playlist.');
                 } else if (r.status === 404 || r.status === 400) {
-                    notePlaylists(d.error || 'That share link is not valid.');
+                    // A revoked link and a mistyped one look the same from
+                    // here, and both need the same next step.
+                    notePlaylists('That share link is not valid any more — it may have been revoked, or the link lost its ending on the way. Ask for a fresh one.');
                 }
             } catch (e) { /* offline: the next load tries again */ }
         }
