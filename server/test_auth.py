@@ -84,7 +84,8 @@ class ServiceCase(unittest.TestCase):
         cls.proc = subprocess.Popen(
             [sys.executable, SERVICE, '--dev', '--port', str(cls.port),
              '--queue', os.path.join(cls.tmp, 'requests.jsonl'), '--web', WEB],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            stdout=open(os.path.join(cls.tmp, 'server.log'), 'wb'),
+            stderr=subprocess.STDOUT)
         deadline = time.time() + 10
         while time.time() < deadline:
             if cls.proc.poll() is not None:

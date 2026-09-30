@@ -39,6 +39,12 @@ CLIPS_LOCK = threading.Lock()
 # grant, not just a song list. Lock order, if these ever nest: PLAYLISTS_LOCK
 # first, then PRESETS_LOCK/CLIPS_LOCK, never the reverse.
 PLAYLISTS_LOCK = threading.Lock()
+# users.json is read-modify-written by signup and by /api/users, which also
+# share one ".tmp" name -- two at once could interleave inside that file or
+# lose an account. SESSION_KEY_LOCK covers the same first-use window for the
+# cookie signing key.
+USERS_LOCK = threading.Lock()
+SESSION_KEY_LOCK = threading.Lock()
 
 # Signs the short-lived tokens that let the R2 Worker serve audio from the
 # edge. Read at every mint rather than cached, so rotating the file takes
@@ -367,28 +373,36 @@ def session_key():
     """The signing key, generated on first use. Read on every call (like the
     stem key) so rotating it takes effect without a restart.
 
-    O_EXCL, not a plain write: the service is threaded, and two requests
-    arriving before the file exists would otherwise each generate a key and
-    each overwrite the other. Cookies signed with the loser's key then fail to
-    verify, which looks exactly like a login silently not sticking. Whoever
-    loses the create reads the winner's key instead."""
+    Read RAW, never stripped: the key is 32 random bytes, and .strip() silently
+    dropped the last byte whenever it happened to be whitespace -- cookies were
+    then signed with 32 bytes and verified with 31, so about one generated key
+    in forty made every later login fail. (Found by looping test_auth.py until
+    it failed: one run in twenty-five, and the same shape of flake had already
+    cost a browser test an afternoon.) Generation is under a lock and lands with
+    os.replace, so a reader never sees a half-written or empty file either."""
     try:
         with open(SESSION_KEY_FILE, 'rb') as f:
-            k = f.read().strip()
+            k = f.read()
         if k:
             return k
     except OSError:
         pass
-    k = secrets.token_bytes(32)
-    os.makedirs(os.path.dirname(SESSION_KEY_FILE), exist_ok=True)
-    try:
-        fd = os.open(SESSION_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        with open(SESSION_KEY_FILE, 'rb') as f:
-            return f.read().strip()
-    with os.fdopen(fd, 'wb') as f:
-        f.write(k)
-    return k
+    with SESSION_KEY_LOCK:
+        try:                    # another thread may have written it while we waited
+            with open(SESSION_KEY_FILE, 'rb') as f:
+                k = f.read()
+            if k:
+                return k
+        except OSError:
+            pass
+        k = secrets.token_bytes(32)
+        os.makedirs(os.path.dirname(SESSION_KEY_FILE), exist_ok=True)
+        tmp = SESSION_KEY_FILE + '.tmp'
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'wb') as f:
+            f.write(k)
+        os.replace(tmp, SESSION_KEY_FILE)   # atomic: a reader never sees it empty
+        return k
 
 
 def make_session(user):
@@ -1287,14 +1301,15 @@ class Handler(BaseHTTPRequestHandler):
         # Read-modify-write the WHOLE file, keeping every other key it holds:
         # users.json also carries the accounts map, and writing a fresh
         # {"users": ...} over it deleted every signup on the site.
-        d = _read_users_file()
-        known = d.get('users') if isinstance(d.get('users'), dict) else {}
-        if data.get('delete'):
-            known.pop(name, None)
-        else:
-            known[name] = {'role': role}
-        d['users'] = known
-        _write_users(d)     # atomic, and 0600: the file holds password hashes
+        with USERS_LOCK:
+            d = _read_users_file()
+            known = d.get('users') if isinstance(d.get('users'), dict) else {}
+            if data.get('delete'):
+                known.pop(name, None)
+            else:
+                known[name] = {'role': role}
+            d['users'] = known
+            _write_users(d)     # atomic, and 0600: it holds password hashes
         return self._json(200, {'ok': True, 'user': name, 'role': role,
                                 'deleted': bool(data.get('delete'))})
 
@@ -1324,20 +1339,21 @@ class Handler(BaseHTTPRequestHandler):
         user, pw = self._auth_body()
         if user is None:
             return
-        d = _read_users_file()
-        accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
-        # A name already used by a Caddy login is refused too: otherwise a
-        # signup could shadow `admin` and the two would disagree about who
-        # that is.
-        if user in accts or user in admins() or user in users():
-            return self._json(409, {'error': 'That name is taken.'})
-        try:
-            accts[user] = {'pw': hash_password(pw), 'role': 'editor',
-                           'created': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
-        except ImportError:
-            return self._json(500, {'error': 'Server is missing bcrypt; ask the admin to install it.'})
-        d[ACCOUNTS_KEY] = accts
-        _write_users(d)
+        with USERS_LOCK:
+            d = _read_users_file()
+            accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
+            # A name already used by a Caddy login is refused too: otherwise a
+            # signup could shadow `admin` and the two would disagree about who
+            # that is.
+            if user in accts or user in admins() or user in users():
+                return self._json(409, {'error': 'That name is taken.'})
+            try:
+                accts[user] = {'pw': hash_password(pw), 'role': 'editor',
+                               'created': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+            except ImportError:
+                return self._json(500, {'error': 'Server is missing bcrypt; ask the admin to install it.'})
+            d[ACCOUNTS_KEY] = accts
+            _write_users(d)
         return self._json(200, {'ok': True, 'user': user, 'role': 'editor'},
                           cookie=self._session_cookie(user))
 
