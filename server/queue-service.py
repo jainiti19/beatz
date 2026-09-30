@@ -29,7 +29,7 @@ and recover from. Nothing here processes a song; it only records the ask.
 
 Usage: queue-service.py [--port 8931] [--queue /opt/beatznbox/queue/requests.jsonl]
 """
-import argparse, base64, hashlib, hmac, json, os, re, threading, time
+import argparse, base64, hashlib, hmac, json, os, re, secrets, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PRESETS_LOCK = threading.Lock()
@@ -1190,6 +1190,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return self._json(200, {'ok': True, 'token': token,
                                     'exp': exp, 'base': base})
+        if DEV and not path.startswith('/api/'):
+            return self.serve_static(path)
         if path == '/api/status':
             # The player asks about the ids it submitted; it holds those in
             # localStorage, so nothing here has to remember who anyone is.
@@ -1223,10 +1225,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global DEV, WEB_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8931)
     ap.add_argument('--queue', default='/opt/beatznbox/queue/requests.jsonl')
+    ap.add_argument('--web', default='/opt/beatznbox/web')
+    ap.add_argument('--dev', action='store_true',
+                    help='no Caddy in front: ignore X-Beatz-User, use the '
+                         'session cookie only, and serve the player from --web')
     a = ap.parse_args()
+    DEV = a.dev
+    WEB_DIR = a.web
     Handler.queue_path = a.queue
     os.makedirs(os.path.dirname(a.queue), exist_ok=True)
     ThreadingHTTPServer(('127.0.0.1', a.port), Handler).serve_forever()
