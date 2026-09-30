@@ -463,6 +463,21 @@ def auth_record(ip):
                 AUTH_ATTEMPTS.pop(k, None)
 
 
+# ---- live lyrics (30 Sep) ------------------------------------------------
+# The host's player publishes what it is playing; a follower who has the link
+# polls it and works out where the song is NOW. Deliberately not a socket:
+# this service is http.server with no async, a singalong tolerates about a
+# second of lag, and the follower extrapolates between polls -- so only the
+# phase is refreshed, not every movement. The reply carries the AGE of the
+# snapshot rather than a timestamp, so a follower whose clock is wrong still
+# lands on the right line.
+#
+# A session is one login, keyed by a random code that IS the credential: there
+# is no listing endpoint, and a stopped session is gone.
+LIVE_TTL = 15 * 60          # no update for this long and the session is over
+LIVE_MAX = 50               # sessions kept; the oldest go first
+LIVE_LOCK = threading.Lock()
+
 MAX_BODY = 4096          # a request is a song name, not a payload
 MAX_LYRICS = 32768       # a long song is a few KB; this is generous
 MAX_FIELD = 120
@@ -1117,6 +1132,110 @@ class Handler(BaseHTTPRequestHandler):
             os.replace(tmp, self._clips_path())     # atomic: no half-written file
         return self._json(200, {'ok': True, 'clip': clean})
 
+    # ---- live lyrics ---------------------------------------------------
+    def _live_path(self):
+        return os.path.join(os.path.dirname(self.queue_path), 'live.json')
+
+    def _live_load(self):
+        """{code: session}, expired ones dropped. Kept in a file rather than in
+        memory so a service restart mid-set does not orphan a link somebody is
+        already following. Callers hold LIVE_LOCK."""
+        try:
+            with open(self._live_path(), encoding='utf-8') as f:
+                d = json.load(f)
+        except Exception:
+            return {}
+        if not isinstance(d, dict):
+            return {}
+        now = time.time()
+        return {c: s for c, s in d.items()
+                if isinstance(s, dict) and now - float(s.get('updated') or 0) < LIVE_TTL}
+
+    def _live_write(self, sessions):
+        tmp = self._live_path() + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(sessions, f, ensure_ascii=False)
+        os.replace(tmp, self._live_path())      # atomic, like every other file
+
+    def post_live(self):
+        """The host's publish. One live session per login: the first publish
+        makes the code, later ones carry it back."""
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        user, role = self._who()
+        if role not in ('editor', 'admin'):
+            return self._json(403, {'error': 'read-only', 'role': role})
+        dirname = str(data.get('dir') or '')
+        if not re.fullmatch(r'[A-Za-z0-9_]+', dirname):
+            return self._json(400, {'error': 'bad song'})
+        try:
+            pos = max(0.0, min(21600.0, float(data.get('pos') or 0)))
+            tempo = min(4.0, max(0.1, float(data.get('tempo') or 1)))
+        except (TypeError, ValueError):
+            return self._json(400, {'error': 'bad position'})
+        code = str(data.get('code') or '').strip()
+        with LIVE_LOCK:
+            sessions = self._live_load()
+            if not code or code not in sessions or sessions[code].get('user') != user:
+                code = secrets.token_urlsafe(8)     # 11 chars: the whole secret
+                sessions = {c: s for c, s in sessions.items() if s.get('user') != user}
+            sessions[code] = {'user': user, 'dir': dirname,
+                              'title': str(data.get('title') or '')[:80],
+                              'pos': round(pos, 2), 'playing': bool(data.get('playing')),
+                              'tempo': round(tempo, 3), 'updated': time.time()}
+            if len(sessions) > LIVE_MAX:
+                for c, _s in sorted(sessions.items(),
+                                    key=lambda kv: kv[1].get('updated') or 0)[:len(sessions) - LIVE_MAX]:
+                    del sessions[c]
+            self._live_write(sessions)
+        return self._json(200, {'ok': True, 'code': code})
+
+    def post_live_stop(self):
+        user, _ = self._who()
+        with LIVE_LOCK:
+            sessions = self._live_load()
+            mine = [c for c, s in sessions.items() if s.get('user') == user]
+            for c in mine:
+                del sessions[c]
+            if mine:
+                self._live_write(sessions)
+        return self._json(200, {'ok': True})
+
+    def get_live(self, code):
+        """PUBLIC -- no login, no Caddy. The code is the credential. `age` is
+        how old the snapshot is, in ms, so the follower can extrapolate without
+        trusting its own clock against the server's."""
+        with LIVE_LOCK:
+            s = self._live_load().get(code)
+        if not s:
+            return self._json(404, {'ok': False, 'error': 'no such session'})
+        return self._json(200, {
+            'ok': True, 'dir': s.get('dir'), 'title': s.get('title'),
+            'pos': s.get('pos'), 'playing': bool(s.get('playing')),
+            'tempo': s.get('tempo'),
+            'age': int(max(0.0, time.time() - float(s.get('updated') or 0)) * 1000),
+        })
+
+    def get_live_lyrics(self, code):
+        """PUBLIC: this session's song lyrics and nothing else. Serving them
+        here rather than opening /stems/* keeps the rest of the library behind
+        the password: only the one song being broadcast is readable, and only
+        by a holder of the code."""
+        with LIVE_LOCK:
+            s = self._live_load().get(code)
+        if not s:
+            return self._json(404, {'error': 'no such session'})
+        dirname = str(s.get('dir') or '')
+        if not re.fullmatch(r'[A-Za-z0-9_]+', dirname):
+            return self._json(404, {'error': 'no lyrics for this song'})
+        try:
+            with open(os.path.join(WEB_DIR, 'stems', dirname, 'lyrics_timed.json'),
+                      encoding='utf-8') as f:
+                return self._json(200, json.load(f))
+        except Exception:
+            return self._json(404, {'error': 'no lyrics for this song'})
+
     # ---- share links --------------------------------------------------
     # Sharing is by link rather than by typing somebody's login: the owner
     # makes a view link or an edit link and sends it however they like, and
@@ -1452,6 +1571,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_presets()
         if path == '/api/clips':
             return self.post_clips()
+        if path == '/api/live':
+            return self.post_live()
+        if path == '/api/live/stop':
+            return self.post_live_stop()
         if path == '/api/shares':
             return self.post_shares()
         if path == '/api/share-links':
@@ -1603,6 +1726,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.get_users()
         if path == '/api/me':
             return self.get_me()
+        if path.startswith('/api/live/'):
+            # PUBLIC: /api/live/<code> and /api/live/<code>/lyrics. No login
+            # and no X-Beatz-User check -- the code in the URL is the whole
+            # credential, exactly like a stem token.
+            rest = path[len('/api/live/'):].strip('/')
+            if rest.endswith('/lyrics'):
+                return self.get_live_lyrics(rest[:-len('/lyrics')].strip('/'))
+            return self.get_live(rest)
         if path == '/api/stem-token':
             token, exp = mint_stem_token()
             if not token:

@@ -393,6 +393,14 @@
            worse than the stage it already has, and on the stage the lyrics
            are already here. */
         body.big-screen .btn-popout { display: none; }
+        /* The live-lyrics link is for the hosts: a viewer login cannot
+           publish (the server refuses it), so there is nothing to offer. */
+        body.viewer .btn-live { display: none !important; }
+        .live-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                    font-size: 12px; color: #9a9aa8; padding: 6px 0; }
+        .live-url { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap; font-family: ui-monospace, monospace; }
+        .live-row[hidden] { display: none; }
         @media (max-width: 820px), (pointer: coarse) { .btn-popout { display: none; } }
 
         .presets {
@@ -2226,6 +2234,74 @@
             }
         }
 
+        /* ===== Live lyrics =====
+         * While this is on, the song being played is published about once a
+         * second and anyone with the link follows along on their own phone.
+         * The payload is tiny and the follower EXTRAPOLATES between polls, so
+         * a second's cadence is enough; it is one request per second per
+         * follower, which this service carries many times over. The page they
+         * get is web/live.html -- no account, no controls, just the lyrics. */
+        let liveOn = false;
+        let liveCode = null;
+        let liveTimer = null;
+
+        function liveUrl() {
+            return location.origin + '/live.html#' + (liveCode || '');
+        }
+
+        /* Fired on every state change and on the once-a-second tick; a no-op
+         * when sharing is off, so the call sites can be unconditional. */
+        async function publishLive() {
+            if (!liveOn || currentSongIndex < 0 || !currentSongDir) return;
+            const song = songs[currentSongIndex];
+            try {
+                const r = await fetch('/api/live', { method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: liveCode, dir: currentSongDir,
+                        title: (song && song.name) || currentSongDir,
+                        pos: songPosition(), playing: isPlaying, tempo: tempo }) });
+                if (!r.ok) return;
+                const d = await r.json();
+                if (d.code && d.code !== liveCode) {
+                    liveCode = d.code;
+                    const u = document.getElementById('liveUrl');
+                    if (u) u.textContent = liveUrl();
+                }
+            } catch (e) { /* offline: the next tick tries again */ }
+        }
+
+        function startLiveShare() {
+            liveOn = true;
+            publishLive();
+            if (liveTimer) clearInterval(liveTimer);
+            let tick = 0;
+            liveTimer = setInterval(() => {
+                if (!liveOn) return;
+                tick += 1;
+                // A paused song still needs a heartbeat, or a long pause
+                // counts as "gone" and the session lapses.
+                if (isPlaying || tick % 30 === 0) publishLive();
+            }, 1000);
+            const row = document.getElementById('liveRow');
+            if (row) row.hidden = false;
+        }
+
+        async function stopLiveShare() {
+            liveOn = false;
+            if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+            const row = document.getElementById('liveRow');
+            if (row) row.hidden = true;
+            try { await fetch('/api/live/stop', { method: 'POST', credentials: 'include' }); }
+            catch (e) { /* it lapses by itself within the quarter hour */ }
+            liveCode = null;
+        }
+
+        function toggleLiveShare() { return liveOn ? stopLiveShare() : startLiveShare(); }
+
+        async function copyLiveUrl() {
+            try { await navigator.clipboard.writeText(liveUrl()); } catch (e) {}
+        }
+
         /* ===== Sharing a playlist =====
          * A link, not a username: the owner makes one and sends it however they
          * like, and whoever opens it signs in and CLAIMS it -- which is what
@@ -2701,6 +2777,9 @@
                     <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
                     <button class="btn btn-expand" onclick="expandButton()"
                             title="Lyrics view" aria-label="Lyrics view">&#127908;</button>
+                    <button class="btn btn-expand btn-live" onclick="toggleLiveShare()"
+                            title="Share these lyrics as a live link"
+                            aria-label="Share live lyrics">&#128225;</button>
                     <button class="btn btn-expand btn-popout" onclick="popOutLyrics()"
                             title="Lyrics in their own window, for a TV"
                             aria-label="Pop out lyrics"><svg width="16" height="16"
@@ -2708,6 +2787,14 @@
                             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
                             style="display:block;margin:auto"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path
                             d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>
+                </div>
+                <!-- The live link, once sharing is on. Anyone with it follows
+                     the lyrics on their own phone -- no account needed. -->
+                <div class="live-row" id="liveRow" hidden>
+                    <span>Live lyrics</span>
+                    <span class="live-url" id="liveUrl"></span>
+                    <button class="share-btn" onclick="copyLiveUrl()">Copy</button>
+                    <button class="share-btn" onclick="stopLiveShare()">Stop</button>
                 </div>
                 <div class="presets">
                     <button class="preset-btn" id="pre-singalong" onclick="applyPreset('singalong')">Sing along</button>
@@ -3077,6 +3164,7 @@
 
             // Load lyrics
             loadLyrics(song.dir);
+            publishLive();          // a live follower changes song with us
 
             // Warm the next song while this one plays.
             prefetchNext();
@@ -3889,6 +3977,7 @@ body {
                 pauseOffset = pos;
             }
             renderTempo();
+            publishLive();          // tempo changes how fast a follower drifts
         }
 
         function renderTempo() {
@@ -3954,6 +4043,7 @@ body {
             isPlaying = true;
             document.getElementById('playBtn').innerHTML = '&#10074;&#10074;';
             seekInterval = setInterval(updateSeek, 200);
+            publishLive();
 
             // Fades are scheduled on the audio clock, not driven by a timer,
             // so they stay smooth when the tab is backgrounded and timers drop
@@ -3992,6 +4082,7 @@ body {
             clearClipFade();       // resuming mid-song starts at full level
             document.getElementById('playBtn').innerHTML = '&#9654;';
             clearInterval(seekInterval);
+            publishLive();         // followers see "paused" at the right spot
         }
 
         function stopPlayback() {
@@ -4033,6 +4124,7 @@ body {
             document.getElementById('currentTime').textContent = formatTime(pauseOffset);
             userScrolledAt = 0;   // an explicit seek should snap the lyrics, grace period or not
             if (wasPlayingBeforeSeek) startPlayback();
+            else publishLive();
         }
 
         function updateSeek() {

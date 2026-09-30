@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>BeatznBox — live lyrics</title>
+<style>
+  /* The stage look, shared with the player's own Lyrics view: what is being
+     sung is big, its neighbours are dim. Sized from BOTH viewport axes --
+     vh alone runs off the side of a narrow phone, vw alone collapses on a
+     short wide one. */
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #0E1413; color: #E6EDEC; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex; flex-direction: column;
+    --bs-now:   clamp(20px, min(7.2vh, 8.5vw), 96px);
+    --bs-line:  clamp(13px, min(4.2vh, 5vw), 52px);
+    --bs-roman: clamp(11px, min(3.1vh, 3.8vw), 38px);
+    --bs-title: clamp(12px, min(3vh, 3.6vw), 34px);
+    --bs-pad:   clamp(8px, 2.2vh, 30px);
+    transition: opacity .4s;
+  }
+  /* Lost the host: dim rather than blank -- the last line is still useful. */
+  body.stale { opacity: .45; }
+  #head { flex: 0 0 auto; text-align: center; padding: var(--bs-pad) var(--bs-pad) 0; }
+  #title {
+    color: #6E8B87; font-size: var(--bs-title);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #status { color: #4A5453; font-size: clamp(10px, 2vh, 16px); margin-top: .3em; }
+  #lyrics {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none;
+    /* Half-viewport padding, not centring: a centred flex column with
+       overflow cannot be scrolled back to its start. */
+    padding: 45vh calc(var(--bs-pad) * 1.4);
+    display: flex; flex-direction: column; gap: calc(var(--bs-pad) * 0.55);
+  }
+  #lyrics::-webkit-scrollbar { display: none; }
+  .lyrics-line {
+    font-size: var(--bs-line); line-height: 1.25; color: #4A5453;
+    text-align: center; overflow-wrap: break-word; transition: color .3s ease;
+  }
+  .lyrics-line.past { color: #2B3534; }
+  .lyrics-line.active { font-size: var(--bs-now); line-height: 1.2; color: #4DB6AC; font-weight: 600; }
+  .lyric-roman { display: none; }
+  .lyrics-line.active .lyric-roman {
+    display: block; font-size: var(--bs-roman); line-height: 1.4;
+    font-weight: 400; color: #6E8B87; margin-top: 0.35em; letter-spacing: 0.4px;
+  }
+  .no-lyrics { color: #4A5453; font-style: italic; text-align: center; font-size: var(--bs-line); }
+  #foot {
+    flex: 0 0 auto; text-align: center; padding: 10px var(--bs-pad) calc(10px + env(safe-area-inset-bottom));
+  }
+  #foot a { color: #4DB6AC; font-size: 12px; text-decoration: none; opacity: .75; }
+</style></head>
+<body>
+<div id="head">
+  <div id="title">Waiting for the host…</div>
+  <div id="status"></div>
+</div>
+<div id="lyrics"></div>
+<div id="foot">
+  <a href="/">BeatznBox · create an account to explore the whole library</a>
+</div>
+<script>
+/* A follower's view of somebody else's song.
+ *
+ * The host's player publishes {pos, playing, tempo} about once a second; this
+ * page polls the code in its own URL hash and works out where the song is NOW
+ * -- the reply carries the AGE of the snapshot instead of a timestamp, so a
+ * phone whose clock is minutes out still lands on the right line. Between
+ * polls the position is extrapolated locally, so the highlight moves smoothly
+ * and only the phase is refreshed.
+ *
+ * No account, no cookie, no controls: the code in the URL is the whole thing
+ * you need, which is what makes it work in a park. */
+const CODE = (location.hash || '').replace(/^#/, '').trim();
+const MAX_WORDS_PER_SEC = 5.0;      // as the player: a "crushed" line never lights
+const els = {
+  title: document.getElementById('title'),
+  status: document.getElementById('status'),
+  lyrics: document.getElementById('lyrics'),
+};
+let lines = null;         // timed lyrics for the current song (or null)
+let crushed = [];         // per line: too many words to have been sung as written
+let state = null;         // last snapshot
+let fetchedAt = 0;        // performance.now() when it arrived
+let staleMs = 0;          // how old the position was at that moment
+let shownDir = null;      // which song `lines` belongs to
+let lastIdx = -2;
+let gone = false;
+
+function jd(s) { return String(s == null ? '' : s); }
+
+function renderLines() {
+  if (!lines) {
+    els.lyrics.innerHTML = '<div class="no-lyrics">' +
+      (gone ? 'The host has stopped sharing.' : 'No lyrics for this song.') + '</div>';
+    return;
+  }
+  els.lyrics.innerHTML = lines.map((L, i) => {
+    const text = jd(L.text);
+    const words = Array.isArray(L.words) ? L.words : [];
+    // The romanised echo, revealed by CSS only under the line being sung --
+    // for anyone who cannot read the script at speed.
+    const roman = words.length && /[؀-ۿऀ-ൿ]/.test(text)
+      ? '<div class="lyric-roman">' + words.map(w => jd(w.roman || w.word)).join(' ') + '</div>'
+      : '';
+    return '<div class="lyrics-line" id="lyric-' + i + '">' +
+           escapeHtml(text) + roman + '</div>';
+  }).join('');
+  lastIdx = -2;
+}
+
+function escapeHtml(s) {
+  return jd(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function isCrushed(L) {
+  const n = Array.isArray(L.words) ? L.words.length : 0;
+  const span = (L.end || 0) - (L.start || 0);
+  return span > 0 && n / span > MAX_WORDS_PER_SEC;
+}
+
+/* Song seconds right now: the snapshot's position, plus however long ago it
+ * was taken (its age, plus half the round trip), times the host's tempo. */
+function nowPos() {
+  if (!state) return 0;
+  const extra = (performance.now() - fetchedAt) / 1000;
+  if (!state.playing) return state.pos || 0;
+  return (state.pos || 0) + ((staleMs / 1000) + extra) * (state.tempo || 1);
+}
+
+function computeActive(t) {
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const L = lines[i];
+    if (typeof L.start !== 'number') continue;
+    if (t < L.start) break;
+    idx = i;
+    if (typeof L.end === 'number' && t < L.end) break;
+  }
+  while (idx >= 0 && crushed[idx]) idx--;   // never light a crushed line
+  return idx;
+}
+
+function tick() {
+  if (!lines) return;
+  const t = nowPos();
+  const idx = computeActive(t);
+  if (idx !== lastIdx) {
+    if (lastIdx >= 0) {
+      const prev = document.getElementById('lyric-' + lastIdx);
+      if (prev) prev.className = 'lyrics-line past';
+    }
+    const el = document.getElementById('lyric-' + idx);
+    if (el) {
+      el.className = 'lyrics-line active';
+      const box = els.lyrics;
+      // Instant, never smooth: this runs every line, and a smooth scroll that
+      // has not finished when the next line lands reads as judder.
+      box.scrollTop = el.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2;
+    }
+    lastIdx = idx;
+  }
+  // Dim when the updates stop coming: a locked phone, a tunnel, a host who
+  // walked away. The last line stays readable rather than blanking.
+  document.body.classList.toggle('stale', performance.now() - fetchedAt > 15000);
+}
+
+async function loadLyrics(dir) {
+  shownDir = dir;
+  lines = null;
+  crushed = [];
+  try {
+    const r = await fetch('/api/live/' + encodeURIComponent(CODE) + '/lyrics',
+                          { cache: 'no-store' });
+    if (r.ok) lines = await r.json();
+  } catch (e) { /* offline: leave it blank until the next song change */ }
+  if (Array.isArray(lines)) crushed = lines.map(isCrushed);
+  renderLines();
+}
+
+async function poll() {
+  if (!CODE) {
+    els.status.textContent = 'No session in this link.';
+    return;
+  }
+  const t0 = performance.now();
+  try {
+    const r = await fetch('/api/live/' + encodeURIComponent(CODE), { cache: 'no-store' });
+    if (r.status === 404) {
+      gone = true;
+      state = null;
+      els.title.textContent = 'BeatznBox';
+      els.status.textContent = 'The host has stopped sharing.';
+      renderLines();
+      return;
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    fetchedAt = performance.now();
+    staleMs = (d.age || 0) + (fetchedAt - t0) / 2;   // snapshot age + half the trip
+    state = d;
+    gone = false;
+    els.title.textContent = d.title || d.dir || 'BeatznBox';
+    els.status.textContent = d.playing ? '' : 'paused';
+    document.body.classList.remove('stale');
+    if (d.dir !== shownDir) await loadLyrics(d.dir);
+  } catch (e) {
+    // A dropped poll is not an error worth showing; the dimming says it.
+  }
+}
+
+renderLines();
+if (!CODE) {
+  els.status.textContent = 'No session in this link.';
+} else {
+  poll();
+  setInterval(poll, 1000);
+  setInterval(tick, 100);
+}
+</script>
+</body></html>

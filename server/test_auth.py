@@ -513,5 +513,96 @@ class Sharing(ServiceCase):
                         'every concurrent grant must survive the read-modify-write')
 
 
+class Live(ServiceCase):
+    """Live lyrics: the host publishes, anyone with the code follows, only the
+    broadcast song's lyrics are reachable, and a viewer cannot publish."""
+
+    seed_accounts = {
+        'host': ('hostpass123', 'editor'),
+        'dave': ('davepass123', 'viewer'),      # a viewer-role login, as `beatz` is
+    }
+
+    SONG = 'Aa_Chal_Ke_Tujhe'
+
+    def publish(self, cookie, **over):
+        body = {'dir': self.SONG, 'title': 'Aa Chal Ke Tujhe', 'pos': 41.5,
+                'playing': True, 'tempo': 1}
+        body.update(over)
+        return self.request('POST', '/api/live', body, cookie=cookie)
+
+    def test_01_publish_then_follow_anonymously(self):
+        host = self.login_cookie('host', 'hostpass123')
+        status, d, _ = self.publish(host)
+        self.assertEqual(status, 200, d)
+        code = d['code']
+        self.assertGreaterEqual(len(code), 8, 'the code is the whole credential')
+
+        # No cookie, no X-Beatz-User: exactly what a follower in a park has.
+        status, s, _ = self.request('GET', '/api/live/' + code)
+        self.assertEqual(status, 200, s)
+        self.assertEqual(s['dir'], self.SONG)
+        self.assertEqual(s['title'], 'Aa Chal Ke Tujhe')
+        self.assertAlmostEqual(s['pos'], 41.5, places=2)
+        self.assertTrue(s['playing'])
+        self.assertEqual(s['tempo'], 1)
+        self.assertLess(s['age'], 5000, 'age lets the follower extrapolate')
+
+    def test_02_only_the_broadcast_song_is_reachable(self):
+        host = self.login_cookie('host', 'hostpass123')
+        status, d, _ = self.publish(host, pos=0, playing=False)
+        code = d['code']
+        status, lyrics, _ = self.request('GET', '/api/live/%s/lyrics' % code)
+        self.assertEqual(status, 200)
+        self.assertIsInstance(lyrics, list)
+        self.assertTrue(lyrics and 'start' in lyrics[0] and 'text' in lyrics[0],
+                        'the same shape the player parses')
+
+        # A song with no timed lyrics answers 404, so the follower can say so.
+        status, d, _ = self.publish(host, dir='Fanna', title='Fanna', code=code)
+        self.assertEqual(status, 200, d)
+        self.assertEqual(d['code'], code, 'the same session keeps its code')
+        status, nothing, _ = self.request('GET', '/api/live/%s/lyrics' % code)
+        self.assertEqual(status, 404)
+
+        for path in ('/api/live/nosuchcode', '/api/live/nosuchcode/lyrics'):
+            status, _, _ = self.request('GET', path)
+            self.assertEqual(status, 404, path)
+
+    def test_03_a_viewer_cannot_publish_and_nobody_sees_the_session_list(self):
+        dave = self.login_cookie('dave', 'davepass123')
+        status, d, _ = self.publish(dave)
+        self.assertEqual(status, 403, d)
+
+        # Anonymous publish is refused the same way, and there is no way to
+        # list sessions: the code is the credential.
+        status, d, _ = self.request('POST', '/api/live',
+                                    {'dir': self.SONG, 'title': 'x', 'pos': 0,
+                                     'playing': False, 'tempo': 1})
+        self.assertEqual(status, 403, d)
+        status, d, _ = self.request('GET', '/api/live')
+        self.assertEqual(status, 404, d)
+
+    def test_04_stop_ends_the_session_and_a_new_one_gets_a_new_code(self):
+        host = self.login_cookie('host', 'hostpass123')
+        status, d, _ = self.publish(host)
+        first = d['code']
+        status, d, _ = self.request('POST', '/api/live/stop', {}, cookie=host)
+        self.assertEqual(status, 200, d)
+        self.assertEqual(self.request('GET', '/api/live/' + first)[0], 404)
+
+        status, d, _ = self.publish(host)
+        self.assertNotEqual(d['code'], first)
+
+    def test_05_bad_input_is_refused(self):
+        host = self.login_cookie('host', 'hostpass123')
+        for body in ({'dir': '../etc', 'pos': 0},
+                     {'dir': 'a b', 'pos': 0},
+                     {'dir': self.SONG, 'pos': 'nonsense'}):
+            status, d, _ = self.request('POST', '/api/live',
+                                        dict({'title': '', 'playing': False, 'tempo': 1}, **body),
+                                        cookie=host)
+            self.assertEqual(status, 400, (body, d))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
