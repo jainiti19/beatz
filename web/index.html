@@ -1507,12 +1507,12 @@
         // refusal all fall through to the origin, which holds every file.
         const STEMS_MODE = new URLSearchParams(location.search).get('stems') || 'edge';
         let edgeBase = null, stemToken = null;
-        const edgeReady = (async () => {
+        const getStemToken = async () => {
             if (STEMS_MODE !== 'edge') return;
             try {
-                // Same-origin and behind the same password, so the browser
-                // attaches the credentials and only someone already logged in
-                // can get a token.
+                // Same-origin, so the browser attaches the login cookie. Only a
+                // signed-in caller gets a token now that the site is public --
+                // which is what keeps the audio closed to strangers.
                 const r = await fetch('/api/stem-token', { credentials: 'include' });
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const d = await r.json();
@@ -1527,7 +1527,19 @@
                 // Never fatal. The origin serves every one of these files.
                 console.warn('stems: could not get an edge token — using the origin', e);
             }
-        })();
+        };
+        // Re-run after a login: the page loads BEFORE anybody signs in, so the
+        // load-time call is refused (403) and every song would fall back to the
+        // origin -- where the mp3s are still behind the site password, so the
+        // person gets a Sign in box and no audio. (30 Sep, on the first day the
+        // site was public.)
+        let edgeReady = getStemToken();
+        async function refreshStemToken() {
+            stemToken = null;
+            edgeBase = null;
+            edgeReady = getStemToken();
+            await edgeReady;
+        }
 
         /* A cache key is ALWAYS the origin URL, whoever served the bytes.
          * Otherwise switching ?stems= would orphan the whole held library, and
@@ -1633,6 +1645,11 @@
         let myShares = {};
         let myLinks = {};
         let sharesSupported = false;
+        // The names in YOUR OWN bucket -- the only ones a link can be made for.
+        // An admin also sees the old shared set (the music-night medleys), and
+        // those belong to nobody, so offering Share on them only ever produced
+        // "no such playlist". (30 Sep: 21 failed attempts in one minute.)
+        let ownNames = new Set();
 
         // Saved song setups. The server holds them (so a mix saved on a phone is
         // there on the NUC driving the speakers); localStorage is the offline
@@ -1767,6 +1784,7 @@
             for (const name of Object.keys(sharedMeta)) {
                 if (d.mine && name in d.mine) playlists[name] = d.mine[name];
             }
+            ownNames = new Set(Object.keys(d.mine || {}).filter(n => !(n in sharedMeta)));
             playlistRev = d.rev || 0;
             try { localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists)); } catch (e) {}
             renderPlaylistChips();
@@ -1835,6 +1853,7 @@
             document.getElementById('authPass').value = '';
             hideAuthScreen();
             await loadWhoami();
+            await refreshStemToken();      // the edge refused us a moment ago
             await claimShareFromUrl();     // first: the loads must see it
             await loadPlaylists();
             await loadPresets();
@@ -2110,7 +2129,7 @@
             // Sharing an own playlist, once we are looking at it -- same
             // one-at-a-time rule as the delete cross, so a crowded row cannot
             // be mis-tapped.
-            if (selectedPlaylist && !sharedMeta[selectedPlaylist] && sharesSupported && isAdmin()) {
+            if (selectedPlaylist && ownNames.has(selectedPlaylist) && sharesSupported && isAdmin()) {
                 html += `<span class="chip chip-share-btn" onclick="sharePlaylist('${esc(selectedPlaylist)}')"`
                      +  ` title="Share this playlist">`
                      +  `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"`
@@ -2258,6 +2277,14 @@
         let liveCode = null;
         let liveTimer = null;
 
+        /* The link is per LOGIN, not per press: the server hands back the same
+         * code every time this person shares, and remembering it here means the
+         * page can show it again after a reload without asking the server. One
+         * link, sent once, works all evening -- it is live while they share and
+         * says "the host has stopped sharing" when they are not. */
+        function liveCodeKey() { return 'beatznbox_live_' + ((ME && ME.user) || 'anon'); }
+        try { liveCode = localStorage.getItem(liveCodeKey()) || null; } catch (e) {}
+
         function liveUrl() {
             return location.origin + '/live.html#' + (liveCode || '');
         }
@@ -2277,6 +2304,7 @@
                 const d = await r.json();
                 if (d.code && d.code !== liveCode) {
                     liveCode = d.code;
+                    try { localStorage.setItem(liveCodeKey(), liveCode); } catch (e) {}
                     const u = document.getElementById('liveUrl');
                     if (u) u.textContent = liveUrl();
                 }
@@ -2296,7 +2324,11 @@
                 if (isPlaying || tick % 30 === 0) publishLive();
             }, 1000);
             const row = document.getElementById('liveRow');
-            if (row) row.hidden = false;
+            if (row) {
+                row.hidden = false;
+                const u = document.getElementById('liveUrl');
+                if (u) u.textContent = liveUrl();
+            }
             const btn = document.querySelector('.btn-live');
             if (btn) btn.classList.add('on');
         }
@@ -2394,7 +2426,14 @@
         async function createShareLink(role) {
             const name = document.getElementById('shareCard').dataset.name;
             const r = await shareRequest('/api/share-links', { name, role });
-            if (!r.ok) return notePlaylists('Could not create a share link.');
+            if (!r.ok) {
+                // Say what the server said: "no such playlist" is the useful
+                // one, and it means this playlist is not yours to share.
+                const d = await r.json().catch(() => ({}));
+                return noteShare(d.error === 'no such playlist'
+                    ? 'That playlist is not one of yours, so it cannot be shared.'
+                    : 'Could not create a link' + (d.error ? ': ' + d.error : '.'));
+            }
             const d = await r.json();
             myLinks = d.myLinks || myLinks;
             // Straight to the clipboard: sending it is the whole point.

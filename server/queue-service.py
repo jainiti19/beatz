@@ -207,6 +207,13 @@ def role_of(login):
 # they can be unit-tested on their own, and so a handler can hold one read of
 # the file and answer everything from it.
 
+def valid_code(code):
+    """A live session code: the random string in a live link. Checked by shape
+    so a hand-written path cannot become one."""
+    return bool(code) and isinstance(code, str) and 8 <= len(code) <= 32 \
+        and re.fullmatch(r'[A-Za-z0-9_-]+', code) is not None
+
+
 def valid_login(name):
     """A login name. Both kinds of login are restricted to the same charset --
     add-user.sh's Caddy logins and the signup form -- so one predicate covers
@@ -1146,24 +1153,40 @@ class Handler(BaseHTTPRequestHandler):
         return os.path.join(os.path.dirname(self.queue_path), 'live.json')
 
     def _live_load(self):
-        """{code: session}, expired ones dropped. Kept in a file rather than in
-        memory so a service restart mid-set does not orphan a link somebody is
-        already following. Callers hold LIVE_LOCK."""
+        """(sessions, codes) -- expired sessions dropped, codes kept.
+
+        `codes` maps a login to the code it always gets, so ONE link can be
+        sent once and used all evening: it is live while the host is sharing,
+        and answers "the host has stopped sharing" when they are not, instead
+        of a different link every time the button is pressed. Kept in a file
+        rather than memory so a restart mid-set does not orphan a link somebody
+        is already following. Callers hold LIVE_LOCK."""
         try:
             with open(self._live_path(), encoding='utf-8') as f:
                 d = json.load(f)
         except Exception:
-            return {}
+            return {}, {}
         if not isinstance(d, dict):
-            return {}
+            return {}, {}
         now = time.time()
-        return {c: s for c, s in d.items()
-                if isinstance(s, dict) and now - float(s.get('updated') or 0) < LIVE_TTL}
+        if 'sessions' not in d:                 # the shape from before codes
+            sessions = {c: s for c, s in d.items()
+                        if isinstance(s, dict) and 'user' in s}
+            codes = {}
+            for c, s in sessions.items():
+                if s.get('user'):
+                    codes.setdefault(s['user'], c)
+        else:
+            sessions = d.get('sessions') if isinstance(d.get('sessions'), dict) else {}
+            codes = d.get('codes') if isinstance(d.get('codes'), dict) else {}
+        sessions = {c: s for c, s in sessions.items()
+                    if isinstance(s, dict) and now - float(s.get('updated') or 0) < LIVE_TTL}
+        return sessions, codes
 
-    def _live_write(self, sessions):
+    def _live_write(self, sessions, codes):
         tmp = self._live_path() + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(sessions, f, ensure_ascii=False)
+            json.dump({'sessions': sessions, 'codes': codes}, f, ensure_ascii=False)
         os.replace(tmp, self._live_path())      # atomic, like every other file
 
     def post_live(self):
@@ -1183,12 +1206,19 @@ class Handler(BaseHTTPRequestHandler):
             tempo = min(4.0, max(0.1, float(data.get('tempo') or 1)))
         except (TypeError, ValueError):
             return self._json(400, {'error': 'bad position'})
-        code = str(data.get('code') or '').strip()
+        want = str(data.get('code') or '').strip()
         with LIVE_LOCK:
-            sessions = self._live_load()
-            if not code or code not in sessions or sessions[code].get('user') != user:
+            sessions, codes = self._live_load()
+            # The caller's own code, always the same one: what they sent if it
+            # is genuinely theirs, else whatever this login got last time, else
+            # a fresh one.
+            code = codes.get(user) or ''
+            if want and want in codes.values() and sessions.get(want, {}).get('user') == user:
+                code = want
+            if not code or not valid_code(code):
                 code = secrets.token_urlsafe(8)     # 11 chars: the whole secret
-                sessions = {c: s for c, s in sessions.items() if s.get('user') != user}
+            codes[user] = code
+            sessions = {c: s for c, s in sessions.items() if s.get('user') != user}
             sessions[code] = {'user': user, 'dir': dirname,
                               'title': str(data.get('title') or '')[:80],
                               'pos': round(pos, 2), 'playing': bool(data.get('playing')),
@@ -1197,18 +1227,20 @@ class Handler(BaseHTTPRequestHandler):
                 for c, _s in sorted(sessions.items(),
                                     key=lambda kv: kv[1].get('updated') or 0)[:len(sessions) - LIVE_MAX]:
                     del sessions[c]
-            self._live_write(sessions)
+            self._live_write(sessions, codes)
         return self._json(200, {'ok': True, 'code': code})
 
     def post_live_stop(self):
+        """Ends the SESSION, not the link: the code stays this login's, so the
+        link somebody already has keeps working the next time they share."""
         user, _ = self._who()
         with LIVE_LOCK:
-            sessions = self._live_load()
+            sessions, codes = self._live_load()
             mine = [c for c, s in sessions.items() if s.get('user') == user]
             for c in mine:
                 del sessions[c]
             if mine:
-                self._live_write(sessions)
+                self._live_write(sessions, codes)
         return self._json(200, {'ok': True})
 
     def get_live(self, code):
@@ -1216,7 +1248,8 @@ class Handler(BaseHTTPRequestHandler):
         how old the snapshot is, in ms, so the follower can extrapolate without
         trusting its own clock against the server's."""
         with LIVE_LOCK:
-            s = self._live_load().get(code)
+            sessions, _codes = self._live_load()
+            s = sessions.get(code)
         if not s:
             return self._json(404, {'ok': False, 'error': 'no such session'})
         return self._json(200, {
@@ -1232,7 +1265,8 @@ class Handler(BaseHTTPRequestHandler):
         the password: only the one song being broadcast is readable, and only
         by a holder of the code."""
         with LIVE_LOCK:
-            s = self._live_load().get(code)
+            sessions, _codes = self._live_load()
+            s = sessions.get(code)
         if not s:
             return self._json(404, {'error': 'no such session'})
         dirname = str(s.get('dir') or '')

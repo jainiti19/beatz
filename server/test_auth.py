@@ -519,6 +519,7 @@ class Live(ServiceCase):
 
     seed_accounts = {
         'host': ('hostpass123', 'editor'),
+        'host2': ('host2pass123', 'editor'),
         'dave': ('davepass123', 'viewer'),      # a viewer-role login, as `beatz` is
     }
 
@@ -582,16 +583,32 @@ class Live(ServiceCase):
         status, d, _ = self.request('GET', '/api/live')
         self.assertEqual(status, 404, d)
 
-    def test_04_stop_ends_the_session_and_a_new_one_gets_a_new_code(self):
+    def test_04_stop_ends_the_session_but_keeps_the_link(self):
         host = self.login_cookie('host', 'hostpass123')
         status, d, _ = self.publish(host)
         first = d['code']
         status, d, _ = self.request('POST', '/api/live/stop', {}, cookie=host)
         self.assertEqual(status, 200, d)
-        self.assertEqual(self.request('GET', '/api/live/' + first)[0], 404)
+        self.assertEqual(self.request('GET', '/api/live/' + first)[0], 404,
+                         'the session is over, so followers are told so')
 
+        # Pressing Share again reuses the SAME link: one link can be sent once
+        # and used all evening, instead of a new one every time.
         status, d, _ = self.publish(host)
-        self.assertNotEqual(d['code'], first)
+        self.assertEqual(d['code'], first)
+
+    def test_06_each_login_has_its_own_link(self):
+        host = self.login_cookie('host', 'hostpass123')
+        host2 = self.login_cookie('host2', 'host2pass123')
+        status, d, _ = self.publish(host)
+        a = d['code']
+        status, d, _ = self.publish(host2)
+        b = d['code']
+        self.assertNotEqual(a, b)
+        # Stopping one leaves the other untouched.
+        self.request('POST', '/api/live/stop', {}, cookie=host)
+        self.assertEqual(self.request('GET', '/api/live/' + a)[0], 404)
+        self.assertEqual(self.request('GET', '/api/live/' + b)[0], 200)
 
     def test_05_bad_input_is_refused(self):
         host = self.login_cookie('host', 'hostpass123')
