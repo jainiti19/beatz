@@ -128,7 +128,10 @@
         .share-head { font-size: 12px; color: #9a9aa8; margin-bottom: 6px; }
         .share-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
         .share-url { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
-                     white-space: nowrap; font-family: ui-monospace, monospace; }
+                     white-space: nowrap; font-family: ui-monospace, monospace;
+                     /* A tap selects the whole URL: the last-resort copy when
+                        the clipboard is unavailable (a phone over LAN, http) */
+                     user-select: all; -webkit-user-select: all; }
         .share-who { flex: 1 1 auto; }
         .share-role { color: #9a9aa8; }
         .share-btn { background: #202027; color: inherit; border: 1px solid #2a2a33;
@@ -396,6 +399,9 @@
         /* The live-lyrics link is for the hosts: a viewer login cannot
            publish (the server refuses it), so there is nothing to offer. */
         body.viewer .btn-live { display: none !important; }
+        /* Red while the link is live -- the same "we are on air" signal the
+           rest of the world uses. */
+        .btn-live.on { color: #ff5252 !important; border-color: #ff5252 !important; }
         .live-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
                     font-size: 12px; color: #9a9aa8; padding: 6px 0; }
         .live-url { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
@@ -1328,7 +1334,9 @@
   <div class="share-card-inner">
     <h3 id="shareTitle">Share</h3>
     <div class="share-section">
-      <div class="share-head">Links — anyone with one signs in and gets the playlist</div>
+      <div class="share-head">Links — anyone who opens one signs in and joins.
+        Revoking a link stops NEW people only; to take someone's access away,
+        use Remove under "Who has access".</div>
       <div id="shareLinks"></div>
       <div class="share-actions">
         <button class="share-btn" onclick="createShareLink('view')">Create view link</button>
@@ -2104,7 +2112,12 @@
             // be mis-tapped.
             if (selectedPlaylist && !sharedMeta[selectedPlaylist] && sharesSupported && isAdmin()) {
                 html += `<span class="chip chip-share-btn" onclick="sharePlaylist('${esc(selectedPlaylist)}')"`
-                     +  ` title="Share this playlist">Share&hellip;</span>`;
+                     +  ` title="Share this playlist">`
+                     +  `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"`
+                     +  ` stroke="currentColor" stroke-width="2" stroke-linecap="round"`
+                     +  ` style="vertical-align:-1px;margin-right:4px"><circle cx="18" cy="5" r="3"/>`
+                     +  `<circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>`
+                     +  `<path d="M8.6 13.5l6.8 3.9"/><path d="M15.4 6.6l-6.8 3.9"/></svg>Share</span>`;
             }
             // Everything shared WITH this login, kept as its own group: it is a
             // different kind of thing from your own playlists.
@@ -2284,6 +2297,8 @@
             }, 1000);
             const row = document.getElementById('liveRow');
             if (row) row.hidden = false;
+            const btn = document.querySelector('.btn-live');
+            if (btn) btn.classList.add('on');
         }
 
         async function stopLiveShare() {
@@ -2291,6 +2306,8 @@
             if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
             const row = document.getElementById('liveRow');
             if (row) row.hidden = true;
+            const btn = document.querySelector('.btn-live');
+            if (btn) btn.classList.remove('on');
             try { await fetch('/api/live/stop', { method: 'POST', credentials: 'include' }); }
             catch (e) { /* it lapses by itself within the quarter hour */ }
             liveCode = null;
@@ -2325,6 +2342,7 @@
                 ? links.map(([t, r]) =>
                     `<div class="share-row"><span class="share-url">${esc(shareLinkUrl(t))}</span>`
                     + `<span class="share-role">${r.role === 'edit' ? 'can edit' : 'view only'}</span>`
+                    + `<button class="share-btn" onclick="copyShareLink('${t}')">Copy</button>`
                     + `<button class="share-btn" onclick="revokeShareLink('${t}')">Revoke</button></div>`).join('')
                 : '<div class="share-empty">No links yet.</div>';
             document.getElementById('sharePeople').innerHTML = people.length
@@ -2349,6 +2367,30 @@
                 headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         }
 
+        /* Copying, which has to work on a phone over plain http as well: the
+         * clipboard API only exists in a secure context, so a LAN address has
+         * none and the old textarea trick is the fallback. */
+        async function copyText(text) {
+            try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                const ok = document.execCommand('copy');
+                ta.remove();
+                return ok;
+            } catch (e) { return false; }
+        }
+
+        function noteShare(text) {
+            const n = document.getElementById('shareNote');
+            if (n) n.textContent = text;
+        }
+
         async function createShareLink(role) {
             const name = document.getElementById('shareCard').dataset.name;
             const r = await shareRequest('/api/share-links', { name, role });
@@ -2356,19 +2398,35 @@
             const d = await r.json();
             myLinks = d.myLinks || myLinks;
             // Straight to the clipboard: sending it is the whole point.
-            try { await navigator.clipboard.writeText(shareLinkUrl(d.token)); } catch (e) {}
+            const ok = await copyText(shareLinkUrl(d.token));
             sharePlaylist(name);
+            noteShare(ok ? `${role === 'edit' ? 'Edit' : 'View'} link created and copied.`
+                         : `${role === 'edit' ? 'Edit' : 'View'} link created — press Copy.`);
         }
 
+        async function copyShareLink(token) {
+            const ok = await copyText(shareLinkUrl(token));
+            noteShare(ok ? 'Link copied.' : 'Copy was blocked — select the link text instead.');
+        }
+
+        /* Revoking a link stops NEW claims. Anyone who already opened it keeps
+         * their access until they are removed from the list below -- which is
+         * exactly how a shared document works, and worth saying out loud. */
         async function revokeShareLink(token) {
             const name = document.getElementById('shareCard').dataset.name;
             const r = await shareRequest('/api/share-links', { token, revoke: true });
-            if (r.ok) { myLinks = (await r.json()).myLinks || {}; sharePlaylist(name); }
+            if (!r.ok) return noteShare('Could not revoke that link.');
+            myLinks = (await r.json()).myLinks || {};
+            sharePlaylist(name);
+            noteShare('Link revoked — new people cannot join with it. Anyone already in is listed below.');
         }
 
         async function removeShare(name, user) {
             const r = await shareRequest('/api/shares', { name, user, role: null });
-            if (r.ok) { applyPlaylists(await r.json()); sharePlaylist(name); }
+            if (!r.ok) return noteShare('Could not remove them.');
+            applyPlaylists(await r.json());
+            sharePlaylist(name);
+            noteShare(`${user} no longer has access.`);
         }
 
         async function leaveSharedPlaylist(name) {
@@ -2777,9 +2835,17 @@
                     <button class="btn btn-play" id="playBtn" onclick="togglePlay()">&#9654;</button>
                     <button class="btn btn-expand" onclick="expandButton()"
                             title="Lyrics view" aria-label="Lyrics view">&#127908;</button>
+                    <!-- Broadcast: a dot with waves, which is what "live"
+                         means everywhere else. Turns red while sharing. -->
                     <button class="btn btn-expand btn-live" onclick="toggleLiveShare()"
                             title="Share these lyrics as a live link"
-                            aria-label="Share live lyrics">&#128225;</button>
+                            aria-label="Share live lyrics"><svg width="16" height="16"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" style="display:block;margin:auto">
+                            <circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/>
+                            <path d="M7.9 7.9a5.8 5.8 0 0 0 0 8.2"/><path d="M16.1 16.1a5.8 5.8 0 0 0 0-8.2"/>
+                            <path d="M5.1 5.1a9.8 9.8 0 0 0 0 13.8"/><path d="M18.9 18.9a9.8 9.8 0 0 0 0-13.8"/>
+                            </svg></button>
                     <button class="btn btn-expand btn-popout" onclick="popOutLyrics()"
                             title="Lyrics in their own window, for a TV"
                             aria-label="Pop out lyrics"><svg width="16" height="16"
