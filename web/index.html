@@ -96,6 +96,46 @@
         .viewer-note { display: none; font-size: 11px; color: #999; padding: 6px 12px 0; }
         body.viewer .viewer-note { display: block; }
         body.big-screen .viewer-note { display: none; }
+        /* A playlist shared with us read-only (30 Sep) hides the same controls
+           for THAT playlist only: body.readonly-playlist is set while it is the
+           one on screen, and never for a viewer login's own page. */
+        body.readonly-playlist .chip-del,
+        body.readonly-playlist .chip-share-btn,
+        body.readonly-playlist .add-pl,
+        body.readonly-playlist .pl-move,
+        body.readonly-playlist .clip-edit,
+        body.readonly-playlist .clip-clear { display: none !important; }
+        /* Sharing: a chip made from a link someone sent, its own group label,
+           and the panel that manages links and people. */
+        .chip-shared { border-style: dashed; }
+        .chip-share { font-size: 10px; color: #9a9aa8; margin-left: 5px; }
+        .chip-share-btn { border-style: dashed; }
+        .chip-group { align-self: center; font-size: 10px; color: #7a7a86;
+                      padding: 0 4px 0 8px; white-space: nowrap; }
+        .share-card {
+          position: fixed; inset: 0; z-index: 900; display: flex;
+          align-items: center; justify-content: center;
+          background: rgba(0, 0, 0, .55); padding: 20px;
+        }
+        .share-card[hidden] { display: none; }
+        .share-card-inner {
+          width: 100%; max-width: 430px; max-height: 82vh; overflow-y: auto;
+          background: #17171c; border: 1px solid #2a2a33; border-radius: 14px;
+          padding: 18px; color: #e8e8ee;
+        }
+        .share-card-inner h3 { margin: 0 0 14px; font-size: 17px; }
+        .share-section { margin-bottom: 14px; }
+        .share-head { font-size: 12px; color: #9a9aa8; margin-bottom: 6px; }
+        .share-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+        .share-url { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
+                     white-space: nowrap; font-family: ui-monospace, monospace; }
+        .share-who { flex: 1 1 auto; }
+        .share-role { color: #9a9aa8; }
+        .share-btn { background: #202027; color: inherit; border: 1px solid #2a2a33;
+                     border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+        .share-empty { font-size: 12px; color: #6a6a76; }
+        .share-note { font-size: 12px; color: #9a9aa8; margin-bottom: 10px; }
+        .share-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
         /* Requests bell. The laptop processes a song minutes after it is asked
            for, so the person who asked needs somewhere to find out what became
            of it without shouting across the room. */
@@ -1274,6 +1314,29 @@
     </p>
   </div>
 </div>
+<!-- Share panel: the links and the people for one of YOUR OWN playlists.
+     Filled by sharePlaylist(); hidden until then. -->
+<div id="shareCard" class="share-card" hidden>
+  <div class="share-card-inner">
+    <h3 id="shareTitle">Share</h3>
+    <div class="share-section">
+      <div class="share-head">Links — anyone with one signs in and gets the playlist</div>
+      <div id="shareLinks"></div>
+      <div class="share-actions">
+        <button class="share-btn" onclick="createShareLink('view')">Create view link</button>
+        <button class="share-btn" onclick="createShareLink('edit')">Create edit link</button>
+      </div>
+    </div>
+    <div class="share-section">
+      <div class="share-head">Who has access</div>
+      <div id="sharePeople"></div>
+    </div>
+    <div class="share-note" id="shareNote"></div>
+    <div class="share-actions">
+      <button class="share-btn" onclick="closeShareCard()">Close</button>
+    </div>
+  </div>
+</div>
     <div class="topbar">
         <img class="brand-logo" src="data:image/webp;base64,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" alt="">
         <h1>BeatznBox</h1>
@@ -1544,6 +1607,16 @@
         // save. On a 409 only these are carried over — see savePlaylists.
         const dirtyPlaylists = new Set();
         let selectedPlaylist = null;
+        // Sharing (30 Sep). `sharedMeta` names the playlists OTHER people have
+        // shared with this login, with the role the link granted; `shadowed` is
+        // shares hidden behind a playlist of the same name in our own list;
+        // `myShares`/`myLinks` are the people and links on our own playlists.
+        // All four arrive from /api/playlists.
+        let sharedMeta = {};
+        let shadowedShares = [];
+        let myShares = {};
+        let myLinks = {};
+        let sharesSupported = false;
 
         // Saved song setups. The server holds them (so a mix saved on a phone is
         // there on the NUC driving the speakers); localStorage is the offline
@@ -1622,6 +1695,68 @@
             return (ME && ME.canEditOwn && !ME.canEditShared) ? (mine || {}) : (shared || {});
         }
 
+        // May this login change the playlist on screen? Our own as before, and
+        // one shared with us only when the link granted edit.
+        function canEditPlaylist(name = selectedPlaylist) {
+            if (!name) return isAdmin();
+            const m = sharedMeta[name];
+            return m ? m.role === 'edit' : isAdmin();
+        }
+
+        function playlistOwner(name = selectedPlaylist) {
+            const m = name ? sharedMeta[name] : null;
+            return m ? m.owner : null;
+        }
+
+        // May this login change ANY playlist -- its own, or one shared with it
+        // as an editor? The playlist picker is offered on this, and each row
+        // inside it is still gated on its own playlist.
+        function canEditAnyPlaylist() {
+            return isAdmin() || Object.values(sharedMeta).some(m => m.role === 'edit');
+        }
+
+        // The half of `playlists` this login actually owns. A shared entry must
+        // never leave in a whole-map write: under `user` scope it would copy
+        // somebody else's playlist into our bucket, under `shared` it would
+        // push it into the admin set.
+        function ownEntries() {
+            const out = {};
+            for (const [n, v] of Object.entries(playlists)) {
+                if (!(n in sharedMeta)) out[n] = v;
+            }
+            return out;
+        }
+
+        // Clips and presets for a playlist shared with us arrive merged into
+        // `mine` under the same bare "<name>::<song>" keys, so they are picked
+        // out by the playlist half and laid over whatever set this login reads.
+        function withShared(entries, mine) {
+            const out = Object.assign({}, entries || {});
+            for (const [k, v] of Object.entries(mine || {})) {
+                const half = String(k).slice(0, String(k).lastIndexOf('::'));
+                if (half in sharedMeta) out[k] = v;
+            }
+            return out;
+        }
+
+        // One place that ingests a /api/playlists payload: the load, a save's
+        // reply, a 409 and a claim all land the same way.
+        function applyPlaylists(d) {
+            sharesSupported = ('sharedMeta' in d);
+            sharedMeta = d.sharedMeta || {};
+            shadowedShares = d.shadowed || [];
+            myShares = d.myShares || {};
+            myLinks = d.myLinks || {};
+            playlists = Object.assign({}, pickSet(d.playlists, d.mine));
+            for (const name of Object.keys(sharedMeta)) {
+                if (d.mine && name in d.mine) playlists[name] = d.mine[name];
+            }
+            playlistRev = d.rev || 0;
+            try { localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists)); } catch (e) {}
+            renderPlaylistChips();
+            filterSongs();
+        }
+
         // ---- accounts ------------------------------------------------------------
         // A session cookie is the login. /api/me says who we are: an "account" is a
         // real signup, a Caddy login is not. The Caddy logins (admin, beatz) skip
@@ -1684,6 +1819,7 @@
             document.getElementById('authPass').value = '';
             hideAuthScreen();
             await loadWhoami();
+            await claimShareFromUrl();     // first: the loads must see it
             await loadPlaylists();
             await loadPresets();
             await loadClips();
@@ -1914,9 +2050,10 @@
         }
 
         function deletePlaylist(name) {
-            // The playlist edits below are hidden from viewers; these guards
-            // are for a tap that lands before /api/whoami has answered.
-            if (!isAdmin()) return;
+            // Deleting is the OWNER's act. A playlist shared with us is left
+            // from its chip instead, which never touches the owner's copy.
+            // These guards also catch a tap before /api/whoami has answered.
+            if (!isAdmin() || sharedMeta[name]) return;
             if (!confirm(`Delete the playlist "${name}"? The songs stay in the library.`)) return;
             delete playlists[name];
             deletedPlaylists.add(name);
@@ -1944,6 +2081,7 @@
             let html = '';
             html += `<span class="chip ${selectedPlaylist === null ? 'active' : ''}" onclick="selectPlaylist(null)">All</span>`;
             for (const name of Object.keys(playlists)) {
+                if (name in sharedMeta) continue;       // drawn in its own group below
                 const on = selectedPlaylist === name;
                 // The delete cross only appears on the playlist you are already
                 // looking at, so a mis-tap on a crowded row cannot bin one.
@@ -1953,8 +2091,32 @@
             }
             // chip-new: hidden for viewers (body.viewer), see the CSS.
             html += `<span class="chip chip-new" onclick="createPlaylist()">+</span>`;
-            // Only offered once something is actually saved, or it reads as a
-            // filter that always empties the list.
+            // Sharing an own playlist, once we are looking at it -- same
+            // one-at-a-time rule as the delete cross, so a crowded row cannot
+            // be mis-tapped.
+            if (selectedPlaylist && !sharedMeta[selectedPlaylist] && sharesSupported && isAdmin()) {
+                html += `<span class="chip chip-share-btn" onclick="sharePlaylist('${esc(selectedPlaylist)}')"`
+                     +  ` title="Share this playlist">Share&hellip;</span>`;
+            }
+            // Everything shared WITH this login, kept as its own group: it is a
+            // different kind of thing from your own playlists.
+            const sharedNames = Object.keys(sharedMeta);
+            if (sharedNames.length) {
+                html += `<span class="chip-group">Shared with me</span>`;
+                for (const name of sharedNames) {
+                    const m = sharedMeta[name];
+                    const on = selectedPlaylist === name;
+                    html += `<span class="chip chip-shared ${on ? 'active' : ''}"`
+                         +  ` onclick="selectPlaylist('${esc(name)}')">${name}`
+                         +  `<span class="chip-share">${m.role === 'edit' ? 'can edit' : 'view only'} &middot; ${m.owner}</span>`
+                         +  (on ? `<span class="chip-leave" onclick="event.stopPropagation();leaveSharedPlaylist('${esc(name)}')" title="Leave this shared playlist">&times;</span>` : '')
+                         +  `</span>`;
+                }
+            }
+            // A view-only share hides the editing controls for THAT playlist
+            // and leaves the rest of the page alone.
+            document.body.classList.toggle('readonly-playlist',
+                !!selectedPlaylist && !canEditPlaylist(selectedPlaylist));
 
             el.innerHTML = html;
             renderPlaylistMode();
@@ -1990,8 +2152,9 @@
             el.hidden = !selectedPlaylist;
             if (el.hidden) return;
             const mode = playlistMode(), fades = playlistFades();
-            // Viewers see the set's settings but cannot change them.
-            if (!isAdmin()) {
+            // Viewers -- and a playlist shared read-only -- see the settings
+            // but cannot change them.
+            if (!canEditPlaylist()) {
                 el.textContent = `Mode: ${mode ? MODE_NAMES[mode] : 'per song'} · Fades ${fades ? 'on' : 'off'}`;
                 return;
             }
@@ -2007,7 +2170,7 @@
         }
 
         function setPlaylistSettings(mode, fades) {
-            if (!isAdmin() || !selectedPlaylist) return;
+            if (!canEditPlaylist() || !selectedPlaylist) return;
             const key = selectedPlaylist + '::*';
             mode = mode && PRESETS[mode] ? mode : null;
             const modeChanged = mode !== playlistMode();
@@ -2034,7 +2197,8 @@
         function ownPlaylistSetup(dir) {
             if (!selectedPlaylist) return null;
             const k = selectedPlaylist + '::' + dir;
-            return (!isAdmin() && mySetups[k]) || sessionPresets[k] || null;
+            const deviceOnly = !canEditPlaylist() && !sharedMeta[selectedPlaylist];
+            return (deviceOnly && mySetups[k]) || sessionPresets[k] || null;
         }
 
         function selectPlaylist(name) {
@@ -2062,6 +2226,114 @@
             }
         }
 
+        /* ===== Sharing a playlist =====
+         * A link, not a username: the owner makes one and sends it however they
+         * like, and whoever opens it signs in and CLAIMS it -- which is what
+         * puts the playlist in their "Shared with me" group. Two roles, and
+         * both are revocable: the link (for new claims) and the person (for a
+         * grant already made). */
+        function shareLinkUrl(token) {
+            return location.origin + location.pathname + '#share=' + token;
+        }
+
+        function sharePlaylist(name) {
+            const card = document.getElementById('shareCard');
+            if (!card || !sharesSupported) return;
+            const esc = (t) => String(t).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const mine = myShares[name] || {};
+            const people = Object.keys(mine);
+            const links = Object.entries(myLinks).filter(([, r]) => r.name === name);
+            card.dataset.name = name;
+            document.getElementById('shareTitle').textContent = 'Share \u201c' + name + '\u201d';
+            document.getElementById('shareLinks').innerHTML = links.length
+                ? links.map(([t, r]) =>
+                    `<div class="share-row"><span class="share-url">${esc(shareLinkUrl(t))}</span>`
+                    + `<span class="share-role">${r.role === 'edit' ? 'can edit' : 'view only'}</span>`
+                    + `<button class="share-btn" onclick="revokeShareLink('${t}')">Revoke</button></div>`).join('')
+                : '<div class="share-empty">No links yet.</div>';
+            document.getElementById('sharePeople').innerHTML = people.length
+                ? people.map(u =>
+                    `<div class="share-row"><span class="share-who">${esc(u)}</span>`
+                    + `<span class="share-role">${mine[u] === 'edit' ? 'can edit' : 'view only'}</span>`
+                    + `<button class="share-btn" onclick="removeShare('${esc(name)}','${esc(u)}')">Remove</button></div>`).join('')
+                : '<div class="share-empty">Nobody yet.</div>';
+            document.getElementById('shareNote').textContent = shadowedShares.length
+                ? 'Hidden: ' + shadowedShares.map(s => `\u201c${s.name}\u201d from ${s.owner} waits behind your own playlist of that name.`).join(' ')
+                : '';
+            card.hidden = false;
+        }
+
+        function closeShareCard() {
+            const card = document.getElementById('shareCard');
+            if (card) card.hidden = true;
+        }
+
+        async function shareRequest(path, body) {
+            return fetch(path, { method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+
+        async function createShareLink(role) {
+            const name = document.getElementById('shareCard').dataset.name;
+            const r = await shareRequest('/api/share-links', { name, role });
+            if (!r.ok) return notePlaylists('Could not create a share link.');
+            const d = await r.json();
+            myLinks = d.myLinks || myLinks;
+            // Straight to the clipboard: sending it is the whole point.
+            try { await navigator.clipboard.writeText(shareLinkUrl(d.token)); } catch (e) {}
+            sharePlaylist(name);
+        }
+
+        async function revokeShareLink(token) {
+            const name = document.getElementById('shareCard').dataset.name;
+            const r = await shareRequest('/api/share-links', { token, revoke: true });
+            if (r.ok) { myLinks = (await r.json()).myLinks || {}; sharePlaylist(name); }
+        }
+
+        async function removeShare(name, user) {
+            const r = await shareRequest('/api/shares', { name, user, role: null });
+            if (r.ok) { applyPlaylists(await r.json()); sharePlaylist(name); }
+        }
+
+        async function leaveSharedPlaylist(name) {
+            const meta = sharedMeta[name];
+            if (!meta) return;
+            if (!confirm(`Leave \u201c${name}\u201d, shared by ${meta.owner}?`)) return;
+            const r = await shareRequest('/api/shares', { name, owner: meta.owner, leave: true });
+            if (!r.ok) return notePlaylists('Could not leave that playlist.');
+            if (selectedPlaylist === name) selectedPlaylist = null;
+            applyPlaylists(await r.json());
+        }
+
+        /* Opening a share link. The token rides in the URL hash, so it never
+         * reaches the server until we claim it -- and claiming needs a login,
+         * which is the rule: the link is the invitation, the account is the
+         * door. The claimed list keeps a reload from re-claiming (and from
+         * bumping the server's rev for nothing). */
+        async function claimShareFromUrl() {
+            const m = /(?:^|[#&])share=([A-Za-z0-9_-]+)/.exec(location.hash || '');
+            if (!m || !ME || !ME.user) return;
+            const token = m[1];
+            let done = [];
+            try { done = JSON.parse(localStorage.getItem('beatznbox_claimed') || '[]'); } catch (e) {}
+            if (done.includes(token)) return;
+            try {
+                const r = await shareRequest('/api/share-links/claim', { token });
+                const d = await r.json().catch(() => ({}));
+                if (r.ok && d.claimed) {
+                    done.push(token);
+                    try { localStorage.setItem('beatznbox_claimed', JSON.stringify(done)); } catch (e) {}
+                    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+                    applyPlaylists(d);
+                    notePlaylists(`\u201c${d.claimed.name}\u201d from ${d.claimed.owner} was added to Shared with me.`);
+                    await loadPresets();
+                    await loadClips();
+                } else if (r.status === 404 || r.status === 400) {
+                    notePlaylists(d.error || 'That share link is not valid.');
+                }
+            } catch (e) { /* offline: the next load tries again */ }
+        }
+
         // credentials:'include' is explicit rather than relying on the default.
         // These requests MUST carry the login: one that does not comes back 401
         // and the browser reopens its password prompt over a page that is
@@ -2071,14 +2343,7 @@
                 const r = await fetch('/api/playlists',
                                       { cache: 'no-store', credentials: 'include' });
                 if (!r.ok) return;
-                const d = await r.json();
-                // The server sends both sets; pickSet decides which one this
-                // login is here for. See its comment for the rule.
-                playlists = pickSet(d.playlists, d.mine);
-                playlistRev = d.rev || 0;
-                localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
-                renderPlaylistChips();
-                filterSongs();
+                applyPlaylists(await r.json());
             } catch (e) {
                 // Offline, or the queue service is down. The localStorage copy
                 // is already loaded, so the set still works -- it just will not
@@ -2090,8 +2355,12 @@
         async function savePlaylists(touched) {
             if (touched) dirtyPlaylists.add(touched);
             localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
+            // A playlist shared with us is saved on its own, into the owner's
+            // bucket. Everything else is the whole-map write it has always
+            // been -- carrying only our OWN entries (see ownEntries).
+            if (touched && sharedMeta[touched]) return saveSharedPlaylist(touched);
             const body = () => JSON.stringify({
-                playlists, rev: playlistRev,
+                playlists: ownEntries(), rev: playlistRev,
                 scope: writeScope(),
             });
             try {
@@ -2109,6 +2378,9 @@
                     // across two medleys on 24 Sep.
                     const d = await r.json();
                     const merged = Object.assign({}, pickSet(d.playlists, d.mine));
+                    for (const name of Object.keys(d.sharedMeta || {})) {
+                        if (d.mine && name in d.mine) merged[name] = d.mine[name];
+                    }
                     for (const n of dirtyPlaylists) {
                         if (playlists[n]) merged[n] = playlists[n];
                     }
@@ -2133,20 +2405,57 @@
                     return;
                 }
                 if (r.ok) {
-                    // The reply carries BOTH sets, and for an editor or an
-                    // account the one that matters is `mine`: taking d.playlists
-                    // here put the shared (empty) set back and made a playlist
-                    // the user had just made vanish in front of them.
-                    const d = await r.json();
-                    playlists = pickSet(d.playlists, d.mine);
-                    playlistRev = d.rev || 0;
-                    localStorage.setItem('beatznbox_playlists', JSON.stringify(playlists));
+                    // The reply carries EVERY set; applyPlaylists takes the one
+                    // this login reads and lays the shared-with-me entries over
+                    // it. Taking d.playlists blindly here once put the shared
+                    // (empty) set back and made a new playlist vanish.
+                    applyPlaylists(await r.json());
                     dirtyPlaylists.clear();
-                    renderPlaylistChips();
                 }
             } catch (e) {
                 console.warn('playlists: change kept locally, not shared', e);
             }
+        }
+
+        /* A collaborator's write: ONE playlist, into the owner's bucket, with
+         * the same rev rule as everywhere -- a stale one comes back with the
+         * current state, and we retry once with our own change laid over it. */
+        async function saveSharedPlaylist(name) {
+            const meta = sharedMeta[name];
+            if (!meta) return;
+            const post = () => fetch('/api/playlists', {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ playlists: { [name]: playlists[name] },
+                                       owner: meta.owner, rev: playlistRev,
+                                       scope: 'share' }),
+            });
+            try {
+                let r = await post();
+                if (r.status === 409) {
+                    const mine = playlists[name];
+                    applyPlaylists(await r.json());
+                    if (!sharedMeta[name]) return notePlaylists('That playlist is no longer shared with you.');
+                    playlists[name] = mine;      // our change survives theirs
+                    r = await post();
+                }
+                if (r.status === 403 || r.status === 404) {
+                    readOnlyRefused('playlist change');
+                    await loadPlaylists();
+                    return notePlaylists(r.status === 403
+                        ? 'That playlist is shared read-only, so the change was not saved.'
+                        : 'That playlist is gone.');
+                }
+                if (r.ok) { applyPlaylists(await r.json()); dirtyPlaylists.clear(); }
+            } catch (e) {
+                console.warn('shared playlist: change kept locally', e);
+            }
+        }
+
+        /* The note under the chips, where a person is already looking. */
+        function notePlaylists(text) {
+            const note = document.getElementById('viewerNote');
+            if (note) { note.textContent = text; note.dataset.temp = '1'; }
         }
 
         function filterSongs() {
@@ -2226,7 +2535,7 @@
          * place in the list on screen, which canMove keeps equal to its place
          * in the playlist (bar songs no longer in the library, hence by dir). */
         function moveInPlaylist(i, delta) {
-            if (!isAdmin() || !selectedPlaylist) return;
+            if (!canEditPlaylist() || !selectedPlaylist) return;
             const list = playlists[selectedPlaylist];
             const a = filteredSongs[i], b = filteredSongs[i + delta];
             if (!list || !a || !b) return;
@@ -2243,7 +2552,9 @@
            old code only acted when the string matched a key. It also could only
            add, so removing meant going into edit mode on the playlist. */
         function addToPlaylist(songIdx) {
-            if (!isAdmin()) return;
+            // Off by default for a viewer, but offered when SOMETHING can be
+            // edited: an editor login may also have playlists shared with them.
+            if (!canEditAnyPlaylist()) return;
             const song = songs[songIdx];
             closePlaylistPicker();
             const names = Object.keys(playlists);
@@ -2276,7 +2587,7 @@
         }
 
         function togglePlaylistMember(songIdx, name) {
-            if (!isAdmin()) return;
+            if (!canEditPlaylist(name)) return;
             const song = songs[songIdx];
             const list = playlists[name];
             if (!list) return;
@@ -4516,11 +4827,13 @@ body {
                 setup.volumes[stem] = sl ? parseInt(sl.value) : 80;
             }
             setup.saved = Date.now();
-            if (!isAdmin()) {
+            if (!canEditPlaylist()) {
                 // A viewer's setup is for their own practice: kept on this
                 // device, never sent, and labelled so. The shared map is not
                 // touched, so the hosts' setup for this song survives intact.
-                keepSetupHere(key, setup);
+                // A playlist shared READ-ONLY gets nothing local either: the
+                // owner's setup for it is the one that applies.
+                if (!selectedPlaylist || !sharedMeta[selectedPlaylist]) keepSetupHere(key, setup);
                 return;
             }
             sessionPresets[key] = setup;
@@ -4548,7 +4861,7 @@ body {
             if (currentSongIndex < 0) return;
             const song = songs[currentSongIndex];
             // Which copies go: see clearsKey.
-            if (!isAdmin()) {
+            if (!canEditPlaylist()) {
                 // A viewer clears only what is theirs. If the hosts saved a
                 // setup for this song, say so -- it still applies next load.
                 for (const key of Object.keys(mySetups)) {
@@ -4613,13 +4926,16 @@ body {
         }
 
         async function pushSetup(key, setup, migrating) {
+            // A key that belongs to a playlist shared with us is filed with its
+            // OWNER, with the same bare "<playlist>::<song>" key -- so both
+            // sides see one setup, not two.
+            const owner = sharedMeta[String(key).split('::')[0]];
             try {
                 const r = await fetch('/api/presets', { method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        key, setup,
-                        scope: writeScope(),
-                    }) });
+                    body: JSON.stringify(Object.assign(
+                        { key, setup, scope: owner ? 'share' : writeScope() },
+                        owner ? { owner: owner.owner } : {})) });
                 // A 400 is a setup the server will never accept; retrying it on
                 // every page load would only stall the migration forever.
                 if (r.status === 400) { console.warn('setup refused by the server', key); return true; }
@@ -4647,7 +4963,9 @@ body {
                 const r = await fetch('/api/presets', { cache: 'no-store', credentials: 'include' });
                 if (!r.ok) return;
                 const d = await r.json();
-                server = pickSet(d.presets, d.mine);
+                // Whatever set this login reads, plus the owner's mixes for any
+                // playlist shared with it -- same bare keys, laid over.
+                server = withShared(pickSet(d.presets, d.mine), d.mine);
             } catch (e) {
                 console.warn('setups: using the local copy', e);
                 return;
@@ -4720,7 +5038,7 @@ body {
                        : here ? 'Saved on this device only' : 'Setup saved';
             if (el) el.textContent = tag ? `${what}: "${tag}"` : what;
             const clearBtn = document.getElementById('clearSetupBtn');
-            if (clearBtn) clearBtn.style.display = !fromAll && (isAdmin() || here) ? 'inline-block' : 'none';
+            if (clearBtn) clearBtn.style.display = !fromAll && (canEditPlaylist() || here) ? 'inline-block' : 'none';
         }
 
         // ===== Playlist clips =====
@@ -4844,8 +5162,9 @@ body {
          * the current mix. Rough is fine -- Karan tunes these by ear, and
          * pressing again just moves the point. */
         function setClipPoint(which) {
-            // Hidden from viewers; this catches a tap before whoami answers.
-            if (!isAdmin()) return;
+            // Hidden from viewers, and from a playlist shared read-only; this
+            // also catches a tap before whoami answers.
+            if (!canEditPlaylist()) return;
             if (!selectedPlaylist || currentSongIndex < 0 || !songDuration) return;
             const key = clipKey(currentSongDir);
             const pos = Math.round(songPosition() * 10) / 10;
@@ -4869,8 +5188,10 @@ body {
 
         function clearClip() {
             const key = clipKey(currentSongDir);
-            if (!isAdmin()) {
-                // A viewer can only drop their own device's clip.
+            if (!canEditPlaylist()) {
+                // A viewer can only drop their own device's clip -- and a
+                // playlist shared read-only has no device-local clip to drop,
+                // so there is nothing to do either way.
                 if (key && myClips[key]) { delete myClips[key]; storeMine(); renderClip(); }
                 return;
             }
@@ -4891,7 +5212,7 @@ body {
             if (note) { out.textContent = note; return; }
             const clip = clipFor(currentSongDir);
             const key = clipKey(currentSongDir);
-            const here = !isAdmin() && key && myClips[key] === clip;
+            const here = !canEditPlaylist() && key && myClips[key] === clip;
             out.title = `Only in "${selectedPlaylist}" — elsewhere the song plays whole`;
             // A viewer's own clip says so, and keeps a Clear (it is theirs);
             // a viewer sees the hosts' clips as times alone, no Clear.
@@ -4910,13 +5231,15 @@ body {
         }
 
         async function pushClip(key, clip) {
+            // As pushSetup: a clip for a playlist shared with us lives in the
+            // owner's bucket, under the same bare key.
+            const owner = sharedMeta[String(key).split('::')[0]];
             try {
                 const r = await fetch('/api/clips', { method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        key, clip,
-                        scope: writeScope(),
-                    }) });
+                    body: JSON.stringify(Object.assign(
+                        { key, clip, scope: owner ? 'share' : writeScope() },
+                        owner ? { owner: owner.owner } : {})) });
                 if (r.status === 403) {
                     // A viewer login the page took for an admin. A set point
                     // is kept as this device's own clip, labelled so; a
@@ -4942,7 +5265,7 @@ body {
                 const r = await fetch('/api/clips', { cache: 'no-store', credentials: 'include' });
                 if (!r.ok) return;
                 const d = await r.json();
-                clips = pickSet(d.clips, d.mine);
+                clips = withShared(pickSet(d.clips, d.mine), d.mine);
                 storeClipsLocally();
                 renderClip();
             } catch (e) {
@@ -4981,7 +5304,13 @@ body {
         // loaded an empty set and overwrote its own localStorage copy with it,
         // so its playlists were simply gone on every fresh load and no clip
         // row could ever appear (no playlist to select).
-        loadWhoami().then(() => {
+        loadWhoami().then(async () => {
+            // A share link in the URL is claimed FIRST, before the loads: it
+            // adds a playlist, and a load still in flight from before the
+            // claim would otherwise land after it and wipe the new share back
+            // out. (Nobody signed in? The auth screen has already asked, and
+            // submitAuth claims it straight after.)
+            await claimShareFromUrl();
             loadPresets();
             loadPlaylists();
             loadClips();

@@ -34,6 +34,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PRESETS_LOCK = threading.Lock()
 CLIPS_LOCK = threading.Lock()
+# Playlists gained a lock with share links: the file carries a shares map and
+# link tokens beside the playlists, and a write that drops one of those loses a
+# grant, not just a song list. Lock order, if these ever nest: PLAYLISTS_LOCK
+# first, then PRESETS_LOCK/CLIPS_LOCK, never the reverse.
+PLAYLISTS_LOCK = threading.Lock()
 
 # Signs the short-lived tokens that let the R2 Worker serve audio from the
 # edge. Read at every mint rather than cached, so rotating the file takes
@@ -123,10 +128,16 @@ WEB_DIR = '/opt/beatznbox/web'
 USER_PRESETS_KEY = '__user__'
 USER_CLIPS_KEY = '__user__'
 
-# The endpoints that write what everyone shares. Everything else stays open to
-# every login: requests, fault reports and pasted lyrics are how testers help,
-# and each only ever appends a note for the watcher to act on.
-SHARED_WRITES = {'/api/playlists', '/api/presets', '/api/clips'}
+# Sharing (30 Sep). A playlist in someone's own bucket can be shared with other
+# logins BY LINK: the owner creates a view link or an edit link, and whoever
+# opens it claims it -- which needs a login, so the link is an invitation
+# rather than an anonymous grant. The grant itself lives in `shares` inside
+# playlists.json, beside the playlists it describes, so a delete and its
+# cleanup are one atomic write.
+SHARE_ROLES = ('view', 'edit')  # what a link, or a person, may be granted
+MAX_SHARES_IN = 200             # playlists shared TO one login
+MAX_SHARES_PER_PLAYLIST = 50    # links + people on one playlist
+SHARE_SCOPE = 'share'           # the scope value a collaborator's write carries
 
 # Roles, weakest first. `editor` may write their OWN playlists, presets and
 # clips; `admin` may also write the shared set and manage users. `viewer` is
@@ -182,6 +193,116 @@ def role_of(login):
     if login in admins():
         return 'admin'
     return 'viewer'
+
+
+# ---- sharing -------------------------------------------------------------
+# Pure functions over the two maps in playlists.json ("shares" and
+# "shareLinks"). They take the maps as arguments rather than reading files so
+# they can be unit-tested on their own, and so a handler can hold one read of
+# the file and answer everything from it.
+
+def valid_login(name):
+    """A login name. Both kinds of login are restricted to the same charset --
+    add-user.sh's Caddy logins and the signup form -- so one predicate covers
+    both. It says nothing about whether the name exists: Caddy logins are not
+    visible to this service, so an invitation to a name that has not signed up
+    yet is allowed and simply waits."""
+    return bool(name) and isinstance(name, str) and len(name) <= 40 \
+        and re.fullmatch(r'[A-Za-z0-9_.-]+', name) is not None
+
+
+def share_role(shares, user, owner, name):
+    """'view' | 'edit' | None: what `user` may do with `owner`'s `name`."""
+    if not user or not owner or not name or user == owner:
+        return None
+    rec = ((shares.get(user) or {}).get(owner) or {}).get(name)
+    return rec if rec in SHARE_ROLES else None
+
+
+def visible_shares(user_pl, shares, user):
+    """({name: {'owner', 'role'}}, [shadowed]) for playlists shared to `user`.
+
+    Visible means the owner still HAS that playlist. A share whose name the
+    caller also owns is SHADOWED -- their own playlist wins, and it is
+    reported rather than quietly ignored, so deleting their own brings the
+    share back. Dangling shares (owner gone, playlist deleted by hand) are
+    skipped quietly: they are the debris of a delete."""
+    mine = user_pl.get(user, {}) if user else {}
+    meta, shadowed = {}, []
+    for owner, by_name in (shares.get(user) or {}).items():
+        if not isinstance(by_name, dict):
+            continue
+        for name, role in by_name.items():
+            if role not in SHARE_ROLES:
+                continue
+            if name in mine or name in meta:
+                # Their own playlist, or a second owner sharing the same name:
+                # one entry per name keeps the client's bare keys unambiguous.
+                shadowed.append({'name': name, 'owner': owner, 'role': role})
+                continue
+            if name not in (user_pl.get(owner) or {}):
+                continue                    # the owner deleted it; the share is dead
+            meta[name] = {'owner': owner, 'role': role}
+    return meta, shadowed
+
+
+def owned_shares(shares, user):
+    """{name: {recipient: role}} for playlists `user` owns."""
+    out = {}
+    for recipient, by_owner in (shares or {}).items():
+        for name, role in ((by_owner or {}).get(user) or {}).items():
+            if role in SHARE_ROLES:
+                out.setdefault(name, {})[recipient] = role
+    return out
+
+
+def key_playlist(key):
+    """The playlist half of a "<playlist>::<song>" (or "<playlist>::*") key."""
+    return key.rsplit('::', 1)[0] if isinstance(key, str) and '::' in key else ''
+
+
+def merge_shared_entries(own, other, names):
+    """`own` plus every entry of `other` whose playlist half is in `names`.
+    Own wins a clash, and `setdefault` is what makes that so."""
+    out = dict(own or {})
+    for k, v in (other or {}).items():
+        if isinstance(k, str) and key_playlist(k) in names:
+            out.setdefault(k, v)
+    return out
+
+
+def shared_entries(buckets, user_pl, shares, user):
+    """{key: value} taken from the owners' buckets, for every playlist shared
+    to `user` -- clips and presets alike. The keys are the same bare
+    "<name>::<song>" the caller already uses for their own, so nothing
+    downstream needs to know who owns a playlist."""
+    meta, _ = visible_shares(user_pl, shares, user)
+    by_owner = {}
+    for name, m in meta.items():
+        by_owner.setdefault(m['owner'], set()).add(name)
+    out = {}
+    for owner, names in by_owner.items():
+        out = merge_shared_entries(out, buckets.get(owner) or {}, names)
+    return out
+
+
+def scope_allowed(scope, user, role, srole):
+    """None when a write may proceed, else (http_code, error).
+
+    shared -> admin only. user -> a login that may edit its own; a viewer
+    login is refused, which is what `beatz` has been since 23 Sep. share ->
+    an edit grant on the playlist named in the body, which even a viewer login
+    may hold: the link IS the invitation, and it grants exactly that one
+    playlist and nothing else."""
+    if scope == 'shared':
+        return None if role == 'admin' else (403, 'read-only')
+    if scope == 'user':
+        if not user:
+            return (400, 'no login to own this')
+        return None if role != 'viewer' else (403, 'read-only')
+    if scope == SHARE_SCOPE:
+        return None if srole == 'edit' else (403, 'read-only')
+    return (400, 'scope must be shared, user or share')
 
 
 # ---- accounts ------------------------------------------------------------
@@ -613,24 +734,77 @@ class Handler(BaseHTTPRequestHandler):
         return os.path.join(os.path.dirname(self.queue_path), 'playlists.json')
 
     def _read_playlists(self):
-        """(shared, per-user, rev). A file written before per-user playlists
-        existed has no `userPlaylists` key; it reads as {} and is only given
-        one when something is next written."""
+        """(shared, per-user, shares, links, rev). A file written before
+        per-user playlists or sharing existed has no such keys; each reads as
+        {} and is only given one when something is next written."""
         try:
             with open(self._playlists_path(), encoding='utf-8') as f:
                 d = json.load(f)
             up = d.get('userPlaylists')
-            return d.get('playlists', {}), (up if isinstance(up, dict) else {}), int(d.get('rev', 0))
+            sh = d.get('shares')
+            lk = d.get('shareLinks')
+            return (d.get('playlists', {}), (up if isinstance(up, dict) else {}),
+                    (sh if isinstance(sh, dict) else {}),
+                    (lk if isinstance(lk, dict) else {}), int(d.get('rev', 0)))
         except Exception:
-            return {}, {}, 0
+            return {}, {}, {}, {}, 0
+
+    def _write_playlists(self, shared, user_pl, shares, links, rev):
+        """The ONE writer for playlists.json. It used to be a dict literal
+        inside post_playlists, which silently dropped any key it did not know
+        about -- adding `shares` to the file would have been undone by the next
+        ordinary save, and every grant with it."""
+        tmp = self._playlists_path() + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'playlists': shared, 'userPlaylists': user_pl,
+                       'shares': shares, 'shareLinks': links, 'rev': rev},
+                      f, ensure_ascii=False)
+        os.replace(tmp, self._playlists_path())     # atomic: no half-written file
+
+    def _playlist_payload(self, shared, user_pl, shares, links, rev, user):
+        """What GET returns, what every 200 returns, and (with `error`) what a
+        409 returns -- so a stale client reconciles from exactly the state it
+        would have got from a fresh load. Only the caller's OWN shares and
+        links are in here: nobody sees who else has access to anything."""
+        meta, shadowed = visible_shares(user_pl, shares, user)
+        mine = dict(user_pl.get(user, {}) if user else {})
+        for name, m in meta.items():
+            mine[name] = (user_pl.get(m['owner']) or {}).get(name, [])
+        my_links = {t: {'name': r.get('name'), 'role': r.get('role'),
+                        'created': r.get('created')}
+                    for t, r in links.items()
+                    if isinstance(r, dict) and r.get('owner') == user}
+        return {'ok': True, 'playlists': shared, 'mine': mine,
+                'sharedMeta': meta, 'shadowed': shadowed,
+                'myShares': owned_shares(shares, user), 'myLinks': my_links,
+                'rev': rev}
+
+    def _share_target(self, data, key, user, role):
+        """(scope, owner, denial) for a preset or clip write.
+
+        Resolves the caller's own bucket vs the shared set vs a grant on
+        someone else's playlist, so both handlers agree. `denial` is a
+        (code, error) pair when the write may not proceed at all."""
+        scope = data.get('scope') or 'shared'
+        owner = (data.get('owner') or '').strip()
+        if scope == SHARE_SCOPE:
+            if not valid_login(owner):
+                return scope, owner, (400, 'owner is required')
+            with PLAYLISTS_LOCK:
+                _, user_pl, shares, _, _ = self._read_playlists()
+                name = key_playlist(key)
+                ok = (share_role(shares, user, owner, name) == 'edit'
+                      and name in (user_pl.get(owner) or {}))
+            return scope, owner, None if ok else (403, 'read-only')
+        return scope, owner, scope_allowed(scope, user, role, None)
 
     def get_playlists(self):
-        shared, user_pl, rev = self._read_playlists()
-        # The caller only ever sees their OWN bucket, never anyone else's. The
-        # shared set is returned to everyone, since that is what "shared" means.
+        shared, user_pl, shares, links, rev = self._read_playlists()
+        # The caller only ever sees their own bucket and what has been shared
+        # with them, never anyone else's. The shared set is returned to
+        # everyone, since that is what "shared" means.
         user, _ = self._who()
-        mine = user_pl.get(user, {}) if user else {}
-        return self._json(200, {'ok': True, 'playlists': shared, 'mine': mine, 'rev': rev})
+        return self._json(200, self._playlist_payload(shared, user_pl, shares, links, rev, user))
 
     def post_playlists(self):
         data, err = self._read_json(MAX_BODY)
@@ -655,40 +829,77 @@ class Handler(BaseHTTPRequestHandler):
                            and '\\' not in d and '..' not in d][:500]
 
         # Which set this write is for. "shared" is the set everyone sees and
-        # only an admin may change; "user" is the caller's own bucket, which
-        # any logged-in user may change. Defaulting to "shared" keeps an old
+        # only an admin may change; "user" is the caller's own bucket; "share"
+        # is a per-playlist delta into SOMEONE ELSE's bucket, for a login the
+        # owner gave an edit link to. Defaulting to "shared" keeps an old
         # client (which sends no scope) behaving exactly as before.
         scope = data.get('scope') or 'shared'
-        if scope not in ('shared', 'user'):
-            return self._json(400, {'error': 'scope must be shared or user'})
+        owner = (data.get('owner') or '').strip()
         user, role = self._who()
-        if scope == 'shared' and role != 'admin':
-            return self._json(403, {'error': 'read-only', 'role': role})
-        if scope == 'user' and not user:
-            # A direct call from the box has no login name to file under.
-            return self._json(400, {'error': 'no login to own this playlist'})
+        if scope not in ('shared', 'user', SHARE_SCOPE):
+            return self._json(400, {'error': 'scope must be shared, user or share'})
 
-        shared, user_pl, rev = self._read_playlists()
-        # Last-writer-wins would silently bin a playlist someone else just made
-        # from another phone. The client sends the rev it started from; a stale
-        # one gets the current state back and re-sends its change on top.
-        sent = data.get('rev')
-        if sent is not None and int(sent) != rev:
-            return self._json(409, {'error': 'stale', 'playlists': shared,
-                                    'mine': user_pl.get(user, {}) if user else {}, 'rev': rev})
+        with PLAYLISTS_LOCK:
+            shared, user_pl, shares, links, rev = self._read_playlists()
+            if scope == SHARE_SCOPE:
+                # One owner per write, and every name in it must be one they
+                # gave the caller edit on. Only the names actually sent are
+                # touched: a collaborator's delta can change a playlist but
+                # never delete one.
+                if not valid_login(owner):
+                    return self._json(400, {'error': 'owner is required'})
+                bucket = user_pl.get(owner) or {}
+                for name in clean:
+                    if name not in bucket:
+                        return self._json(404, {'error': 'no such playlist'})
+                    if share_role(shares, user, owner, name) != 'edit':
+                        return self._json(403, {'error': 'read-only', 'role': role})
+            else:
+                denied = scope_allowed(scope, user, role, None)
+                if denied:
+                    return self._json(denied[0], {'error': denied[1], 'role': role})
 
-        if scope == 'shared':
-            shared = clean
-        else:
-            user_pl[user] = clean
-        rev += 1
-        tmp = self._playlists_path() + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump({'playlists': shared, 'userPlaylists': user_pl, 'rev': rev},
-                      f, ensure_ascii=False)
-        os.replace(tmp, self._playlists_path())     # atomic: no half-written file
-        return self._json(200, {'ok': True, 'playlists': shared,
-                                'mine': user_pl.get(user, {}) if user else {}, 'rev': rev})
+            # Last-writer-wins would silently bin a playlist someone else just
+            # made from another phone. The client sends the rev it started
+            # from; a stale one gets the current state back and re-sends on top.
+            sent = data.get('rev')
+            if sent is not None:
+                try:
+                    stale = int(sent) != rev
+                except (TypeError, ValueError):
+                    return self._json(400, {'error': 'bad rev'})
+                if stale:
+                    body = self._playlist_payload(shared, user_pl, shares, links, rev, user)
+                    body.pop('ok', None)
+                    body['error'] = 'stale'
+                    return self._json(409, body)
+
+            if scope == 'shared':
+                shared = clean
+            elif scope == 'user':
+                user_pl[user] = clean
+                # Shares and links for playlists that no longer exist go with
+                # them: a link to a deleted playlist must die with the playlist.
+                for recipient, by_owner in list(shares.items()):
+                    held = by_owner.get(user)
+                    if not isinstance(held, dict):
+                        continue
+                    for gone in [n for n in list(held) if n not in clean]:
+                        del held[gone]
+                    if not held:
+                        del by_owner[user]
+                    if not by_owner:
+                        del shares[recipient]
+                for token in [t for t, r in links.items()
+                              if isinstance(r, dict) and r.get('owner') == user
+                              and r.get('name') not in clean]:
+                    del links[token]
+            else:
+                bucket = user_pl.setdefault(owner, {})
+                bucket.update(clean)
+            rev += 1
+            self._write_playlists(shared, user_pl, shares, links, rev)
+            return self._json(200, self._playlist_payload(shared, user_pl, shares, links, rev, user))
 
     # ---- saved song setups -------------------------------------------
     # "Save Setup" lived in each browser's localStorage, so a mix saved on a
@@ -719,7 +930,14 @@ class Handler(BaseHTTPRequestHandler):
     def get_presets(self):
         shared, user_pr = self._read_presets()
         user, _ = self._who()
-        mine = user_pr.get(user, {}) if user else {}
+        own = user_pr.get(user, {}) if user else {}
+        with PLAYLISTS_LOCK:
+            _, user_pl, shares, _, _ = self._read_playlists()
+        # A collaborator sees the owner's mixes for the playlists shared with
+        # them, under the same bare keys as their own -- the client never has
+        # to know who owns a playlist. Their own entry wins a clash.
+        mine = shared_entries(user_pr, user_pl, shares, user) if user else {}
+        mine.update(own)
         return self._json(200, {'ok': True, 'presets': shared, 'mine': mine})
 
     def post_presets(self):
@@ -754,21 +972,19 @@ class Handler(BaseHTTPRequestHandler):
                 'saved': int(time.time() * 1000),
             }
         # Which set this write is for, exactly as for playlists: "shared" is
-        # the set everyone sees (admin only), "user" is the caller's own.
-        scope = data.get('scope') or 'shared'
-        if scope not in ('shared', 'user'):
-            return self._json(400, {'error': 'scope must be shared or user'})
+        # the set everyone sees (admin only), "user" is the caller's own, and
+        # "share" is a grant on someone else's playlist.
         user, role = self._who()
-        if scope == 'shared' and role != 'admin':
-            return self._json(403, {'error': 'read-only', 'role': role})
-        if scope == 'user' and not user:
-            return self._json(400, {'error': 'no login to own this setup'})
+        scope, owner, denied = self._share_target(data, key, user, role)
+        if denied:
+            return self._json(denied[0], {'error': denied[1], 'role': role})
 
         # Read-modify-write under a lock: the server is threaded, and two saves
         # landing together would otherwise each write a map missing the other.
         with PRESETS_LOCK:
             shared, user_pr = self._read_presets()
-            target = shared if scope == 'shared' else user_pr.setdefault(user, {})
+            bucket_user = owner if scope == SHARE_SCOPE else user
+            target = shared if scope == 'shared' else user_pr.setdefault(bucket_user, {})
             if clean is None:
                 target.pop(key, None)
             else:
@@ -810,7 +1026,13 @@ class Handler(BaseHTTPRequestHandler):
     def get_clips(self):
         shared, user_cl = self._read_clips()
         user, _ = self._who()
-        mine = user_cl.get(user, {}) if user else {}
+        own = user_cl.get(user, {}) if user else {}
+        with PLAYLISTS_LOCK:
+            _, user_pl, shares, _, _ = self._read_playlists()
+        # Same merge as presets: the owner's clips for a playlist shared with
+        # the caller arrive under the same bare keys, own entry winning.
+        mine = shared_entries(user_cl, user_pl, shares, user) if user else {}
+        mine.update(own)
         return self._json(200, {'ok': True, 'clips': shared, 'mine': mine})
 
     def post_clips(self):
@@ -855,20 +1077,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {'error': 'end must come after start'})
             clean = {'start': start, 'end': end}
         # Which set this write is for, exactly as for playlists and presets.
-        scope = data.get('scope') or 'shared'
-        if scope not in ('shared', 'user'):
-            return self._json(400, {'error': 'scope must be shared or user'})
         user, role = self._who()
-        if scope == 'shared' and role != 'admin':
-            return self._json(403, {'error': 'read-only', 'role': role})
-        if scope == 'user' and not user:
-            return self._json(400, {'error': 'no login to own this clip'})
+        scope, owner, denied = self._share_target(data, key, user, role)
+        if denied:
+            return self._json(denied[0], {'error': denied[1], 'role': role})
 
         # Read-modify-write under a lock, as for presets: two people trimming
         # different songs at once must not each write a map missing the other.
         with CLIPS_LOCK:
             shared, user_cl = self._read_clips()
-            target = shared if scope == 'shared' else user_cl.setdefault(user, {})
+            bucket_user = owner if scope == SHARE_SCOPE else user
+            target = shared if scope == 'shared' else user_cl.setdefault(bucket_user, {})
             if clean is None:
                 target.pop(key, None)
             else:
@@ -883,6 +1102,139 @@ class Handler(BaseHTTPRequestHandler):
                 json.dump(out, f, ensure_ascii=False)
             os.replace(tmp, self._clips_path())     # atomic: no half-written file
         return self._json(200, {'ok': True, 'clip': clean})
+
+    # ---- share links --------------------------------------------------
+    # Sharing is by link rather than by typing somebody's login: the owner
+    # makes a view link or an edit link and sends it however they like, and
+    # whoever opens it CLAIMS it -- which needs a login, so a link is an
+    # invitation and never an anonymous grant. The token is the whole
+    # credential, so it is long and random; revoking a link stops new claims,
+    # while people who already claimed keep their grant until the owner removes
+    # them from the share panel.
+    def post_share_links(self):
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        user, _ = self._who()
+        if not user:
+            return self._json(400, {'error': 'login required'})
+        with PLAYLISTS_LOCK:
+            shared, user_pl, shares, links, rev = self._read_playlists()
+            if data.get('revoke'):
+                token = str(data.get('token') or '').strip()
+                rec = links.get(token) if token else None
+                if not isinstance(rec, dict) or rec.get('owner') != user:
+                    return self._json(404, {'error': 'no such link'})
+                del links[token]
+                token = None
+            else:
+                name = str(data.get('name') or '').strip()[:60]
+                lrole = data.get('role')
+                if lrole not in SHARE_ROLES:
+                    return self._json(400, {'error': 'role must be view or edit'})
+                if name not in (user_pl.get(user) or {}):
+                    return self._json(404, {'error': 'no such playlist'})
+                mine_links = [r for r in links.values()
+                              if isinstance(r, dict) and r.get('owner') == user]
+                if len(mine_links) >= MAX_SHARES_PER_PLAYLIST:
+                    return self._json(400, {'error': 'too many share links'})
+                token = secrets.token_urlsafe(12)
+                links[token] = {'owner': user, 'name': name, 'role': lrole,
+                                'created': int(time.time())}
+            rev += 1
+            self._write_playlists(shared, user_pl, shares, links, rev)
+            body = self._playlist_payload(shared, user_pl, shares, links, rev, user)
+            body['token'] = token        # the one just made, or None on a revoke
+            return self._json(200, body)
+
+    def post_share_claim(self):
+        """The recipient's half: opening a link. Idempotent, and it never
+        downgrades -- someone with edit who opens a view link keeps edit --
+        so a second claim costs no rev."""
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        user, _ = self._who()
+        if not user:
+            return self._json(400, {'error': 'login required'})
+        token = str(data.get('token') or '').strip()
+        with PLAYLISTS_LOCK:
+            shared, user_pl, shares, links, rev = self._read_playlists()
+            rec = links.get(token) if token else None
+            if not isinstance(rec, dict):
+                return self._json(404, {'error': 'that link is not valid'})
+            owner, name, lrole = rec.get('owner'), rec.get('name'), rec.get('role')
+            if lrole not in SHARE_ROLES or not valid_login(owner) or not isinstance(name, str):
+                return self._json(404, {'error': 'that link is not valid'})
+            if name not in (user_pl.get(owner) or {}):
+                return self._json(404, {'error': 'that playlist no longer exists'})
+            if owner == user:
+                return self._json(400, {'error': 'that is your own playlist'})
+            held = shares.setdefault(user, {}).setdefault(owner, {})
+            want = 'edit' if 'edit' in (held.get(name), lrole) else 'view'
+            if held.get(name) != want:
+                total = sum(len(m) for m in shares.get(user, {}).values())
+                if total >= MAX_SHARES_IN:
+                    return self._json(400, {'error': 'too many shared playlists'})
+                held[name] = want
+                rev += 1
+                self._write_playlists(shared, user_pl, shares, links, rev)
+            body = self._playlist_payload(shared, user_pl, shares, links, rev, user)
+            body['claimed'] = {'owner': owner, 'name': name, 'role': held.get(name)}
+            return self._json(200, body)
+
+    def post_shares(self):
+        """The owner's grip on their own playlist: remove one person, or change
+        their role. A recipient uses the same call to leave."""
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        user, _ = self._who()
+        if not user:
+            return self._json(400, {'error': 'login required'})
+        name = str(data.get('name') or '').strip()[:60]
+        if not name:
+            return self._json(400, {'error': 'playlist is required'})
+        with PLAYLISTS_LOCK:
+            shared, user_pl, shares, links, rev = self._read_playlists()
+            if data.get('leave'):
+                owner = str(data.get('owner') or '').strip()
+                if not valid_login(owner):
+                    return self._json(400, {'error': 'owner is required'})
+                held = (shares.get(user) or {}).get(owner)
+                if isinstance(held, dict) and name in held:
+                    del held[name]
+                    if not held:
+                        del shares[user][owner]
+                    if not shares.get(user):
+                        del shares[user]
+                    rev += 1
+                    self._write_playlists(shared, user_pl, shares, links, rev)
+            else:
+                if name not in (user_pl.get(user) or {}):
+                    return self._json(404, {'error': 'no such playlist'})
+                recipient = str(data.get('user') or '').strip()
+                if not valid_login(recipient) or recipient == user:
+                    return self._json(400, {'error': 'bad user name'})
+                held = (shares.get(recipient) or {}).get(user)
+                grant = data.get('role')
+                changed = False
+                if grant in SHARE_ROLES:
+                    if held is None:
+                        held = shares.setdefault(recipient, {}).setdefault(user, {})
+                    changed = held.get(name) != grant
+                    held[name] = grant
+                elif isinstance(held, dict) and name in held:
+                    del held[name]
+                    changed = True
+                    if not held:
+                        del shares[recipient][user]
+                    if not shares.get(recipient):
+                        del shares[recipient]
+                if changed:
+                    rev += 1
+                    self._write_playlists(shared, user_pl, shares, links, rev)
+            return self._json(200, self._playlist_payload(shared, user_pl, shares, links, rev, user))
 
     # ---- users -------------------------------------------------------
     # Who may log in and what they may do. The PASSWORD is not here: Caddy
@@ -1071,14 +1423,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.rstrip('/')
-        # The shared set is Iti's and Karan's (see SHARED_WRITES). A viewer is
-        # refused here, before the body is read: nothing they send is used, and
-        # the player expects this exact shape and keeps the change on their own
-        # device instead of showing an error. An editor passes this gate and is
-        # refused inside the handler only if they asked for the SHARED scope --
-        # they may still write their own playlists, presets and clips.
-        if path in SHARED_WRITES and self._who()[1] == 'viewer':
-            return self._json(403, {'error': 'read-only', 'role': 'viewer'})
+        # The refusal that matters is inside each handler, through
+        # scope_allowed: the shared set is admin-only, a login may write its
+        # own, and a share grant lets exactly one playlist be written by
+        # whoever holds the link. A viewer's refused write still comes back
+        # 403 read-only, which is what the player's fallbacks key on.
         if path == '/api/lyrics':
             return self.post_lyrics()
         if path == '/api/playlists':
@@ -1087,6 +1436,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_presets()
         if path == '/api/clips':
             return self.post_clips()
+        if path == '/api/shares':
+            return self.post_shares()
+        if path == '/api/share-links':
+            return self.post_share_links()
+        if path == '/api/share-links/claim':
+            return self.post_share_claim()
         if path == '/api/users':
             return self.post_users()
         if path == '/api/signup':
