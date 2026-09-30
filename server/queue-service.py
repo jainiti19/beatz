@@ -6,6 +6,12 @@ so every request has already passed the site's basic auth. Caddy also names
 the login in X-Beatz-User; since 23 Sep only an admin login may write the
 shared playlists, setups and clips (see "who may change the shared set").
 
+Since 30 Sep there are three roles, not two. `admin` keeps everything;
+`editor` may write their OWN playlists, setups and clips but not the shared
+set; `viewer` is read-only. Roles live in users.json beside the queue files
+(see "roles"), and the password stays in Caddy — server/add-user.sh adds a
+login there and records its role here.
+
 The queue is a JSONL file rather than a database because the consumer is a
 laptop polling over SSH, and a text file is something you can read, fix by hand
 and recover from. Nothing here processes a song; it only records the ask.
@@ -59,10 +65,31 @@ EDGE_BASE_PATH = os.environ.get('BEATZ_EDGE_BASE', '/opt/beatznbox/stem-edge.url
 ADMINS_FILE = os.environ.get('BEATZ_ADMINS_FILE', '/opt/beatznbox/admins.txt')
 DEFAULT_ADMINS = {'admin'}
 
+# Per-user roles, so a login can own playlists without being an admin. Kept
+# beside the queue files, like playlists.json, because that is where the data
+# it scopes already lives. Read on every request (like the token key and the
+# admins file) so adding a user takes effect without a restart.
+#
+# Shape: {"users": {"iti": {"role": "editor"}, "karan": {"role": "admin"}}}
+# A login absent from this file falls back to the admins() rule below, so the
+# existing `admin` and `beatz` logins keep working with no migration.
+USERS_FILE = os.environ.get('BEATZ_USERS_FILE', '/opt/beatznbox/users.json')
+
+# The reserved key under which per-user presets and clips live inside their
+# otherwise-flat files. It contains no "::", so it can never collide with a
+# real "<playlist>::<song>" key.
+USER_PRESETS_KEY = '__user__'
+USER_CLIPS_KEY = '__user__'
+
 # The endpoints that write what everyone shares. Everything else stays open to
 # every login: requests, fault reports and pasted lyrics are how testers help,
 # and each only ever appends a note for the watcher to act on.
 SHARED_WRITES = {'/api/playlists', '/api/presets', '/api/clips'}
+
+# Roles, weakest first. `editor` may write their OWN playlists, presets and
+# clips; `admin` may also write the shared set and manage users. `viewer` is
+# read-only, which is what `beatz` has been since 23 Sep.
+ROLES = ('viewer', 'editor', 'admin')
 
 
 def admins():
@@ -76,6 +103,43 @@ def admins():
         return names
     except OSError:
         return set(DEFAULT_ADMINS)
+
+
+def users():
+    """{login: role} from users.json, or {} when the file is absent.
+
+    A missing or unreadable file is not an error: the service then falls back
+    to admins() for every login, which is exactly how it behaved before this
+    file existed."""
+    try:
+        with open(USERS_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+    except Exception:
+        return {}
+    out = {}
+    for name, rec in (d.get('users') or {}).items():
+        if not isinstance(name, str) or not name.strip():
+            continue
+        role = rec.get('role') if isinstance(rec, dict) else rec
+        if role in ROLES:
+            out[name.strip()] = role
+    return out
+
+
+def role_of(login):
+    """The role for a login name, or None when the login is unknown.
+
+    users.json wins when it names the login; otherwise the admins() rule
+    decides, so `admin` stays admin and `beatz` stays a viewer without either
+    being written into the new file."""
+    if not login:
+        return None
+    known = users()
+    if login in known:
+        return known[login]
+    if login in admins():
+        return 'admin'
+    return 'viewer'
 
 
 MAX_BODY = 4096          # a request is a song name, not a payload
@@ -201,7 +265,7 @@ class Handler(BaseHTTPRequestHandler):
                 return None, 'admin'
             return None, 'viewer'
         user = user.strip()
-        return user, ('admin' if user and user in admins() else 'viewer')
+        return user, (role_of(user) or 'viewer')
 
     def _pending(self):
         """Requests still waiting, NOT the size of the queue file.
@@ -292,16 +356,24 @@ class Handler(BaseHTTPRequestHandler):
         return os.path.join(os.path.dirname(self.queue_path), 'playlists.json')
 
     def _read_playlists(self):
+        """(shared, per-user, rev). A file written before per-user playlists
+        existed has no `userPlaylists` key; it reads as {} and is only given
+        one when something is next written."""
         try:
             with open(self._playlists_path(), encoding='utf-8') as f:
                 d = json.load(f)
-            return d.get('playlists', {}), int(d.get('rev', 0))
+            up = d.get('userPlaylists')
+            return d.get('playlists', {}), (up if isinstance(up, dict) else {}), int(d.get('rev', 0))
         except Exception:
-            return {}, 0
+            return {}, {}, 0
 
     def get_playlists(self):
-        pl, rev = self._read_playlists()
-        return self._json(200, {'ok': True, 'playlists': pl, 'rev': rev})
+        shared, user_pl, rev = self._read_playlists()
+        # The caller only ever sees their OWN bucket, never anyone else's. The
+        # shared set is returned to everyone, since that is what "shared" means.
+        user, _ = self._who()
+        mine = user_pl.get(user, {}) if user else {}
+        return self._json(200, {'ok': True, 'playlists': shared, 'mine': mine, 'rev': rev})
 
     def post_playlists(self):
         data, err = self._read_json(MAX_BODY)
@@ -325,20 +397,41 @@ class Handler(BaseHTTPRequestHandler):
                            if isinstance(d, str) and d and '/' not in d
                            and '\\' not in d and '..' not in d][:500]
 
-        cur, rev = self._read_playlists()
+        # Which set this write is for. "shared" is the set everyone sees and
+        # only an admin may change; "user" is the caller's own bucket, which
+        # any logged-in user may change. Defaulting to "shared" keeps an old
+        # client (which sends no scope) behaving exactly as before.
+        scope = data.get('scope') or 'shared'
+        if scope not in ('shared', 'user'):
+            return self._json(400, {'error': 'scope must be shared or user'})
+        user, role = self._who()
+        if scope == 'shared' and role != 'admin':
+            return self._json(403, {'error': 'read-only', 'role': role})
+        if scope == 'user' and not user:
+            # A direct call from the box has no login name to file under.
+            return self._json(400, {'error': 'no login to own this playlist'})
+
+        shared, user_pl, rev = self._read_playlists()
         # Last-writer-wins would silently bin a playlist someone else just made
         # from another phone. The client sends the rev it started from; a stale
         # one gets the current state back and re-sends its change on top.
         sent = data.get('rev')
         if sent is not None and int(sent) != rev:
-            return self._json(409, {'error': 'stale', 'playlists': cur, 'rev': rev})
+            return self._json(409, {'error': 'stale', 'playlists': shared,
+                                    'mine': user_pl.get(user, {}) if user else {}, 'rev': rev})
 
+        if scope == 'shared':
+            shared = clean
+        else:
+            user_pl[user] = clean
         rev += 1
         tmp = self._playlists_path() + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump({'playlists': clean, 'rev': rev}, f, ensure_ascii=False)
+            json.dump({'playlists': shared, 'userPlaylists': user_pl, 'rev': rev},
+                      f, ensure_ascii=False)
         os.replace(tmp, self._playlists_path())     # atomic: no half-written file
-        return self._json(200, {'ok': True, 'playlists': clean, 'rev': rev})
+        return self._json(200, {'ok': True, 'playlists': shared,
+                                'mine': user_pl.get(user, {}) if user else {}, 'rev': rev})
 
     # ---- saved song setups -------------------------------------------
     # "Save Setup" lived in each browser's localStorage, so a mix saved on a
@@ -350,15 +443,27 @@ class Handler(BaseHTTPRequestHandler):
         return os.path.join(os.path.dirname(self.queue_path), 'presets.json')
 
     def _read_presets(self):
+        """(shared, per-user). The file has always been a flat map of
+        "<playlist>::<song>" -> setup, and stays that way: the per-user setups
+        live under a single reserved key, so an old file reads correctly and a
+        new one is still readable by anything that only knows the flat shape.
+        The reserved key is not a valid preset key (it has no "::"), so it can
+        never collide with a real one."""
         try:
             with open(self._presets_path(), encoding='utf-8') as f:
                 d = json.load(f)
-            return d if isinstance(d, dict) else {}
         except Exception:
-            return {}
+            return {}, {}
+        if not isinstance(d, dict):
+            return {}, {}
+        up = d.pop(USER_PRESETS_KEY, None)
+        return d, (up if isinstance(up, dict) else {})
 
     def get_presets(self):
-        return self._json(200, {'ok': True, 'presets': self._read_presets()})
+        shared, user_pr = self._read_presets()
+        user, _ = self._who()
+        mine = user_pr.get(user, {}) if user else {}
+        return self._json(200, {'ok': True, 'presets': shared, 'mine': mine})
 
     def post_presets(self):
         data, err = self._read_json(MAX_BODY)
@@ -391,19 +496,34 @@ class Handler(BaseHTTPRequestHandler):
                 'tag': str(setup.get('tag') or '')[:40],
                 'saved': int(time.time() * 1000),
             }
+        # Which set this write is for, exactly as for playlists: "shared" is
+        # the set everyone sees (admin only), "user" is the caller's own.
+        scope = data.get('scope') or 'shared'
+        if scope not in ('shared', 'user'):
+            return self._json(400, {'error': 'scope must be shared or user'})
+        user, role = self._who()
+        if scope == 'shared' and role != 'admin':
+            return self._json(403, {'error': 'read-only', 'role': role})
+        if scope == 'user' and not user:
+            return self._json(400, {'error': 'no login to own this setup'})
+
         # Read-modify-write under a lock: the server is threaded, and two saves
         # landing together would otherwise each write a map missing the other.
         with PRESETS_LOCK:
-            presets = self._read_presets()
+            shared, user_pr = self._read_presets()
+            target = shared if scope == 'shared' else user_pr.setdefault(user, {})
             if clean is None:
-                presets.pop(key, None)
+                target.pop(key, None)
             else:
-                if key not in presets and len(presets) >= 5000:
+                if key not in target and len(target) >= 5000:
                     return self._json(400, {'error': 'too many saved setups'})
-                presets[key] = clean
+                target[key] = clean
+            out = dict(shared)
+            if user_pr:
+                out[USER_PRESETS_KEY] = user_pr
             tmp = self._presets_path() + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(presets, f, ensure_ascii=False)
+                json.dump(out, f, ensure_ascii=False)
             os.replace(tmp, self._presets_path())
         return self._json(200, {'ok': True, 'setup': clean})
 
@@ -418,15 +538,23 @@ class Handler(BaseHTTPRequestHandler):
         return os.path.join(os.path.dirname(self.queue_path), 'clips.json')
 
     def _read_clips(self):
+        """(shared, per-user), same flat-file-with-a-reserved-key shape as
+        presets."""
         try:
             with open(self._clips_path(), encoding='utf-8') as f:
                 d = json.load(f)
-            return d if isinstance(d, dict) else {}
         except Exception:
-            return {}
+            return {}, {}
+        if not isinstance(d, dict):
+            return {}, {}
+        up = d.pop(USER_CLIPS_KEY, None)
+        return d, (up if isinstance(up, dict) else {})
 
     def get_clips(self):
-        return self._json(200, {'ok': True, 'clips': self._read_clips()})
+        shared, user_cl = self._read_clips()
+        user, _ = self._who()
+        mine = user_cl.get(user, {}) if user else {}
+        return self._json(200, {'ok': True, 'clips': shared, 'mine': mine})
 
     def post_clips(self):
         data, err = self._read_json(MAX_BODY)
@@ -469,29 +597,106 @@ class Handler(BaseHTTPRequestHandler):
                 if end is None or end <= start:
                     return self._json(400, {'error': 'end must come after start'})
             clean = {'start': start, 'end': end}
+        # Which set this write is for, exactly as for playlists and presets.
+        scope = data.get('scope') or 'shared'
+        if scope not in ('shared', 'user'):
+            return self._json(400, {'error': 'scope must be shared or user'})
+        user, role = self._who()
+        if scope == 'shared' and role != 'admin':
+            return self._json(403, {'error': 'read-only', 'role': role})
+        if scope == 'user' and not user:
+            return self._json(400, {'error': 'no login to own this clip'})
+
         # Read-modify-write under a lock, as for presets: two people trimming
         # different songs at once must not each write a map missing the other.
         with CLIPS_LOCK:
-            clips = self._read_clips()
+            shared, user_cl = self._read_clips()
+            target = shared if scope == 'shared' else user_cl.setdefault(user, {})
             if clean is None:
-                clips.pop(key, None)
+                target.pop(key, None)
             else:
-                if key not in clips and len(clips) >= 5000:
+                if key not in target and len(target) >= 5000:
                     return self._json(400, {'error': 'too many clips'})
-                clips[key] = clean
+                target[key] = clean
+            out = dict(shared)
+            if user_cl:
+                out[USER_CLIPS_KEY] = user_cl
             tmp = self._clips_path() + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(clips, f, ensure_ascii=False)
+                json.dump(out, f, ensure_ascii=False)
             os.replace(tmp, self._clips_path())     # atomic: no half-written file
         return self._json(200, {'ok': True, 'clip': clean})
 
+    # ---- users -------------------------------------------------------
+    # Who may log in and what they may do. The PASSWORD is not here: Caddy
+    # owns it (bcrypt in the Caddyfile), and server/add-user.sh is what adds a
+    # login there. This file only records the ROLE, so the service can decide
+    # what a login may write without reimplementing password storage.
+    def _read_users(self):
+        try:
+            with open(USERS_FILE, encoding='utf-8') as f:
+                d = json.load(f)
+        except Exception:
+            return {}
+        return d.get('users') if isinstance(d.get('users'), dict) else {}
+
+    def get_users(self):
+        if self._who()[1] != 'admin':
+            return self._json(403, {'error': 'read-only', 'role': self._who()[1]})
+        known = self._read_users()
+        # Every login the service knows about, whether it came from users.json
+        # or the admins() rule, so the list is not missing the two accounts
+        # that predate the file.
+        out = {}
+        for name in set(known) | admins():
+            role = role_of(name)
+            if role:
+                out[name] = {'role': role,
+                             'inFile': name in known}
+        return self._json(200, {'ok': True, 'users': out})
+
+    def post_users(self):
+        if self._who()[1] != 'admin':
+            return self._json(403, {'error': 'read-only', 'role': self._who()[1]})
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        name = (data.get('user') or '').strip()
+        role = data.get('role')
+        if not name or len(name) > 40 or not re.fullmatch(r'[A-Za-z0-9_.-]+', name):
+            return self._json(400, {'error': 'bad user name'})
+        if role not in ROLES:
+            return self._json(400, {'error': 'role must be one of ' + ', '.join(ROLES)})
+        # Refuse to demote the last admin: with no admin left, nobody can
+        # change the shared set or add users back, and the only way out is a
+        # shell on the box.
+        if role != 'admin':
+            remaining = {n for n in set(self._read_users()) | admins()
+                         if n != name and role_of(n) == 'admin'}
+            if not remaining:
+                return self._json(400, {'error': 'that would leave no admin'})
+        known = self._read_users()
+        if data.get('delete'):
+            known.pop(name, None)
+        else:
+            known[name] = {'role': role}
+        tmp = USERS_FILE + '.tmp'
+        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'users': known}, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, USERS_FILE)
+        return self._json(200, {'ok': True, 'user': name, 'role': role,
+                                'deleted': bool(data.get('delete'))})
+
     def do_POST(self):
         path = self.path.rstrip('/')
-        # The shared set is Iti's and Karan's (see SHARED_WRITES). Refused
-        # before the body is read: nothing a viewer sends here is used. The
-        # player expects this exact shape and keeps the change on the
-        # viewer's own device instead of showing an error.
-        if path in SHARED_WRITES and self._who()[1] != 'admin':
+        # The shared set is Iti's and Karan's (see SHARED_WRITES). A viewer is
+        # refused here, before the body is read: nothing they send is used, and
+        # the player expects this exact shape and keeps the change on their own
+        # device instead of showing an error. An editor passes this gate and is
+        # refused inside the handler only if they asked for the SHARED scope --
+        # they may still write their own playlists, presets and clips.
+        if path in SHARED_WRITES and self._who()[1] == 'viewer':
             return self._json(403, {'error': 'read-only', 'role': 'viewer'})
         if path == '/api/lyrics':
             return self.post_lyrics()
@@ -501,6 +706,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_presets()
         if path == '/api/clips':
             return self.post_clips()
+        if path == '/api/users':
+            return self.post_users()
         if path == '/api/report':
             return self.post_report()
         if path != '/api/request':
@@ -625,6 +832,8 @@ class Handler(BaseHTTPRequestHandler):
             # refusal that matters is in do_POST.
             user, role = self._who()
             return self._json(200, {'user': user, 'role': role,
+                                    'canEditShared': role == 'admin',
+                                    'canEditOwn': role in ('admin', 'editor'),
                                     'local': user is None and role == 'admin'})
         if path == '/api/playlists':
             return self.get_playlists()
@@ -632,6 +841,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.get_presets()
         if path == '/api/clips':
             return self.get_clips()
+        if path == '/api/users':
+            return self.get_users()
         if path == '/api/stem-token':
             token, exp = mint_stem_token()
             if not token:
