@@ -1007,6 +1007,10 @@ class Handler(BaseHTTPRequestHandler):
                           cookie=self._session_cookie(user))
 
     def post_logout(self):
+        # Clears the browser's cookie. The token itself stays valid until it
+        # expires: HMAC sessions are stateless, so there is nothing to revoke
+        # server-side. Acceptable here -- 30-day TTL, HttpOnly, and this is a
+        # party app whose worst-case loss is someone else's playlists.
         return self._json(200, {'ok': True}, cookie=self._expired_session_cookie())
 
     def get_me(self):

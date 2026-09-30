@@ -4974,13 +4974,18 @@ body {
         document.getElementById('authSwitch').addEventListener('click', () => {
             showAuthScreen(AUTH_MODE === 'signup' ? 'login' : 'signup');
         });
-        loadSongList();
-        loadPlaylists();
-        // Setups wait for whoami: whether this browser may send up its old
-        // setups (the one-off migration) depends on the login. Nothing else
-        // waits -- playlists, clips and playback load as before.
-        loadWhoami().then(loadPresets);
-        loadClips();
+        loadSongList();     // not per-login; can start straight away
+        // Playlists, clips and setups are ALL keyed by the login now, so all
+        // three wait for whoami. Called before it, ME is still null and
+        // pickSet() answers with the SHARED set -- an account or an editor
+        // loaded an empty set and overwrote its own localStorage copy with it,
+        // so its playlists were simply gone on every fresh load and no clip
+        // row could ever appear (no playlist to select).
+        loadWhoami().then(() => {
+            loadPresets();
+            loadPlaylists();
+            loadClips();
+        });
         initOffline();
         renderBell();
         pollRequests();

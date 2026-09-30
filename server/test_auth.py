@@ -208,6 +208,26 @@ class AuthFlow(unittest.TestCase):
         status, me, _ = self.request('GET', '/api/me')
         self.assertIsNone(me.get('user'), 'with no cookie there is no login')
 
+    def test_08_personal_clip_round_trip(self):
+        """Clips follow the same rule as playlists: an editor/account writes
+        its own, the shared set is refused."""
+        status, d, sc = self.request('POST', '/api/login',
+                                     {'user': 'alice', 'password': ALICE})
+        self.assertEqual(status, 200, d)
+        cookie = cookie_value(sc)
+        key = 'My Set::song_a'
+        status, d, _ = self.request('POST', '/api/clips',
+                                    {'key': key, 'clip': {'start': 1.5, 'end': 30.0},
+                                     'scope': 'user'}, cookie=cookie)
+        self.assertEqual(status, 200, d)
+        status, d, _ = self.request('GET', '/api/clips', cookie=cookie)
+        self.assertEqual(d['mine'].get(key), {'start': 1.5, 'end': 30.0})
+        self.assertEqual(d.get('clips'), {}, 'the shared clips must be untouched')
+        status, d, _ = self.request('POST', '/api/clips',
+                                    {'key': key, 'clip': {'start': 2, 'end': 3},
+                                     'scope': 'shared'}, cookie=cookie)
+        self.assertEqual(status, 403, d)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
