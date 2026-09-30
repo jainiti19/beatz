@@ -84,12 +84,17 @@ DEFAULT_ADMINS = {'admin'}
 # Shape: {"users": {"iti": {"role": "editor"}, "karan": {"role": "admin"}}}
 # A login absent from this file falls back to the admins() rule below, so the
 # existing `admin` and `beatz` logins keep working with no migration.
-USERS_FILE = os.environ.get('BEATZ_USERS_FILE', '/opt/beatznbox/users.json')
+# Where users.json lives. Defaults to the queue directory (set in main() from
+# --queue), so a --dev run keeps every file it writes under one scratch
+# directory and never touches /opt/beatznbox. BEATZ_USERS_FILE overrides it,
+# which is what the VPS uses.
+USERS_FILE = os.environ.get('BEATZ_USERS_FILE', '')
 
 # The key that signs session cookies. Deliberately NOT the stem-token key: a
 # stem token is handed to a browser to fetch audio, and if one leaked it must
 # not also be a login. Generated on first use, 0600, beside the other keys.
-SESSION_KEY_FILE = os.environ.get('BEATZ_SESSION_KEY_FILE', '/opt/beatznbox/session.key')
+# Same rule as USERS_FILE: beside the queue files unless overridden.
+SESSION_KEY_FILE = os.environ.get('BEATZ_SESSION_KEY_FILE', '')
 
 # How long a login lasts. Long, because this is a party app and nobody wants
 # to type a password every time they open it; the cookie is HttpOnly and the
@@ -1225,7 +1230,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global DEV, WEB_DIR
+    global DEV, WEB_DIR, USERS_FILE, SESSION_KEY_FILE
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8931)
     ap.add_argument('--queue', default='/opt/beatznbox/queue/requests.jsonl')
@@ -1237,7 +1242,16 @@ def main():
     DEV = a.dev
     WEB_DIR = a.web
     Handler.queue_path = a.queue
-    os.makedirs(os.path.dirname(a.queue), exist_ok=True)
+    # users.json and session.key sit beside the queue files unless the
+    # environment names them. On the VPS that is /opt/beatznbox/queue/../,
+    # which is where they already are; on a laptop it is the scratch
+    # directory, so a --dev run writes nothing outside it.
+    qdir = os.path.dirname(os.path.abspath(a.queue))
+    if not USERS_FILE:
+        USERS_FILE = os.path.join(qdir, 'users.json')
+    if not SESSION_KEY_FILE:
+        SESSION_KEY_FILE = os.path.join(qdir, 'session.key')
+    os.makedirs(qdir, exist_ok=True)
     ThreadingHTTPServer(('127.0.0.1', a.port), Handler).serve_forever()
 
 
