@@ -1698,9 +1698,10 @@
                 ME = await r.json();
                 setRole(ME.role);
                 showLogin(ME.user);
-                // A Caddy login has no account and needs no screen. An account,
-                // or nobody at all, does.
-                if (ME.account || !ME.user) hideAuthScreen();
+                // A Caddy login has no account and needs no screen: Caddy
+                // already asked. An account has one, and nobody at all needs
+                // the screen most of all -- that is the whole point of it.
+                if (ME.user && !ME.account) hideAuthScreen();
                 else showAuthScreen('login');
             } catch (e) {
                 // Offline: keep whatever this device last knew.
