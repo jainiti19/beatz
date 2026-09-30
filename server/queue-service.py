@@ -1593,6 +1593,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_report()
         if path != '/api/request':
             return self._json(404, {'error': 'not found'})
+        if self._logged_in() is None:
+            return
         data, err = self._read_json(MAX_BODY)
         if err is not None:
             return
@@ -1639,12 +1641,29 @@ class Handler(BaseHTTPRequestHandler):
             os.fsync(f.fileno())
         return self._json(200, {'ok': True, 'id': entry['id'], 'name': name})
 
+    def _logged_in(self):
+        """(user, role), or None after having refused an anonymous write.
+
+        While the site sits behind Caddy's password every caller is already
+        somebody. Open the site (30 Sep) and "anonymous" becomes the whole
+        internet -- so the three endpoints whose output the laptop then ACTS
+        on (it downloads a requested song, it files a report, it aligns pasted
+        lyrics) ask for a login. Reading stays open, and so does the live
+        lyrics page: that is the one thing a stranger is meant to reach."""
+        user, role = self._who()
+        if user or role == 'admin':     # role admin with no name = a local call
+            return user, role
+        self._json(403, {'error': 'login required'})
+        return None
+
     def post_lyrics(self):
         """Words pasted in the player for a song LRCLIB does not carry.
 
         Written to a drop directory rather than the request queue: the watcher
         treats these differently — no download, no separation, just align the
         words against stems that already exist."""
+        if self._logged_in() is None:
+            return
         data, err = self._read_json(MAX_LYRICS)
         if err is not None:
             return
@@ -1676,6 +1695,8 @@ class Handler(BaseHTTPRequestHandler):
         Appended, never rewritten: the same rule the request queue follows, so
         a half-finished write cannot lose what came before it.
         """
+        if self._logged_in() is None:
+            return
         data, err = self._read_json(MAX_BODY)
         if err is not None:
             return
@@ -1735,6 +1756,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.get_live_lyrics(rest[:-len('/lyrics')].strip('/'))
             return self.get_live(rest)
         if path == '/api/stem-token':
+            # A LOGIN is required to mint one. The token unlocks the whole
+            # library from the edge, so the moment the site is reachable
+            # without the Caddy password this line is what keeps the audio
+            # private. Caddy logins still pass it (they arrive with a name);
+            # a call from the box itself (role admin, no name) does too.
+            user, role = self._who()
+            if not user and role != 'admin':
+                return self._json(403, {'error': 'login required'})
             token, exp = mint_stem_token()
             if not token:
                 # No key on the box means the edge is not set up. Say so

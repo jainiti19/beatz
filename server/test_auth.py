@@ -604,5 +604,46 @@ class Live(ServiceCase):
             self.assertEqual(status, 400, (body, d))
 
 
+class PublicDoor(ServiceCase):
+    """What an ANONYMOUS visitor may do once the site is reachable without the
+    Caddy password (the 30 Sep rollout). Reading and the live lyrics page are
+    open -- that is the point of a link you can send anybody -- while the three
+    endpoints whose output the laptop then ACTS on need a login, or the public
+    internet can fill the download queue."""
+
+    seed_accounts = {'fan': ('fanpass123', 'editor')}
+
+    def test_01_anonymous_writes_that_feed_the_pipeline_are_refused(self):
+        for path, body in (('/api/request', {'song': 'Kesariya'}),
+                           ('/api/report', {'dir': 'Kesariya', 'reason': 'wrong-song'}),
+                           ('/api/lyrics', {'dir': 'Kesariya', 'lyrics': 'a\nb\nc\nd\n'})):
+            status, d, _ = self.request('POST', path, body)
+            self.assertEqual(status, 403, (path, d))
+
+    def test_02_anonymous_cannot_mint_a_library_token(self):
+        status, d, _ = self.request('GET', '/api/stem-token')
+        self.assertEqual(status, 403, d)
+        # Signed in, the same call gets past the login check and fails on the
+        # missing key file instead -- 503, not 403. That difference is the
+        # whole assertion.
+        cookie = self.login_cookie('fan', 'fanpass123')
+        status, d, _ = self.request('GET', '/api/stem-token', cookie=cookie)
+        self.assertEqual(status, 503, d)
+
+    def test_03_signed_in_writes_still_work(self):
+        cookie = self.login_cookie('fan', 'fanpass123')
+        status, d, _ = self.request('POST', '/api/report',
+                                    {'dir': 'Kesariya', 'reason': 'wrong-song'}, cookie=cookie)
+        self.assertEqual(status, 200, d)
+        status, d, _ = self.request('POST', '/api/request',
+                                    {'song': 'Kesariya'}, cookie=cookie)
+        self.assertEqual(status, 200, d)
+
+    def test_04_reading_stays_open(self):
+        for path in ('/api/health', '/api/playlists', '/api/clips', '/api/presets'):
+            status, d, _ = self.request('GET', path)
+            self.assertEqual(status, 200, (path, d))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
