@@ -12,6 +12,17 @@ set; `viewer` is read-only. Roles live in users.json beside the queue files
 (see "roles"), and the password stays in Caddy — server/add-user.sh adds a
 login there and records its role here.
 
+Also since 30 Sep, people can make their OWN account: POST /api/signup takes
+a name and a password, stores a bcrypt hash in users.json under "accounts",
+and sets a signed session cookie. Those accounts are separate from the Caddy
+logins above: a Caddy login is authenticated by Caddy and arrives as
+X-Beatz-User, an account is authenticated here. A session cookie wins over
+the header when both are present. New accounts see only their own playlists,
+setups and clips; the shared set stays with the Caddy logins, unchanged.
+
+Run with --dev to test on a laptop: no Caddy, so X-Beatz-User is ignored and
+the session cookie is the only way in, and the player is served from --web.
+
 The queue is a JSONL file rather than a database because the consumer is a
 laptop polling over SSH, and a text file is something you can read, fix by hand
 and recover from. Nothing here processes a song; it only records the ask.
@@ -74,6 +85,32 @@ DEFAULT_ADMINS = {'admin'}
 # A login absent from this file falls back to the admins() rule below, so the
 # existing `admin` and `beatz` logins keep working with no migration.
 USERS_FILE = os.environ.get('BEATZ_USERS_FILE', '/opt/beatznbox/users.json')
+
+# The key that signs session cookies. Deliberately NOT the stem-token key: a
+# stem token is handed to a browser to fetch audio, and if one leaked it must
+# not also be a login. Generated on first use, 0600, beside the other keys.
+SESSION_KEY_FILE = os.environ.get('BEATZ_SESSION_KEY_FILE', '/opt/beatznbox/session.key')
+
+# How long a login lasts. Long, because this is a party app and nobody wants
+# to type a password every time they open it; the cookie is HttpOnly and the
+# site is behind Caddy, so the exposure is small.
+SESSION_TTL = 30 * 24 * 3600
+
+# Signup and login are the only endpoints an unauthenticated caller can reach,
+# so they are the only ones worth guessing at. A small in-memory counter per
+# IP blunts that without a dependency. Not a substitute for fail2ban.
+AUTH_ATTEMPTS = {}          # ip -> [timestamps]
+AUTH_ATTEMPTS_LOCK = threading.Lock()
+AUTH_MAX = 10               # attempts
+AUTH_WINDOW = 15 * 60       # seconds
+
+# Set by --dev. In dev there is no Caddy in front, so X-Beatz-User cannot be
+# trusted and the session cookie is the only way in. It also relaxes the
+# cookie's Secure flag, since localhost is plain http.
+DEV = False
+
+# Where the player's files live, for --dev. Set from --web in main().
+WEB_DIR = '/opt/beatznbox/web'
 
 # The reserved key under which per-user presets and clips live inside their
 # otherwise-flat files. It contains no "::", so it can never collide with a
@@ -140,6 +177,132 @@ def role_of(login):
     if login in admins():
         return 'admin'
     return 'viewer'
+
+
+# ---- accounts ------------------------------------------------------------
+# A real account, with a password the person chose, as opposed to the Caddy
+# logins above. Kept in the same users.json, under a different key, so the
+# two systems share one file and one reader. The Caddy logins have no "pw"
+# and are never checked here; they are authenticated by Caddy and arrive as
+# X-Beatz-User. An account has a "pw" and is authenticated by this service.
+#
+# Shape: {"users": {"iti": {"role": "admin"}},
+#         "accounts": {"karan": {"pw": "$2b$12$...", "role": "editor",
+#                                "created": "2026-09-30T12:00:00Z"}}}
+ACCOUNTS_KEY = 'accounts'
+
+
+def accounts():
+    """{login: record} from users.json's "accounts" map, or {}."""
+    try:
+        with open(USERS_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+    except Exception:
+        return {}
+    a = d.get(ACCOUNTS_KEY)
+    return a if isinstance(a, dict) else {}
+
+
+def _write_users(d):
+    """Write users.json atomically, 0600: it holds password hashes."""
+    tmp = USERS_FILE + '.tmp'
+    os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, USERS_FILE)
+
+
+def _read_users_file():
+    try:
+        with open(USERS_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def hash_password(pw):
+    """bcrypt, cost 12. Imported lazily so the service still starts (and the
+    Caddy logins still work) on a box where bcrypt is not installed yet."""
+    import bcrypt
+    return bcrypt.hashpw(pw.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('ascii')
+
+
+def check_password(pw, hashed):
+    import bcrypt
+    try:
+        return bcrypt.checkpw(pw.encode('utf-8'), hashed.encode('ascii'))
+    except Exception:
+        return False
+
+
+def session_key():
+    """The signing key, generated on first use. Read on every call (like the
+    stem key) so rotating it takes effect without a restart."""
+    try:
+        with open(SESSION_KEY_FILE, 'rb') as f:
+            k = f.read().strip()
+        if k:
+            return k
+    except OSError:
+        pass
+    k = secrets.token_bytes(32)
+    os.makedirs(os.path.dirname(SESSION_KEY_FILE), exist_ok=True)
+    fd = os.open(SESSION_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(k)
+    return k
+
+
+def make_session(user):
+    """v1.<user>.<exp>.<hmac>. The user is base64url'd so a name with a dot in
+    it cannot be mistaken for the separator."""
+    exp = int(time.time()) + SESSION_TTL
+    u = base64.urlsafe_b64encode(user.encode('utf-8')).decode('ascii').rstrip('=')
+    msg = f'v1.{u}.{exp}'
+    sig = hmac.new(session_key(), msg.encode('ascii'), hashlib.sha256).hexdigest()
+    return f'{msg}.{sig}'
+
+
+def read_session(value):
+    """The login name in a session cookie, or None if it is absent, malformed,
+    expired or not signed by us."""
+    if not value:
+        return None
+    parts = value.split('.')
+    if len(parts) != 4 or parts[0] != 'v1':
+        return None
+    _, u, exp, sig = parts
+    msg = f'v1.{u}.{exp}'
+    want = hmac.new(session_key(), msg.encode('ascii'), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, want):
+        return None
+    try:
+        if int(exp) < time.time():
+            return None
+        pad = '=' * (-len(u) % 4)
+        return base64.urlsafe_b64decode(u + pad).decode('utf-8')
+    except Exception:
+        return None
+
+
+def auth_rate_ok(ip):
+    """False when this IP has made too many signup/login attempts lately."""
+    now = time.time()
+    with AUTH_ATTEMPTS_LOCK:
+        hits = [t for t in AUTH_ATTEMPTS.get(ip, []) if now - t < AUTH_WINDOW]
+        if len(hits) >= AUTH_MAX:
+            AUTH_ATTEMPTS[ip] = hits
+            return False
+        hits.append(now)
+        AUTH_ATTEMPTS[ip] = hits
+        # Keep the map from growing without bound on a long-running box.
+        if len(AUTH_ATTEMPTS) > 1000:
+            for k in [k for k, v in AUTH_ATTEMPTS.items()
+                      if not [t for t in v if now - t < AUTH_WINDOW]]:
+                AUTH_ATTEMPTS.pop(k, None)
+        return True
 
 
 MAX_BODY = 4096          # a request is a song name, not a payload
@@ -231,6 +394,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _cookie(self, name):
+        """One cookie's value, or None. The header is a single line of
+        name=value pairs; we only ever read our own, so a full parser is not
+        worth it."""
+        raw = self.headers.get('Cookie')
+        if not raw:
+            return None
+        for part in raw.split(';'):
+            k, _, v = part.strip().partition('=')
+            if k == name:
+                return v
+        return None
+
+    def _set_session_cookie(self, user):
+        val = make_session(user)
+        bits = [f'beatz_session={val}', 'Path=/', 'HttpOnly', 'SameSite=Lax',
+                f'Max-Age={SESSION_TTL}']
+        if not DEV:
+            bits.append('Secure')
+        self.send_header('Set-Cookie', '; '.join(bits))
+
+    def _clear_session_cookie(self):
+        bits = ['beatz_session=', 'Path=/', 'HttpOnly', 'SameSite=Lax',
+                'Max-Age=0']
+        if not DEV:
+            bits.append('Secure')
+        self.send_header('Set-Cookie', '; '.join(bits))
+
     def _who(self):
         """(login, role) for this request; role is 'admin' or 'viewer'.
 
@@ -259,9 +450,23 @@ class Handler(BaseHTTPRequestHandler):
         The laptop's watcher never appears here at all: it works over SSH on
         the queue files, not through this service.
         """
+        # A session cookie wins over the Caddy header: a real account is a
+        # stronger statement of who this is than a shared basic-auth login.
+        # In --dev there is no Caddy, so the header is ignored entirely --
+        # trusting it there would let anyone on the LAN claim to be admin.
+        if not DEV:
+            sess = read_session(self._cookie('beatz_session'))
+            if sess:
+                acct = accounts().get(sess)
+                if acct:
+                    return sess, (acct.get('role') if acct.get('role') in ROLES else 'editor')
+                # A cookie for an account that has since been deleted: treat
+                # it as no login at all rather than falling through to the
+                # header, which would silently promote it to a Caddy login.
+                return None, 'viewer'
         user = self.headers.get('X-Beatz-User')
         if user is None:
-            if self.headers.get('X-Forwarded-For') is None:
+            if self.headers.get('X-Forwarded-For') is None and not DEV:
                 return None, 'admin'
             return None, 'viewer'
         user = user.strip()
@@ -688,6 +893,125 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {'ok': True, 'user': name, 'role': role,
                                 'deleted': bool(data.get('delete'))})
 
+    # ---- accounts: signup, login, logout -----------------------------
+    # The only endpoints an unauthenticated caller can reach. Everything else
+    # needs either a session cookie or a Caddy login.
+    def _auth_body(self):
+        """(user, password) from the request body, or (None, None) after
+        having already sent an error."""
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return None, None
+        user = (data.get('user') or '').strip()
+        pw = data.get('password') or ''
+        if not user or len(user) > 40 or not re.fullmatch(r'[A-Za-z0-9_.-]+', user):
+            self._json(400, {'error': 'User name must be letters, digits, dot, dash or underscore.'})
+            return None, None
+        if len(pw) < 8:
+            self._json(400, {'error': 'Password must be at least 8 characters.'})
+            return None, None
+        return user, pw
+
+    def post_signup(self):
+        ip = self.client_address[0]
+        if not auth_rate_ok(ip):
+            return self._json(429, {'error': 'Too many attempts. Try again later.'})
+        user, pw = self._auth_body()
+        if user is None:
+            return
+        d = _read_users_file()
+        accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
+        # A name already used by a Caddy login is refused too: otherwise a
+        # signup could shadow `admin` and the two would disagree about who
+        # that is.
+        if user in accts or user in admins() or user in users():
+            return self._json(409, {'error': 'That name is taken.'})
+        try:
+            accts[user] = {'pw': hash_password(pw), 'role': 'editor',
+                           'created': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+        except ImportError:
+            return self._json(500, {'error': 'Server is missing bcrypt; ask the admin to install it.'})
+        d[ACCOUNTS_KEY] = accts
+        _write_users(d)
+        self._set_session_cookie(user)
+        return self._json(200, {'ok': True, 'user': user, 'role': 'editor'})
+
+    def post_login(self):
+        ip = self.client_address[0]
+        if not auth_rate_ok(ip):
+            return self._json(429, {'error': 'Too many attempts. Try again later.'})
+        user, pw = self._auth_body()
+        if user is None:
+            return
+        acct = accounts().get(user)
+        # One message for "no such user" and "wrong password": telling them
+        # apart would let anyone enumerate the accounts.
+        if not acct or not check_password(pw, acct.get('pw') or ''):
+            return self._json(401, {'error': 'Wrong user name or password.'})
+        role = acct.get('role') if acct.get('role') in ROLES else 'editor'
+        self._set_session_cookie(user)
+        return self._json(200, {'ok': True, 'user': user, 'role': role})
+
+    def post_logout(self):
+        self._clear_session_cookie()
+        return self._json(200, {'ok': True})
+
+    def get_me(self):
+        """Who the caller is, for the player to decide what to show. Distinct
+        from /api/whoami, which predates accounts and is kept as it was."""
+        user, role = self._who()
+        acct = accounts().get(user) if user else None
+        return self._json(200, {
+            'ok': True,
+            'user': user,
+            'role': role,
+            'account': bool(acct),
+            'canEditShared': role == 'admin',
+            'canEditOwn': role in ('admin', 'editor'),
+        })
+
+    # ---- static files, --dev only ------------------------------------
+    # On the VPS Caddy serves the player and this service only ever sees
+    # /api/*. In --dev there is no Caddy, so the service serves the player
+    # too, and the whole app runs from one process on one port.
+    def serve_static(self, path):
+        root = os.path.realpath(WEB_DIR)
+        rel = path.lstrip('/') or 'index.html'
+        full = os.path.realpath(os.path.join(root, rel))
+        # Refuse anything that escapes the web root, however it is spelled.
+        if not (full == root or full.startswith(root + os.sep)):
+            return self._json(404, {'error': 'not found'})
+        if os.path.isdir(full):
+            full = os.path.join(full, 'index.html')
+        if not os.path.isfile(full):
+            return self._json(404, {'error': 'not found'})
+        ctype = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8',
+            '.json': 'application/json',
+            '.css': 'text/css; charset=utf-8',
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.ico': 'image/x-icon',
+        }.get(os.path.splitext(full)[1].lower(), 'application/octet-stream')
+        try:
+            with open(full, 'rb') as f:
+                body = f.read()
+        except OSError:
+            return self._json(404, {'error': 'not found'})
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(body)))
+        # The page changes on every deploy; the audio does not. Same rule as
+        # the Caddyfile, so a phone does not serve yesterday's index.html.
+        if os.path.basename(full) in ('index.html', 'sw.js') or full.endswith('.json'):
+            self.send_header('Cache-Control', 'no-cache, must-revalidate')
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
+
     def do_POST(self):
         path = self.path.rstrip('/')
         # The shared set is Iti's and Karan's (see SHARED_WRITES). A viewer is
@@ -708,6 +1032,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_clips()
         if path == '/api/users':
             return self.post_users()
+        if path == '/api/signup':
+            return self.post_signup()
+        if path == '/api/login':
+            return self.post_login()
+        if path == '/api/logout':
+            return self.post_logout()
         if path == '/api/report':
             return self.post_report()
         if path != '/api/request':
@@ -843,6 +1173,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.get_clips()
         if path == '/api/users':
             return self.get_users()
+        if path == '/api/me':
+            return self.get_me()
         if path == '/api/stem-token':
             token, exp = mint_stem_token()
             if not token:

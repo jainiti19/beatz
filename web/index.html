@@ -1207,6 +1207,41 @@
         input[type="range"]::-moz-range-track {
             background: var(--border); border-radius: 3px;
         }
+    /* Login / signup. Covers the app until /api/me says who we are. */
+    .auth-screen {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      background: #0d0d10; padding: 20px;
+    }
+    .auth-screen[hidden] { display: none; }
+    .auth-card {
+      width: 100%; max-width: 340px; background: #17171c;
+      border: 1px solid #2a2a33; border-radius: 14px; padding: 24px;
+      color: #e8e8ee;
+    }
+    .auth-card h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: .5px; }
+    .auth-sub { margin: 0 0 18px; color: #9a9aa8; font-size: 14px; }
+    .auth-card label {
+      display: block; margin-bottom: 12px; font-size: 13px; color: #b8b8c4;
+    }
+    .auth-card input {
+      display: block; width: 100%; margin-top: 5px; padding: 10px 12px;
+      background: #0d0d10; border: 1px solid #2a2a33; border-radius: 8px;
+      color: #e8e8ee; font-size: 16px; box-sizing: border-box;
+    }
+    .auth-card input:focus { outline: none; border-color: #6c5ce7; }
+    .auth-card button[type=submit] {
+      width: 100%; margin-top: 6px; padding: 11px; border: 0; border-radius: 8px;
+      background: #6c5ce7; color: #fff; font-size: 15px; font-weight: 600;
+      cursor: pointer;
+    }
+    .auth-card button[type=submit]:disabled { opacity: .6; cursor: default; }
+    .auth-error { margin: 0 0 10px; color: #ff6b6b; font-size: 13px; }
+    .auth-switch { margin: 16px 0 0; font-size: 13px; color: #9a9aa8; text-align: center; }
+    .auth-switch button {
+      background: none; border: 0; color: #6c5ce7; font-size: 13px;
+      cursor: pointer; padding: 0 0 0 4px; text-decoration: underline;
+    }
     </style>
 </head>
 <!-- no-song: on a phone this collapses the page to the song list alone. Set
@@ -1539,6 +1574,87 @@
             renderPlaylistMode();
         }
 
+        // ---- accounts ------------------------------------------------------------
+        // A session cookie is the login. /api/me says who we are: an "account" is a
+        // real signup, a Caddy login is not. The Caddy logins (admin, beatz) skip
+        // the screen entirely -- Caddy already authenticated them, and asking again
+        // would be a second password for no reason.
+        let ME = null;          // last /api/me response
+        let AUTH_MODE = 'login'; // 'login' or 'signup'
+
+        function showAuthScreen(mode) {
+          AUTH_MODE = mode || 'login';
+          const screen = document.getElementById('authScreen');
+          const submit = document.getElementById('authSubmit');
+          const switchBtn = document.getElementById('authSwitch');
+          const switchText = document.getElementById('authSwitchText');
+          const sub = document.getElementById('authSub');
+          const pass = document.getElementById('authPass');
+          if (AUTH_MODE === 'signup') {
+            sub.textContent = 'Create an account';
+            submit.textContent = 'Create account';
+            switchText.textContent = 'Already have one?';
+            switchBtn.textContent = 'Sign in';
+            pass.autocomplete = 'new-password';
+          } else {
+            sub.textContent = 'Sign in to your library';
+            submit.textContent = 'Sign in';
+            switchText.textContent = 'New here?';
+            switchBtn.textContent = 'Create an account';
+            pass.autocomplete = 'current-password';
+          }
+          document.getElementById('authError').hidden = true;
+          screen.hidden = false;
+          document.getElementById('authUser').focus();
+        }
+
+        function hideAuthScreen() {
+          document.getElementById('authScreen').hidden = true;
+        }
+
+        async function submitAuth(ev) {
+          ev.preventDefault();
+          const user = document.getElementById('authUser').value.trim();
+          const pass = document.getElementById('authPass').value;
+          const err = document.getElementById('authError');
+          const submit = document.getElementById('authSubmit');
+          err.hidden = true;
+          submit.disabled = true;
+          try {
+            const r = await fetch('/api/' + (AUTH_MODE === 'signup' ? 'signup' : 'login'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ user, password: pass }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) {
+              err.textContent = d.error || 'Something went wrong.';
+              err.hidden = false;
+              return;
+            }
+            document.getElementById('authPass').value = '';
+            hideAuthScreen();
+            await loadWhoami();
+            await loadPlaylists();
+            await loadPresets();
+            await loadClips();
+          } catch (e) {
+            err.textContent = 'Could not reach the server.';
+            err.hidden = false;
+          } finally {
+            submit.disabled = false;
+          }
+        }
+
+        async function doLogout() {
+          try {
+            await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+          } catch (e) { /* the cookie is cleared server-side; a failed call is fine */ }
+          ME = null;
+          location.reload();
+        }
+
         async function loadWhoami() {
             try {
                 const r = await fetch('/api/whoami', { cache: 'no-store', credentials: 'include' });
@@ -1591,6 +1707,9 @@
         }
 
         function logOut() {
+          // An account has a session cookie to clear; a Caddy login has only the
+          // browser's saved basic-auth, which the old hack below tries to forget.
+          if (ME && ME.account) return doLogout();
             try {
                 localStorage.removeItem('beatznbox_role');
                 sessionStorage.setItem('beatznbox_logout', '1');
