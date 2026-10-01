@@ -107,10 +107,25 @@ USERS_FILE = os.environ.get('BEATZ_USERS_FILE', '')
 # Same rule as USERS_FILE: beside the queue files unless overridden.
 SESSION_KEY_FILE = os.environ.get('BEATZ_SESSION_KEY_FILE', '')
 
+# The mail sender: {host, port, user, password, from, notify, base}. Holds an
+# SMTP password, so it lives 0600 beside users.json and is read per send
+# (rotating it needs no restart). Missing file = mail is simply not set up:
+# reset links say so honestly, signup notifications are skipped, and nothing
+# else changes. BEATZ_MAIL_SPOOL (dev and tests) writes messages to a file
+# instead of sending, so the round trip is testable without a mailbox.
+MAIL_FILE = os.environ.get('BEATZ_MAIL_FILE', '/opt/beatznbox/mail.json')
+MAIL_SPOOL = os.environ.get('BEATZ_MAIL_SPOOL', '')
+
 # How long a login lasts. Long, because this is a party app and nobody wants
 # to type a password every time they open it; the cookie is HttpOnly and the
-# site is behind Caddy, so the exposure is small.
+# site is behind Caddy, so the exposure is small. A password change or a
+# reset bumps the account's session epoch and outdates every existing cookie,
+# which is what makes that acceptable.
 SESSION_TTL = 30 * 24 * 3600
+
+# A reset link. Short, because it is a password in a URL: it sits in a mailbox
+# (and in mail-server logs) and one leak should be worth minutes, not a day.
+RESET_TTL = 30 * 60
 
 # Signup and login are the only endpoints an unauthenticated caller can reach,
 # so they are the only ones worth guessing at. A small in-memory counter per
@@ -119,6 +134,71 @@ AUTH_ATTEMPTS = {}          # ip -> [timestamps]
 AUTH_ATTEMPTS_LOCK = threading.Lock()
 AUTH_MAX = 10               # attempts
 AUTH_WINDOW = 15 * 60       # seconds
+
+# Forgot-password gets its OWN budget, counted over ALL calls (a send is the
+# abuse, not just a failure). Sharing AUTH_ATTEMPTS would mean ten forgotten
+# passwords from one NAT -- a household -- locking everyone out of LOGIN.
+FORGOT_ATTEMPTS = {}        # ip -> [timestamps]
+FORGOT_ATTEMPTS_LOCK = threading.Lock()
+FORGOT_MAX = 5
+FORGOT_WINDOW = 15 * 60
+
+# The password rule (1 Oct). Deliberately modest: the room is family and
+# friends, so it blocks the embarrassing cases -- too short, the user name
+# itself, "password123" -- without demanding a password manager. The byte cap
+# is not taste: bcrypt 5 RAISES past 72 bytes, so without it a long signup
+# password kills the request rather than being refused politely.
+PW_MIN = 8
+PW_MAX_BYTES = 72
+
+# The usual suspects, lower-case. A sing-along app does not need zxcvbn; it
+# needs "password" and "12345678" to stop being someone's karaoke password.
+COMMON_PASSWORDS = frozenset((
+    '123456', 'password', '12345678', 'qwerty', '123456789', '12345', '1234',
+    '111111', '1234567', 'dragon', '123123', 'baseball', 'abc123', 'football',
+    'monkey', 'letmein', 'shadow', 'master', '666666', 'qwertyuiop', '123321',
+    'mustang', '1234567890', 'michael', '654321', 'superman', '1qaz2wsx',
+    '7777777', '121212', '000000', 'qazwsx', '123qwe', 'killer', 'trustno1',
+    'jordan', 'jennifer', 'zxcvbnm', 'asdfgh', 'hunter', 'buster', 'soccer',
+    'harley', 'batman', 'andrew', 'tigger', 'sunshine', 'iloveyou', '2000',
+    'charlie', 'robert', 'thomas', 'hockey', 'ranger', 'daniel', 'starwars',
+    'klaster', '112233', 'george', 'computer', 'michelle', 'jessica', 'pepper',
+    '1111', 'zxcvbn', '555555', '11111111', '131313', 'freedom', '777777',
+    'pass', 'maggie', '159753', 'aaaaaa', 'ginger', 'princess', 'joshua',
+    'cheese', 'amanda', 'summer', 'love', 'ashley', '6969', 'nicole',
+    'chelsea', 'biteme', 'matthew', 'access', 'yankees', '987654321', 'dallas',
+    'austin', 'thunder', 'taylor', 'matrix', 'william', 'corvette', 'hello',
+    'martin', 'heather', 'secret', 'merlin', 'diamond', '1234abcd', 'virginia',
+    'bear', 'tiger', 'cookie', 'whatever', 'qazwsxedc', '12121212', 'letmein1',
+    'welcome', 'welcome1', 'admin', 'admin123', 'root', 'toor', 'passw0rd',
+    'p@ssw0rd', 'abc12345', '1q2w3e4r', 'qwerty123', 'qwerty1', '123456a',
+    'zaq12wsx', 'qazxsw', 'asdfasdf', 'asdf1234', 'iloveyou1', 'monkey1',
+    'dragon1', 'baseball1', 'football1', 'princess1', 'sunshine1', 'michael1',
+    'charlie1', 'jordan23', 'jennifer1', 'maggie1', 'ginger1', 'hunter1',
+    'summer1', 'chelsea1', 'matthew1', 'computer1', 'michelle1', 'jessica1',
+    'pepper1', 'daniel1', 'thomas1', 'robert1', 'andrew1', 'tigger1',
+    'batman1', 'ranger1', 'hockey1', 'soccer1', 'buster1', 'harley1',
+    'starwars1', 'mustang1', 'shadow1', 'master1', 'superman1', 'trustno1!',
+    'killer1', 'secret1', 'merlin1', 'diamond1', 'virginia1', 'whatever1',
+    'welcome123', 'hello123', 'india123', 'india', 'delhi', 'mumbai', 'krishna',
+    'ganesh', 'shiva', 'password1', 'password12', 'password123', 'pass1234',
+    'test1234', 'testing', 'testtest', 'temp1234', 'changeme', 'letmein123',
+    'beatz', 'beatznbox',
+))
+
+
+def valid_password(user, pw):
+    """None when the password is allowed, else a reason to show the person.
+    The reasons are user-facing words, not codes."""
+    if not isinstance(pw, str) or len(pw) < PW_MIN:
+        return f'Password must be at least {PW_MIN} characters.'
+    if len(pw.encode('utf-8')) > PW_MAX_BYTES:
+        return f'Password must be at most {PW_MAX_BYTES} bytes.'
+    if len(user) >= 3 and user.lower() in pw.lower():
+        return 'Password must not contain your user name.'
+    if pw.lower() in COMMON_PASSWORDS:
+        return 'That password is too common — pick something else.'
+    return None
 
 # Set by --dev. In dev there is no Caddy in front, so X-Beatz-User cannot be
 # trusted and the session cookie is the only way in. It also relaxes the
@@ -406,15 +486,23 @@ def _read_users_file():
 
 def hash_password(pw):
     """bcrypt, cost 12. Imported lazily so the service still starts (and the
-    Caddy logins still work) on a box where bcrypt is not installed yet."""
+    Caddy logins still work) on a box where bcrypt is not installed yet.
+
+    Cut at PW_MAX_BYTES before hashing: bcrypt 5 RAISES past 72 bytes instead
+    of truncating like the C libraries did, and a crash must not be reachable
+    from a signup form. valid_password refuses such passwords up front, so
+    the cut only ever sees legacy input -- and check_password cuts the same
+    bytes, so an old long password still verifies."""
     import bcrypt
-    return bcrypt.hashpw(pw.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('ascii')
+    return bcrypt.hashpw(pw.encode('utf-8')[:PW_MAX_BYTES],
+                         bcrypt.gensalt(rounds=12)).decode('ascii')
 
 
 def check_password(pw, hashed):
     import bcrypt
     try:
-        return bcrypt.checkpw(pw.encode('utf-8'), hashed.encode('ascii'))
+        return bcrypt.checkpw(pw.encode('utf-8')[:PW_MAX_BYTES],
+                              hashed.encode('ascii'))
     except Exception:
         return False
 
@@ -455,36 +543,53 @@ def session_key():
         return k
 
 
-def make_session(user):
-    """v1.<user>.<exp>.<hmac>. The user is base64url'd so a name with a dot in
-    it cannot be mistaken for the separator."""
+def make_session(user, epoch=0):
+    """v2.<user>.<epoch>.<exp>.<hmac>. The user is base64url'd so a name with
+    a dot in it cannot be mistaken for the separator. `epoch` is the account's
+    session counter: changing or resetting a password bumps it, which is what
+    outdates every cookie minted before -- the only way a stateless signed
+    cookie can be revoked."""
     exp = int(time.time()) + SESSION_TTL
     u = base64.urlsafe_b64encode(user.encode('utf-8')).decode('ascii').rstrip('=')
-    msg = f'v1.{u}.{exp}'
+    msg = f'v2.{u}.{int(epoch or 0)}.{exp}'
     sig = hmac.new(session_key(), msg.encode('ascii'), hashlib.sha256).hexdigest()
     return f'{msg}.{sig}'
 
 
 def read_session(value):
-    """The login name in a session cookie, or None if it is absent, malformed,
-    expired or not signed by us."""
+    """(login, epoch) in a session cookie, or (None, None) if it is absent,
+    malformed, expired or not signed by us.
+
+    The v1 shape (no epoch) still verifies: it reads as epoch 0, which every
+    account was at until change/reset existed, so cookies already in browsers
+    keep working -- they simply die at that account's first password change.
+    The calling code decides what a stale epoch means; this function does not
+    know the accounts file."""
     if not value:
-        return None
+        return None, None
     parts = value.split('.')
-    if len(parts) != 4 or parts[0] != 'v1':
-        return None
-    _, u, exp, sig = parts
-    msg = f'v1.{u}.{exp}'
+    if len(parts) == 4 and parts[0] == 'v1':
+        _, u, exp, sig = parts
+        msg, epoch = f'v1.{u}.{exp}', 0
+    elif len(parts) == 5 and parts[0] == 'v2':
+        _, u, ep, exp, sig = parts
+        msg = f'v2.{u}.{ep}.{exp}'
+        try:
+            epoch = int(ep)
+        except ValueError:
+            return None, None
+    else:
+        return None, None
     want = hmac.new(session_key(), msg.encode('ascii'), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, want):
-        return None
+        return None, None
     try:
         if int(exp) < time.time():
-            return None
+            return None, None
         pad = '=' * (-len(u) % 4)
-        return base64.urlsafe_b64decode(u + pad).decode('utf-8')
+        return base64.urlsafe_b64decode(u + pad).decode('utf-8'), epoch
     except Exception:
-        return None
+        return None, None
 
 
 def auth_check(ip):
@@ -511,6 +616,108 @@ def auth_record(ip):
             for k in [k for k, v in AUTH_ATTEMPTS.items()
                       if not [t for t in v if now - t < AUTH_WINDOW]]:
                 AUTH_ATTEMPTS.pop(k, None)
+
+
+def forgot_check(ip):
+    """False when this IP has asked for too many reset mails. Counted over ALL
+    calls, not just misses: here the SEND is what needs bounding, and unlike
+    login a success is not self-limiting."""
+    now = time.time()
+    with FORGOT_ATTEMPTS_LOCK:
+        hits = [t for t in FORGOT_ATTEMPTS.get(ip, []) if now - t < FORGOT_WINDOW]
+        FORGOT_ATTEMPTS[ip] = hits
+        return len(hits) < FORGOT_MAX
+
+
+def forgot_record(ip):
+    now = time.time()
+    with FORGOT_ATTEMPTS_LOCK:
+        hits = [t for t in FORGOT_ATTEMPTS.get(ip, []) if now - t < FORGOT_WINDOW]
+        hits.append(now)
+        FORGOT_ATTEMPTS[ip] = hits
+        if len(FORGOT_ATTEMPTS) > 1000:
+            for k in [k for k, v in FORGOT_ATTEMPTS.items()
+                      if not [t for t in v if now - t < FORGOT_WINDOW]]:
+                FORGOT_ATTEMPTS.pop(k, None)
+
+
+# ---- mail (1 Oct) ----------------------------------------------------------
+# Password resets and signup notifications leave through here. Best effort by
+# design: signup works for everyone, mail only when a sender is configured,
+# and a mail that cannot leave the box never fails the request that wanted it.
+def mail_config():
+    """The parsed mail.json, or None when mail is not set up."""
+    try:
+        with open(MAIL_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def send_mail(to, subject, text):
+    """True when the message went (or was spooled). Never raises."""
+    if not to:
+        return False
+    cfg = mail_config()
+    if MAIL_SPOOL:
+        # Dev and tests: no mailbox, but the message is inspectable. JSONL so
+        # an assertion is json.loads(last_line), not MIME archaeology.
+        try:
+            with open(MAIL_SPOOL, 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'to': to, 'from': (cfg or {}).get('from', ''),
+                                    'subject': subject, 'text': text,
+                                    'ts': int(time.time())},
+                                   ensure_ascii=False) + '\n')
+            return True
+        except OSError:
+            return False
+    if not cfg or not cfg.get('host'):
+        return False
+    try:
+        import smtplib
+        from email.message import EmailMessage
+        msg = EmailMessage()
+        msg['From'] = cfg.get('from') or cfg.get('user') or ''
+        msg['To'] = to
+        msg['Subject'] = subject
+        msg.set_content(text)
+        port = int(cfg.get('port') or 465)
+        if cfg.get('tls', True):
+            server = smtplib.SMTP_SSL(cfg['host'], port, timeout=10)
+        else:
+            server = smtplib.SMTP(cfg['host'], port, timeout=10)
+        with server:
+            if cfg.get('user'):
+                server.login(cfg['user'], cfg.get('password') or '')
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f'mail: could not send to {to}: {e}', flush=True)
+        return False
+
+
+# ---- invites (1 Oct) -------------------------------------------------------
+# Signup is gated on a code an admin made: the site is public now, and an open
+# signup form on a public site is an invitation to bots. Codes are read aloud
+# and typed from screenshots, so the alphabet drops every lookalike.
+INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+
+def new_invite_code():
+    raw = ''.join(secrets.choice(INVITE_ALPHABET) for _ in range(8))
+    return raw[:4] + '-' + raw[4:]
+
+
+def normalize_invite(code):
+    return str(code or '').strip().upper()
+
+
+def valid_email(value):
+    """Shape only -- it is a reset channel, not an identity. Deliberately
+    forgiving; a typo is found when the reset mail does not arrive."""
+    return bool(value) and isinstance(value, str) and len(value) <= 100 \
+        and re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', value) is not None
 
 
 # ---- live lyrics (30 Sep) ------------------------------------------------
@@ -639,10 +846,12 @@ class Handler(BaseHTTPRequestHandler):
                 return v
         return None
 
-    def _session_cookie(self, user):
-        """The Set-Cookie VALUE for a login, to hand to _json."""
-        bits = [f'beatz_session={make_session(user)}', 'Path=/', 'HttpOnly',
-                'SameSite=Lax', f'Max-Age={SESSION_TTL}']
+    def _session_cookie(self, user, epoch=0):
+        """The Set-Cookie VALUE for a login, to hand to _json. The epoch is
+        the account's session counter -- minting with a stale one would lock
+        the caller out of their own fresh password change."""
+        bits = [f'beatz_session={make_session(user, epoch)}', 'Path=/',
+                'HttpOnly', 'SameSite=Lax', f'Max-Age={SESSION_TTL}']
         if not DEV:
             bits.append('Secure')
         return '; '.join(bits)
@@ -703,14 +912,19 @@ class Handler(BaseHTTPRequestHandler):
         # stronger statement of who this is than a shared basic-auth login.
         # It is read in every mode -- --dev included, where it is the only
         # way in.
-        sess = read_session(self._cookie('beatz_session'))
-        if sess:
-            acct = accounts().get(sess)
-            if acct:
-                return sess, (acct.get('role') if acct.get('role') in ROLES else 'editor')
-            # A cookie for an account that has since been deleted: treat it
-            # as no login at all rather than falling through to the header,
-            # which would silently promote it to a Caddy login.
+        sess_user, sess_epoch = read_session(self._cookie('beatz_session'))
+        if sess_user:
+            acct = accounts().get(sess_user)
+            # The epoch must match the account's current one: a password
+            # change or reset bumps it, and every cookie minted before then
+            # fails here -- a v1 cookie reads as epoch 0, which every account
+            # is at until its first change.
+            if acct and int(acct.get('sess') or 0) == int(sess_epoch or 0):
+                return sess_user, (acct.get('role') if acct.get('role') in ROLES else 'editor')
+            # A cookie for an account that has since been deleted -- or whose
+            # password changed elsewhere: treat it as no login at all rather
+            # than falling through to the header, which would silently
+            # promote it to a Caddy login.
             return None, 'viewer'
         # In --dev there is no Caddy, so the header is ignored entirely --
         # trusting it there would let anyone on the LAN claim to be admin.
@@ -1563,12 +1777,17 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {'ok': True, 'user': name, 'role': role,
                                 'deleted': bool(data.get('delete'))})
 
-    # ---- accounts: signup, login, logout -----------------------------
+    # ---- accounts: signup, login, logout, reset ----------------------
     # The only endpoints an unauthenticated caller can reach. Everything else
-    # needs either a session cookie or a Caddy login.
+    # needs either a session cookie or a Caddy login. Since 1 Oct a signup
+    # needs an INVITE CODE and an email (the reset channel), and the password
+    # must pass valid_password().
     def _auth_body(self):
         """(user, password) from the request body, or (None, None) after
-        having already sent an error."""
+        having already sent an error.
+
+        Login validates the SHAPE only, never the policy: a rule added today
+        must not lock out a password that was legal yesterday."""
         data, err = self._read_json(MAX_BODY)
         if err is not None:
             return None, None
@@ -1577,8 +1796,8 @@ class Handler(BaseHTTPRequestHandler):
         if not user or len(user) > 40 or not re.fullmatch(r'[A-Za-z0-9_.-]+', user):
             self._json(400, {'error': 'User name must be letters, digits, dot, dash or underscore.'})
             return None, None
-        if len(pw) < 8:
-            self._json(400, {'error': 'Password must be at least 8 characters.'})
+        if not pw:
+            self._json(400, {'error': 'Password is required.'})
             return None, None
         return user, pw
 
@@ -1586,9 +1805,20 @@ class Handler(BaseHTTPRequestHandler):
         ip = self._client_ip()
         if not auth_check(ip):
             return self._json(429, {'error': 'Too many attempts. Try again later.'})
-        user, pw = self._auth_body()
-        if user is None:
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
             return
+        user = (data.get('user') or '').strip()
+        pw = data.get('password') or ''
+        email = (data.get('email') or '').strip()
+        invite = normalize_invite(data.get('invite'))
+        if not user or len(user) > 40 or not re.fullmatch(r'[A-Za-z0-9_.-]+', user):
+            return self._json(400, {'error': 'User name must be letters, digits, dot, dash or underscore.'})
+        why = valid_password(user, pw)
+        if why:
+            return self._json(400, {'error': why})
+        if not valid_email(email):
+            return self._json(400, {'error': 'A valid email address is required — it is how a password reset would reach you.'})
         with USERS_LOCK:
             d = _read_users_file()
             accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
@@ -1597,15 +1827,39 @@ class Handler(BaseHTTPRequestHandler):
             # that is.
             if user in accts or user in admins() or user in users():
                 return self._json(409, {'error': 'That name is taken.'})
+            # One email, one account: "forgot" resolves by name OR email, and
+            # two accounts answering to one address would make that ambiguous.
+            if email.lower() in [(r.get('email') or '').lower()
+                                 for r in accts.values() if isinstance(r, dict)]:
+                return self._json(409, {'error': 'That email is already on another account.'})
+            invites = d.get('invites') if isinstance(d.get('invites'), dict) else {}
+            rec = invites.get(invite) if invite else None
+            left = rec.get('uses_left') if isinstance(rec, dict) else None
+            if not isinstance(rec, dict) or (left is not None and left <= 0):
+                auth_record(ip)     # guessing codes is the thing to throttle
+                return self._json(403, {'error': 'That invite code is not valid.'})
             try:
                 accts[user] = {'pw': hash_password(pw), 'role': 'editor',
-                               'created': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+                               'created': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                               'email': email, 'invite': invite}
             except ImportError:
                 return self._json(500, {'error': 'Server is missing bcrypt; ask the admin to install it.'})
+            if left is not None:
+                rec['uses_left'] = left - 1
+            rec.setdefault('used_by', []).append(user)
+            d['invites'] = invites
             d[ACCOUNTS_KEY] = accts
             _write_users(d)
+        cfg = mail_config()
+        if cfg:
+            # She gatekeeps signups; this is how she learns one happened
+            # without opening the app. Best effort, like every mail.
+            send_mail(cfg.get('notify') or '',
+                      f'New Beatznbox account: {user}',
+                      f'{user} created an account with the email {email} '
+                      f'(invite {invite}).')
         return self._json(200, {'ok': True, 'user': user, 'role': 'editor'},
-                          cookie=self._session_cookie(user))
+                          cookie=self._session_cookie(user, 0))
 
     def post_login(self):
         ip = self._client_ip()
@@ -1622,28 +1876,264 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {'error': 'Wrong user name or password.'})
         role = acct.get('role') if acct.get('role') in ROLES else 'editor'
         return self._json(200, {'ok': True, 'user': user, 'role': role},
-                          cookie=self._session_cookie(user))
+                          cookie=self._session_cookie(user, acct.get('sess') or 0))
 
     def post_logout(self):
         # Clears the browser's cookie. The token itself stays valid until it
-        # expires: HMAC sessions are stateless, so there is nothing to revoke
-        # server-side. Acceptable here -- 30-day TTL, HttpOnly, and this is a
-        # party app whose worst-case loss is someone else's playlists.
+        # expires -- unless the password changes or is reset, which bumps the
+        # account's session epoch and outdates every cookie at once.
         return self._json(200, {'ok': True}, cookie=self._expired_session_cookie())
+
+    def post_forgot(self):
+        """Start a password reset. The reply is ALWAYS the same shape, whether
+        the account exists, has an email, or neither -- the only thing it says
+        is whether mail is set up at all, which is a fact about the site, not
+        about any account."""
+        ip = self._client_ip()
+        if not forgot_check(ip):
+            return self._json(429, {'error': 'Too many reset requests. Try again later.'})
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        who = str(data.get('user') or '').strip()
+        cfg = mail_config()
+        have_mail = bool(cfg and cfg.get('host'))
+        out = {'ok': True, 'mail': have_mail}
+        letter = None
+        if who and have_mail:
+            with USERS_LOCK:
+                d = _read_users_file()
+                accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
+                name = who if who in accts else None
+                if name is None:
+                    low = who.lower()
+                    name = next((n for n, r in accts.items()
+                                 if isinstance(r, dict)
+                                 and (r.get('email') or '').lower() == low), None)
+                rec = accts.get(name) if name else None
+                email = (rec or {}).get('email') or ''
+                now = time.time()
+                prev = rec.get('reset') if isinstance(rec, dict) else None
+                floor_ok = not isinstance(prev, dict) or \
+                    now - float(prev.get('last_sent') or 0) >= 60
+                if isinstance(rec, dict) and email and floor_ok:
+                    token = secrets.token_urlsafe(32)
+                    # Only the HASH is stored: users.json leaking must not
+                    # mint resets. One live token per account -- a resend
+                    # replaces the old link, and so does using it.
+                    rec['reset'] = {'h': hashlib.sha256(token.encode()).hexdigest(),
+                                    'exp': int(now) + RESET_TTL, 'last_sent': now}
+                    accts[name] = rec
+                    d[ACCOUNTS_KEY] = accts
+                    _write_users(d)
+                    base = (cfg.get('base') or 'https://beatznbox.wesimplyhome.com').rstrip('/')
+                    link = f'{base}/#reset={token}'
+                    letter = (email, 'Reset your Beatznbox password',
+                              'Someone asked to reset the password for the '
+                              f'Beatznbox account "{name}".\n\n'
+                              f'Open this link to choose a new one:\n\n{link}\n\n'
+                              f'The link works for {RESET_TTL // 60} minutes and only once.\n'
+                              'If this was not you, nothing needs doing — your '
+                              'password still works.\n')
+        forgot_record(ip)       # every call counts, success or not
+        if letter:
+            send_mail(*letter)  # outside the lock: SMTP must not block writers
+        return self._json(200, out)
+
+    def post_reset(self):
+        """Finish a reset: token in, new password out, and the caller is
+        signed in on the spot (the reply carries a fresh cookie, so the
+        password never makes a second trip through the login form)."""
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        token = str(data.get('token') or '').strip()
+        pw = data.get('password') or ''
+        if not token:
+            return self._json(400, {'error': 'That reset link is no longer valid.'})
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        user, epoch = None, 0
+        with USERS_LOCK:
+            d = _read_users_file()
+            accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
+            now = time.time()
+            for name, rec in accts.items():
+                rr = rec.get('reset') if isinstance(rec, dict) else None
+                if not isinstance(rr, dict):
+                    continue
+                if not hmac.compare_digest(str(rr.get('h') or ''), digest):
+                    continue
+                if float(rr.get('exp') or 0) < now:
+                    break                     # found but expired: same answer
+                why = valid_password(name, pw)
+                if why:
+                    # The token SURVIVES a policy rejection, so the person
+                    # does not have to ask for a fresh link to try again.
+                    return self._json(400, {'error': why})
+                try:
+                    rec['pw'] = hash_password(pw)
+                except ImportError:
+                    return self._json(500, {'error': 'Server is missing bcrypt; ask the admin to install it.'})
+                rec['sess'] = int(rec.get('sess') or 0) + 1
+                rec.pop('reset', None)
+                accts[name] = rec
+                d[ACCOUNTS_KEY] = accts
+                _write_users(d)
+                user, epoch = name, rec['sess']
+                break
+        if not user:
+            return self._json(400, {'error': 'That reset link is no longer valid.'})
+        return self._json(200, {'ok': True, 'user': user},
+                          cookie=self._session_cookie(user, epoch))
+
+    def post_email(self):
+        """Set or change the account's email. The current password is
+        required even though the session already proves the login: a long
+        stale cookie must not be able to redirect where reset mail goes."""
+        user, _ = self._who()
+        acct = accounts().get(user) if user else None
+        if not acct:
+            return self._json(400, {'error': 'This login has no account to carry an email.'})
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        email = (data.get('email') or '').strip()
+        current = data.get('current') or ''
+        if not valid_email(email):
+            return self._json(400, {'error': 'That does not look like an email address.'})
+        if not check_password(current, acct.get('pw') or ''):
+            return self._json(403, {'error': 'Current password is wrong.'})
+        with USERS_LOCK:
+            d = _read_users_file()
+            accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
+            for other, r in accts.items():
+                if other != user and isinstance(r, dict) \
+                        and (r.get('email') or '').lower() == email.lower():
+                    return self._json(409, {'error': 'That email is already on another account.'})
+            rec = accts.get(user)
+            if not isinstance(rec, dict):
+                return self._json(400, {'error': 'This login has no account to carry an email.'})
+            rec['email'] = email
+            rec.pop('reset', None)      # a new address invalidates a pending reset
+            accts[user] = rec
+            d[ACCOUNTS_KEY] = accts
+            _write_users(d)
+        return self._json(200, {'ok': True, 'email': email})
+
+    def post_password(self):
+        """Change your own password, knowing the current one. The reply mints
+        a cookie at the NEW epoch, so this device stays signed in while every
+        other one is out."""
+        user, _ = self._who()
+        acct = accounts().get(user) if user else None
+        if not acct:
+            return self._json(400, {'error': 'This login has no account password to change.'})
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        current = data.get('current') or ''
+        new = data.get('new') or ''
+        if not check_password(current, acct.get('pw') or ''):
+            return self._json(403, {'error': 'Current password is wrong.'})
+        why = valid_password(user, new)
+        if why:
+            return self._json(400, {'error': why})
+        with USERS_LOCK:
+            d = _read_users_file()
+            accts = d.get(ACCOUNTS_KEY) if isinstance(d.get(ACCOUNTS_KEY), dict) else {}
+            rec = accts.get(user)
+            if not isinstance(rec, dict):
+                return self._json(400, {'error': 'This login has no account password to change.'})
+            try:
+                rec['pw'] = hash_password(new)
+            except ImportError:
+                return self._json(500, {'error': 'Server is missing bcrypt; ask the admin to install it.'})
+            rec['sess'] = int(rec.get('sess') or 0) + 1
+            rec.pop('reset', None)      # a changed password kills a pending reset
+            accts[user] = rec
+            d[ACCOUNTS_KEY] = accts
+            _write_users(d)
+            epoch = rec['sess']
+        return self._json(200, {'ok': True}, cookie=self._session_cookie(user, epoch))
 
     def get_me(self):
         """Who the caller is, for the player to decide what to show. Distinct
         from /api/whoami, which predates accounts and is kept as it was."""
         user, role = self._who()
         acct = accounts().get(user) if user else None
+        email = (acct or {}).get('email') or ''
         return self._json(200, {
             'ok': True,
             'user': user,
             'role': role,
             'account': bool(acct),
+            'email': email,
+            'has_email': bool(email),
             'canEditShared': role == 'admin',
             'canEditOwn': role in ('admin', 'editor'),
         })
+
+    # ---- admin: who joined, and the invite codes ----------------------
+    def get_accounts(self):
+        """Every account, for the admin's Users list. This is how she sees
+        who signed up -- the email notification is best effort."""
+        if self._who()[1] != 'admin':
+            return self._json(403, {'error': 'read-only'})
+        accts = accounts()
+        out = []
+        for name in sorted(accts):
+            r = accts.get(name) if isinstance(accts.get(name), dict) else {}
+            out.append({'user': name, 'role': r.get('role') or 'editor',
+                        'created': r.get('created') or '',
+                        'email': r.get('email') or '',
+                        'invite': r.get('invite') or ''})
+        return self._json(200, {'ok': True, 'accounts': out})
+
+    def _invites(self):
+        d = _read_users_file()
+        inv = d.get('invites') if isinstance(d.get('invites'), dict) else {}
+        return [dict(r if isinstance(r, dict) else {}, code=c) for c, r in inv.items()]
+
+    def get_invites(self):
+        if self._who()[1] != 'admin':
+            return self._json(403, {'error': 'read-only'})
+        return self._json(200, {'ok': True, 'invites': self._invites()})
+
+    def post_invites(self):
+        """Create a code, or disable one. Codes are the public door now, so
+        this stays with the admin alone."""
+        if self._who()[1] != 'admin':
+            return self._json(403, {'error': 'read-only'})
+        data, err = self._read_json(MAX_BODY)
+        if err is not None:
+            return
+        disable = normalize_invite(data.get('disable'))
+        code = ''
+        with USERS_LOCK:
+            d = _read_users_file()
+            inv = d.get('invites') if isinstance(d.get('invites'), dict) else {}
+            if disable:
+                if disable not in inv:
+                    return self._json(404, {'error': 'no such invite code'})
+                del inv[disable]
+            else:
+                uses = data.get('uses', 1)
+                if uses is not None:
+                    if not isinstance(uses, int) or isinstance(uses, bool) \
+                            or not (1 <= uses <= 200):
+                        return self._json(400, {'error': 'uses must be 1-200, or null for unlimited'})
+                for _ in range(10):         # a generated collision is absurd; bounded anyway
+                    code = new_invite_code()
+                    if code not in inv:
+                        break
+                inv[code] = {'created': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                             'uses_left': uses,
+                             'note': str(data.get('note') or '').strip()[:60],
+                             'used_by': []}
+            d['invites'] = inv
+            _write_users(d)
+        return self._json(200, {'ok': True, 'code': code or None,
+                                'invites': self._invites()})
 
     # ---- static files, --dev only ------------------------------------
     # On the VPS Caddy serves the player and this service only ever sees
@@ -1720,6 +2210,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_login()
         if path == '/api/logout':
             return self.post_logout()
+        if path == '/api/forgot':
+            return self.post_forgot()
+        if path == '/api/reset':
+            return self.post_reset()
+        if path == '/api/password':
+            return self.post_password()
+        if path == '/api/email':
+            return self.post_email()
+        if path == '/api/invites':
+            return self.post_invites()
         if path == '/api/report':
             return self.post_report()
         if path != '/api/request':
@@ -1876,6 +2376,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.get_clips()
         if path == '/api/users':
             return self.get_users()
+        if path == '/api/accounts':
+            return self.get_accounts()
+        if path == '/api/invites':
+            return self.get_invites()
         if path == '/api/me':
             return self.get_me()
         if path.startswith('/api/live/'):

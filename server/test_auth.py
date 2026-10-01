@@ -26,9 +26,13 @@ What is NOT covered here, because it cannot be: --dev has no Caddy, so a
 path is the do_POST gate at SHARED_WRITES, and its server-side logic is
 unchanged by the fixes.
 """
+import base64
+import hashlib
+import hmac
 import http.client
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -40,7 +44,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE = os.path.join(HERE, 'queue-service.py')
 WEB = os.path.join(os.path.dirname(HERE), 'web')
 
-ALICE = 'password123'
+ALICE = 'curtaincall77'   # not in the common list, does not contain a login name
 ROOT = 'rootpass123'
 
 
@@ -64,26 +68,43 @@ class ServiceCase(unittest.TestCase):
 
     Subclasses declare `seed_accounts` ({login: (password, role)}) and it is
     written to users.json before the service starts -- signup only ever makes
-    editors, so a role other than that has to be seeded. Everything else about
-    a case lives in its tests."""
+    editors, so a role other than that has to be seeded. `seed_invites`
+    defaults to one unlimited code, which is what signup forms must now
+    carry. Mail goes to a spool file in the scratch dir, never out of the
+    machine: `sent_mail()` reads it back as dicts."""
 
     seed_accounts = {}
+    invite = 'TEST-INVTE'
+    seed_invites = {invite: {'uses_left': None, 'note': 'tests', 'used_by': []}}
+    # A mail.json dict for tests that exercise mail. Without one the service
+    # gets a path that does not exist, so "mail is not set up" is the
+    # deterministic default rather than whatever is on the laptop.
+    seed_mail = None
 
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp(prefix='beatz-auth-test-')
         cls.port = free_port()
         cls.users_file = os.path.join(cls.tmp, 'users.json')
-        if cls.seed_accounts:
+        cls.mail_file = os.path.join(cls.tmp, 'mail.jsonl')
+        cls.session_key_file = os.path.join(cls.tmp, 'session.key')
+        if cls.seed_accounts or cls.seed_invites:
             import bcrypt
             with open(cls.users_file, 'w', encoding='utf-8') as f:
                 json.dump({'accounts': {
                     login: {'pw': bcrypt.hashpw(pw.encode(), bcrypt.gensalt(rounds=4)).decode(),
                             'role': role, 'created': 'x'}
-                    for login, (pw, role) in cls.seed_accounts.items()}}, f)
+                    for login, (pw, role) in cls.seed_accounts.items()},
+                    'invites': dict(cls.seed_invites)}, f)
+        env = dict(os.environ, BEATZ_MAIL_SPOOL=cls.mail_file)
+        env['BEATZ_MAIL_FILE'] = os.path.join(cls.tmp, 'mail.json')
+        if isinstance(cls.seed_mail, dict):
+            with open(env['BEATZ_MAIL_FILE'], 'w', encoding='utf-8') as f:
+                json.dump(cls.seed_mail, f)
         cls.proc = subprocess.Popen(
             [sys.executable, SERVICE, '--dev', '--port', str(cls.port),
              '--queue', os.path.join(cls.tmp, 'requests.jsonl'), '--web', WEB],
+            env=env,
             stdout=open(os.path.join(cls.tmp, 'server.log'), 'wb'),
             stderr=subprocess.STDOUT)
         deadline = time.time() + 10
@@ -105,6 +126,14 @@ class ServiceCase(unittest.TestCase):
             cls.proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             cls.proc.kill()
+
+    def sent_mail(self):
+        """Every message the service spooled, oldest first."""
+        try:
+            with open(self.mail_file, encoding='utf-8') as f:
+                return [json.loads(l) for l in f if l.strip()]
+        except OSError:
+            return []
 
     def request(self, method, path, body=None, cookie=None, headers=None):
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=15)
@@ -133,9 +162,11 @@ class ServiceCase(unittest.TestCase):
         self.assertTrue(cookie, 'login did not set a cookie: %r' % sc)
         return cookie
 
-    def signup_cookie(self, user, pw=ALICE):
+    def signup_cookie(self, user, pw=ALICE, email=None, invite=None):
         status, d, sc = self.request('POST', '/api/signup',
-                                     {'user': user, 'password': pw})
+                                     {'user': user, 'password': pw,
+                                      'email': email or user + '@test.local',
+                                      'invite': invite or self.invite})
         self.assertEqual(status, 200, d)
         return cookie_value(sc)
 
@@ -152,7 +183,9 @@ class AuthFlow(ServiceCase):
 
     def test_01_signup_then_me(self):
         status, d, sc = self.request('POST', '/api/signup',
-                                     {'user': 'alice', 'password': ALICE})
+                                     {'user': 'alice', 'password': ALICE,
+                                      'email': 'alice@test.local',
+                                      'invite': self.invite})
         self.assertEqual(status, 200, d)
         alice = cookie_value(sc)
         self.assertTrue(alice, 'signup must set a session cookie: %r' % sc)
@@ -511,6 +544,237 @@ class Sharing(ServiceCase):
         made = {r['name'] for r in (raw.get('shareLinks') or {}).values()}
         self.assertTrue(set(names) <= made,
                         'every concurrent grant must survive the read-modify-write')
+
+
+class AccountHardening(ServiceCase):
+    """Signup policy, invite codes and password recovery (1 Oct).
+
+    Signup now needs an invite code and an email, the password must pass the
+    policy, and a forgotten password comes back through a mailed link. Mail
+    goes to the spool file, so the whole round trip is real except delivery.
+    """
+
+    seed_accounts = {
+        'root': (ROOT, 'admin'),
+        'alice': (ALICE, 'editor'),
+        'shorty': ('abc', 'editor'),     # below today's rule, from before it
+    }
+    seed_mail = {'host': 'smtp.invalid', 'port': 465, 'user': '', 'password': '',
+                 'from': 'beatz@test.local', 'notify': 'iti@test.local',
+                 'base': 'https://beatznbox.test'}
+
+    # -- helpers -----------------------------------------------------------
+
+    def signup(self, user, pw=ALICE, email=None, invite=None):
+        """Raw signup so a policy or invite refusal can be asserted, not
+        swallowed by signup_cookie's assert."""
+        return self.request('POST', '/api/signup',
+                            {'user': user, 'password': pw,
+                             'email': user + '@test.local' if email is None else email,
+                             'invite': self.invite if invite is None else invite})
+
+    def make_code(self, cookie, uses=1, note=''):
+        status, d, _ = self.request('POST', '/api/invites',
+                                    {'uses': uses, 'note': note}, cookie=cookie)
+        self.assertEqual(status, 200, d)
+        return d['code']
+
+    def reset_token(self, letter):
+        m = re.search(r'#reset=([A-Za-z0-9_-]+)', letter['text'])
+        self.assertTrue(m, letter)
+        return m.group(1)
+
+    # -- the flow ----------------------------------------------------------
+
+    def test_01_password_policy(self):
+        # Every refusal is a clean 400 with a sentence, never a crash -- the
+        # 73-byte case used to raise inside bcrypt and kill the connection.
+        for pw, needle in (('short1', 'at least 8'),
+                           ('policy1-rocks-9', 'user name'),
+                           ('password123', 'too common'),
+                           ('x' * 73, 'at most 72')):
+            status, d, _ = self.signup('policy1', pw=pw)
+            self.assertEqual(status, 400, (pw, d))
+            self.assertIn(needle, d['error'])
+        self.assertEqual(self.signup('policy1', pw=ALICE)[0], 200)
+
+    def test_02_login_ignores_the_policy(self):
+        # A 3-character password still signs in: a rule added today must not
+        # lock out a password that was legal yesterday.
+        status, d, _ = self.request('POST', '/api/login',
+                                    {'user': 'shorty', 'password': 'abc'})
+        self.assertEqual(status, 200, d)
+
+    def test_03_invites_gate_signup(self):
+        root = self.login_cookie('root', ROOT)
+        self.assertEqual(self.signup('inv1', invite='')[0], 403)
+        self.assertEqual(self.signup('inv1', invite='ZZZZ-ZZZZ')[0], 403)
+
+        single = self.make_code(root, uses=1, note='Tarun')
+        self.assertRegex(single, r'^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}'
+                                 r'-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$')
+        self.assertEqual(self.signup('inv1', invite=single)[0], 200)
+        status, d, _ = self.signup('inv2', invite=single)
+        self.assertEqual(status, 403, 'a spent code must not work again: %r' % d)
+
+        # Normalised: lower case and stray spaces are the same code.
+        unlimited = self.make_code(root, uses=None)
+        self.assertEqual(self.signup('inv3', invite=' ' + unlimited.lower() + ' ')[0], 200)
+        self.assertEqual(self.signup('inv4', invite=unlimited)[0], 200)
+
+        gone = self.make_code(root, uses=5)
+        status, d, _ = self.request('POST', '/api/invites', {'disable': gone}, cookie=root)
+        self.assertEqual(status, 200, d)
+        self.assertEqual(self.signup('inv5', invite=gone)[0], 403)
+
+        # The raw file shows the consumption.
+        with open(self.users_file, encoding='utf-8') as f:
+            raw = json.load(f)
+        self.assertEqual(raw['invites'][single]['uses_left'], 0)
+        self.assertIn('inv1', raw['invites'][single]['used_by'])
+
+    def test_04_email_rules(self):
+        for bad in ('', 'nope', 'a@b', 'a b@c.com'):
+            status, d, _ = self.signup('em1', email=bad)
+            self.assertEqual(status, 400, (bad, d))
+            self.assertIn('email', d['error'].lower())
+        self.assertEqual(self.signup('em1', email='One@Test.local')[0], 200)
+        status, d, _ = self.signup('em2', email='one@test.LOCAL')
+        self.assertEqual(status, 409, 'emails are unique, case-insensitively: %r' % d)
+
+    def test_05_forgot_and_reset_round_trip(self):
+        self.assertEqual(self.signup('rec1', pw='firstpass77',
+                                     email='rec1@test.local')[0], 200)
+        before = len(self.sent_mail())
+
+        # Unknown account: the same generic answer, and nothing mailed.
+        status, d, _ = self.request('POST', '/api/forgot', {'user': 'no-such-one'})
+        self.assertEqual(status, 200, d)
+        self.assertTrue(d['ok'] and d['mail'])
+        self.assertEqual(len(self.sent_mail()), before)
+
+        # By name or by email, one lane.
+        status, d, _ = self.request('POST', '/api/forgot', {'user': 'rec1@test.local'})
+        self.assertEqual(status, 200, d)
+        sent = self.sent_mail()
+        self.assertEqual(len(sent), before + 1)
+        self.assertEqual(sent[-1]['to'], 'rec1@test.local')
+        token = self.reset_token(sent[-1])
+
+        # A policy rejection keeps the link alive for a retry.
+        status, d, _ = self.request('POST', '/api/reset',
+                                    {'token': token, 'password': 'rec1'})
+        self.assertEqual(status, 400, d)
+        status, d, sc = self.request('POST', '/api/reset',
+                                     {'token': token, 'password': 'brandnew99'})
+        self.assertEqual(status, 200, d)
+        reset_cookie = cookie_value(sc)
+        self.assertTrue(reset_cookie, 'reset signs the person straight in')
+        me = self.request('GET', '/api/me', cookie=reset_cookie)[1]
+        self.assertEqual(me['user'], 'rec1')
+
+        self.assertEqual(self.request('POST', '/api/login',
+                                      {'user': 'rec1', 'password': 'firstpass77'})[0], 401)
+        self.assertEqual(self.request('POST', '/api/login',
+                                      {'user': 'rec1', 'password': 'brandnew99'})[0], 200)
+        status, d, _ = self.request('POST', '/api/reset',
+                                    {'token': token, 'password': 'another88'})
+        self.assertEqual(status, 400, 'a used link is dead: %r' % d)
+
+    def test_06_session_epochs(self):
+        self.assertEqual(self.signup('ep1', pw='epochpass11',
+                                     email='ep1@test.local')[0], 200)
+        cookie_a = cookie_value(self.request(
+            'POST', '/api/login', {'user': 'ep1', 'password': 'epochpass11'})[2])
+        cookie_b = cookie_value(self.request(
+            'POST', '/api/login', {'user': 'ep1', 'password': 'epochpass11'})[2])
+
+        status, d, sc = self.request('POST', '/api/password',
+                                     {'current': 'epochpass11', 'new': 'epochpass12'},
+                                     cookie=cookie_a)
+        self.assertEqual(status, 200, d)
+        cookie_c = cookie_value(sc)
+        self.assertEqual(self.request('GET', '/api/me', cookie=cookie_c)[1]['user'], 'ep1')
+        self.assertIsNone(self.request('GET', '/api/me', cookie=cookie_a)[1]['user'])
+        self.assertIsNone(self.request('GET', '/api/me', cookie=cookie_b)[1]['user'],
+                          'the other device is out too')
+
+        status, d, _ = self.request('POST', '/api/password',
+                                    {'current': 'nope', 'new': 'epochpass13'},
+                                    cookie=cookie_c)
+        self.assertEqual(status, 403, d)
+
+    def test_07_admin_gating(self):
+        alice = self.login_cookie('alice', ALICE)
+        for path in ('/api/accounts', '/api/invites'):
+            status, d, _ = self.request('GET', path, cookie=alice)
+            self.assertEqual(status, 403, (path, d))
+        status, d, _ = self.request('POST', '/api/invites', {'uses': 1}, cookie=alice)
+        self.assertEqual(status, 403, d)
+
+        root = self.login_cookie('root', ROOT)
+        status, d, _ = self.request('GET', '/api/accounts', cookie=root)
+        self.assertEqual(status, 200, d)
+        names = [a['user'] for a in d['accounts']]
+        self.assertIn('root', names)
+        self.assertIn('shorty', names)
+        row = next(a for a in d['accounts'] if a['user'] == 'root')
+        self.assertEqual(row['role'], 'admin')
+
+    def test_08_signup_notification(self):
+        before = len(self.sent_mail())
+        self.assertEqual(self.signup('note1', email='note1@test.local')[0], 200)
+        sent = self.sent_mail()[before:]
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]['to'], 'iti@test.local')
+        self.assertIn('note1', sent[0]['subject'] + sent[0]['text'])
+        self.assertIn('note1@test.local', sent[0]['text'])
+
+    def test_09_v1_cookies_survive_until_a_bump(self):
+        self.login_cookie('root', ROOT)   # ensures session.key exists
+        self.assertEqual(self.signup('old1', pw='legacyone88',
+                                     email='old1@test.local')[0], 200)
+        # Build the cookie shape every browser held before epochs existed.
+        with open(self.session_key_file, 'rb') as f:
+            key = f.read()
+        u = base64.urlsafe_b64encode(b'old1').decode('ascii').rstrip('=')
+        exp = int(time.time()) + 3600
+        msg = f'v1.{u}.{exp}'
+        sig = hmac.new(key, msg.encode('ascii'), hashlib.sha256).hexdigest()
+        v1 = f'{msg}.{sig}'
+        self.assertEqual(self.request('GET', '/api/me', cookie=v1)[1]['user'], 'old1')
+        # A change bumps the epoch; the old shape dies with it, while the
+        # reply's own cookie keeps this device in.
+        status, d, sc = self.request('POST', '/api/password',
+                                     {'current': 'legacyone88', 'new': 'legacytwo99'},
+                                     cookie=v1)
+        self.assertEqual(status, 200, d)
+        self.assertEqual(self.request('GET', '/api/me', cookie=cookie_value(sc))[1]['user'],
+                         'old1')
+        self.assertIsNone(self.request('GET', '/api/me', cookie=v1)[1]['user'])
+
+
+    def test_10_setting_your_email_needs_your_password(self):
+        self.assertEqual(self.signup('emx', pw='emailpass11',
+                                     email='emx@test.local')[0], 200)
+        self.assertEqual(self.signup('emy', email='taken@test.local')[0], 200)
+        cookie = cookie_value(self.request(
+            'POST', '/api/login', {'user': 'emx', 'password': 'emailpass11'})[2])
+        status, d, _ = self.request('POST', '/api/email',
+                                    {'email': 'moved@test.local', 'current': 'wrong'},
+                                    cookie=cookie)
+        self.assertEqual(status, 403, d)
+        status, d, _ = self.request('POST', '/api/email',
+                                    {'email': 'moved@test.local', 'current': 'emailpass11'},
+                                    cookie=cookie)
+        self.assertEqual(status, 200, d)
+        me = self.request('GET', '/api/me', cookie=cookie)[1]
+        self.assertEqual(me['email'], 'moved@test.local')
+        self.assertTrue(me['has_email'])
+        status, d, _ = self.request('POST', '/api/email',
+                                    {'email': 'TAKEN@test.local', 'current': 'emailpass11'},
+                                    cookie=cookie)
+        self.assertEqual(status, 409, 'another account already has it: %r' % d)
 
 
 class SharedSetSharing(ServiceCase):

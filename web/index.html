@@ -1325,6 +1325,18 @@
       background: none; border: 0; color: #6c5ce7; font-size: 13px;
       cursor: pointer; padding: 0 0 0 4px; text-decoration: underline;
     }
+    .auth-hint { margin: 0 0 10px; color: #9a9aa8; font-size: 12px; }
+    .auth-error.ok { color: #4DB6AC; }
+    /* Inputs inside the account modal: the auth card's dark field, sized to
+       sit in a .share-row. */
+    .share-card input {
+      background: #0d0d10; border: 1px solid #2a2a33; border-radius: 8px;
+      color: #e8e8ee; font-size: 13px; padding: 7px 9px;
+      box-sizing: border-box; min-width: 0;
+    }
+    .share-card input:focus { outline: none; border-color: #6c5ce7; }
+    .share-uses { width: 62px; flex: 0 0 auto; }
+    .acct-grow { flex: 1 1 auto; }
     </style>
 </head>
 <!-- no-song: on a phone this collapses the page to the song list alone. Set
@@ -1340,21 +1352,113 @@
     <h1>Beatz</h1>
     <p class="auth-sub" id="authSub">Sign in to your library</p>
     <form id="authForm" autocomplete="on">
-      <label>User name
+      <label><span id="authUserLabel">User name</span>
         <input id="authUser" name="username" autocomplete="username"
                autocapitalize="none" spellcheck="false" required>
       </label>
-      <label>Password
+      <!-- Signup only: the email is the reset channel, and the invite code is
+           the door — the site is public now, so the form is not. -->
+      <label id="authEmailLabel" hidden>Email
+        <input id="authEmail" name="email" type="email" autocomplete="email"
+               autocapitalize="none" spellcheck="false">
+      </label>
+      <label id="authPassLabel">Password
         <input id="authPass" name="password" type="password"
                autocomplete="current-password" required>
       </label>
+      <label id="authInviteLabel" hidden>Invite code
+        <input id="authInvite" name="invite" autocapitalize="characters"
+               spellcheck="false" placeholder="XXXX-XXXX">
+      </label>
+      <p class="auth-hint" id="authHint" hidden>At least 8 characters, not your
+        user name, not a very common password.</p>
       <p class="auth-error" id="authError" hidden></p>
       <button type="submit" id="authSubmit">Sign in</button>
     </form>
     <p class="auth-switch">
       <span id="authSwitchText">New here?</span>
       <button type="button" id="authSwitch">Create an account</button>
+      <button type="button" id="authForgot">Forgot password?</button>
     </p>
+  </div>
+</div>
+<!-- A reset link (#reset=<token>). Deliberately its own card, handled before
+     whoami: whoever opens the link may be signed out, and that must not
+     matter. -->
+<div id="resetScreen" class="auth-screen" hidden>
+  <div class="auth-card">
+    <h1>Beatz</h1>
+    <p class="auth-sub" id="resetSub">Choose a new password</p>
+    <form id="resetForm" autocomplete="off">
+      <label>New password
+        <input id="resetPass" type="password" autocomplete="new-password" required>
+      </label>
+      <label>Repeat it
+        <input id="resetPass2" type="password" autocomplete="new-password" required>
+      </label>
+      <p class="auth-hint">At least 8 characters, not your user name, not a
+        very common password.</p>
+      <p class="auth-error" id="resetError" hidden></p>
+      <button type="submit" id="resetSubmit">Save and sign in</button>
+    </form>
+  </div>
+</div>
+<!-- Account: your own email and password; for the admin, who has joined and
+     the invite codes. Filled by openAccount(). -->
+<div id="accountCard" class="share-card" hidden>
+  <div class="share-card-inner">
+    <h3>Account</h3>
+    <div class="share-section">
+      <div class="share-head">Signed in as <b id="acctUser"></b>
+        <span class="share-role" id="acctRole"></span></div>
+    </div>
+    <div class="share-section" id="ownBox">
+      <div class="share-head">Email — where a password-reset link would go</div>
+      <div class="share-row">
+        <input id="acctEmail" class="acct-grow" type="email" placeholder="you@example.com"
+               autocapitalize="none" spellcheck="false">
+        <button class="share-btn" onclick="saveEmail()">Save email</button>
+      </div>
+      <div class="share-row">
+        <input id="acctEmailPw" class="acct-grow" type="password"
+               autocomplete="current-password" placeholder="Current password (needed to change the email)">
+      </div>
+      <div class="share-head" style="margin-top:12px">Change password</div>
+      <div class="share-row">
+        <input id="acctCur" class="acct-grow" type="password"
+               autocomplete="current-password" placeholder="Current password">
+      </div>
+      <div class="share-row">
+        <input id="acctNew" class="acct-grow" type="password"
+               autocomplete="new-password" placeholder="New password">
+        <input id="acctNew2" class="acct-grow" type="password"
+               autocomplete="new-password" placeholder="Repeat new">
+      </div>
+      <div class="share-actions">
+        <button class="share-btn" onclick="savePassword()">Change password</button>
+      </div>
+    </div>
+    <div id="adminBox" hidden>
+      <div class="share-section">
+        <div class="share-head">Who has joined</div>
+        <div id="adminAccounts"></div>
+      </div>
+      <div class="share-section">
+        <div class="share-head">Invite codes — needed to create an account</div>
+        <div id="adminInvites"></div>
+        <div class="share-row">
+          <input id="invNote" class="acct-grow" placeholder="Note (who is it for?)">
+          <input id="invUses" class="share-uses" type="number" min="1" max="200"
+                 value="1" title="How many signups this code allows">
+          <button class="share-btn" onclick="createInvite()">New code</button>
+        </div>
+        <div class="share-note">Uses = how many people may sign up with the code.</div>
+      </div>
+    </div>
+    <div class="share-note" id="acctNote"></div>
+    <div class="share-actions">
+      <button class="share-btn" onclick="closeAccount()">Close</button>
+    </div>
   </div>
 </div>
 <!-- Share panel: the links and the people for one of YOUR OWN playlists.
@@ -1413,6 +1517,11 @@
         <button class="bell-btn" id="bellBtn" onclick="toggleBell()" title="Your requests">
             <span>Requests</span><span class="bell-badge" id="bellBadge" hidden>0</span>
         </button>
+        <button class="logout-btn" id="accountBtn" onclick="openAccount()" hidden
+                title="Your account" aria-label="Your account"><svg width="16" height="16"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/>
+                <path d="M5 20c1.2-3.4 3.9-5 7-5s5.8 1.6 7 5"/></svg></button>
         <button class="logout-btn" id="logoutBtn" onclick="logOut()" hidden
                 title="Log out" aria-label="Log out"><svg width="16" height="16"
                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -1862,14 +1971,35 @@
           const submit = document.getElementById('authSubmit');
           const switchBtn = document.getElementById('authSwitch');
           const switchText = document.getElementById('authSwitchText');
+          const forgotBtn = document.getElementById('authForgot');
           const sub = document.getElementById('authSub');
           const pass = document.getElementById('authPass');
-          if (AUTH_MODE === 'signup') {
+          const email = document.getElementById('authEmail');
+          const invite = document.getElementById('authInvite');
+          const signup = AUTH_MODE === 'signup';
+          const forgot = AUTH_MODE === 'forgot';
+          // Fields appear per mode, and `required` follows them -- a hidden
+          // required input refuses the submit with no visible reason.
+          document.getElementById('authEmailLabel').hidden = !signup;
+          document.getElementById('authInviteLabel').hidden = !signup;
+          document.getElementById('authPassLabel').hidden = forgot;
+          email.required = signup;
+          invite.required = signup;
+          pass.required = !forgot;
+          document.getElementById('authUserLabel').textContent =
+            forgot ? 'User name or email' : 'User name';
+          document.getElementById('authHint').hidden = !signup;
+          if (signup) {
             sub.textContent = 'Create an account';
             submit.textContent = 'Create account';
             switchText.textContent = 'Already have one?';
             switchBtn.textContent = 'Sign in';
             pass.autocomplete = 'new-password';
+          } else if (forgot) {
+            sub.textContent = 'Reset your password';
+            submit.textContent = 'Send reset link';
+            switchText.textContent = 'Remembered it?';
+            switchBtn.textContent = 'Sign in';
           } else {
             sub.textContent = 'Sign in to your library';
             submit.textContent = 'Sign in';
@@ -1877,7 +2007,10 @@
             switchBtn.textContent = 'Create an account';
             pass.autocomplete = 'current-password';
           }
-          document.getElementById('authError').hidden = true;
+          forgotBtn.hidden = AUTH_MODE !== 'login';
+          const err = document.getElementById('authError');
+          err.hidden = true;
+          err.classList.remove('ok');
           screen.hidden = false;
           document.getElementById('authUser').focus();
         }
@@ -1893,13 +2026,39 @@
           const err = document.getElementById('authError');
           const submit = document.getElementById('authSubmit');
           err.hidden = true;
+          err.classList.remove('ok');
           submit.disabled = true;
           try {
+            if (AUTH_MODE === 'forgot') {
+              // The server's answer is generic on purpose; it only ever
+              // varies on whether this SITE has mail set up at all.
+              const r = await fetch('/api/forgot', {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user }),
+              });
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) {
+                err.textContent = d.error || 'Something went wrong.';
+              } else {
+                err.classList.add('ok');
+                err.textContent = d.mail === false
+                  ? 'Password reset by email is not set up on this site yet.'
+                  : 'If that account has an email, a reset link is on its way. (Check the spam folder too.)';
+              }
+              err.hidden = false;
+              return;
+            }
+            const body = { user, password: pass };
+            if (AUTH_MODE === 'signup') {
+              body.email = document.getElementById('authEmail').value.trim();
+              body.invite = document.getElementById('authInvite').value.trim();
+            }
             const r = await fetch('/api/' + (AUTH_MODE === 'signup' ? 'signup' : 'login'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
-              body: JSON.stringify({ user, password: pass }),
+              body: JSON.stringify(body),
             });
             const d = await r.json().catch(() => ({}));
             if (!r.ok) {
@@ -1921,6 +2080,164 @@
           } finally {
             submit.disabled = false;
           }
+        }
+
+        /* ===== A reset link =====
+         * #reset=<token> arrives by email. Its card shows before whoami: the
+         * person may well be signed out, and a link that needs a login before
+         * it can set a password is a link that cannot do its one job. */
+        function resetTokenFromUrl() {
+          const m = /(?:^|[#&])reset=([A-Za-z0-9_-]+)/.exec(location.hash || '');
+          return m ? m[1] : null;
+        }
+
+        function showResetFromUrl() {
+          if (!resetTokenFromUrl()) return false;
+          document.getElementById('resetScreen').hidden = false;
+          document.getElementById('resetPass').focus();
+          return true;
+        }
+
+        async function submitReset(ev) {
+          ev.preventDefault();
+          const token = resetTokenFromUrl();
+          const p1 = document.getElementById('resetPass').value;
+          const p2 = document.getElementById('resetPass2').value;
+          const err = document.getElementById('resetError');
+          err.hidden = true;
+          if (p1 !== p2) {
+            err.textContent = 'The two passwords do not match.';
+            err.hidden = false;
+            return;
+          }
+          try {
+            const r = await fetch('/api/reset', {
+              method: 'POST', credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token, password: p1 }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) {
+              err.textContent = d.error || 'That reset link is no longer valid.';
+              err.hidden = false;
+              return;
+            }
+            // The reply signed us in; drop the token from the URL so a
+            // refresh cannot replay it (it is single-use anyway).
+            try { history.replaceState(null, '', location.pathname); } catch (e) {}
+            document.getElementById('resetScreen').hidden = true;
+            await loadWhoami();
+            await refreshStemToken();
+            await claimShareFromUrl();
+            await loadPlaylists();
+            await loadPresets();
+            await loadClips();
+          } catch (e) {
+            err.textContent = 'Could not reach the server.';
+            err.hidden = false;
+          }
+        }
+
+        /* ===== The account card =====
+         * Everyone: their email and their password. The admin additionally
+         * sees who has joined and the invite codes -- gated on canEditShared,
+         * NOT isAdmin(), which is true for editors too. */
+        function openAccount() {
+          const card = document.getElementById('accountCard');
+          if (!card || !ME) return;
+          document.getElementById('acctUser').textContent = ME.user || '';
+          document.getElementById('acctRole').textContent = ME.role || '';
+          document.getElementById('acctEmail').value = ME.email || '';
+          document.getElementById('acctNote').textContent = '';
+          document.getElementById('adminBox').hidden = !(ME && ME.canEditShared);
+          card.hidden = false;
+          if (ME && ME.canEditShared) loadAdminLists();
+        }
+
+        function closeAccount() {
+          document.getElementById('accountCard').hidden = true;
+        }
+
+        async function saveEmail() {
+          const email = document.getElementById('acctEmail').value.trim();
+          const current = document.getElementById('acctEmailPw').value;
+          const note = document.getElementById('acctNote');
+          const r = await shareRequest('/api/email', { email, current });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) { note.textContent = d.error || 'Could not save that.'; return; }
+          ME.email = d.email;
+          ME.has_email = true;
+          document.getElementById('acctEmailPw').value = '';
+          note.textContent = 'Email saved — a reset link can reach you there.';
+        }
+
+        async function savePassword() {
+          const current = document.getElementById('acctCur').value;
+          const p1 = document.getElementById('acctNew').value;
+          const p2 = document.getElementById('acctNew2').value;
+          const note = document.getElementById('acctNote');
+          if (p1 !== p2) { note.textContent = 'The two new passwords do not match.'; return; }
+          const r = await shareRequest('/api/password', { current, new: p1 });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) { note.textContent = d.error || 'Could not change it.'; return; }
+          for (const id of ['acctCur', 'acctNew', 'acctNew2']) {
+            document.getElementById(id).value = '';
+          }
+          note.textContent = 'Password changed. Other devices are signed out.';
+        }
+
+        async function loadAdminLists() {
+          const box = document.getElementById('adminAccounts');
+          const invBox = document.getElementById('adminInvites');
+          try {
+            const [a, i] = await Promise.all([
+              fetch('/api/accounts', { credentials: 'include' }).then(r => r.ok ? r.json() : null),
+              fetch('/api/invites', { credentials: 'include' }).then(r => r.ok ? r.json() : null),
+            ]);
+            if (a) {
+              box.innerHTML = a.accounts.map(x =>
+                `<div class="share-row"><span class="share-who">${escapeHtml(x.user)}</span>`
+                + `<span class="share-role">${escapeHtml(x.role)}`
+                + (x.email ? ' &middot; ' + escapeHtml(x.email) : ' &middot; no email') + '</span></div>'
+              ).join('');
+            }
+            if (i) {
+              invBox.innerHTML = i.invites.length
+                ? i.invites.map(v =>
+                    `<div class="share-row"><span class="share-who">${escapeHtml(v.code)}</span>`
+                    + `<span class="share-role">`
+                    + (v.uses_left === null ? 'unlimited' : v.uses_left + ' left')
+                    + (v.note ? ' &middot; ' + escapeHtml(v.note) : '')
+                    + (v.used_by && v.used_by.length
+                        ? ' &middot; used by ' + v.used_by.map(escapeHtml).join(', ') : '')
+                    + `</span><button class="share-btn" onclick="disableInvite('${escapeHtml(v.code)}')">Disable</button></div>`
+                  ).join('')
+                : '<div class="share-empty">No codes.</div>';
+            }
+          } catch (e) { /* offline: leave what is on screen */ }
+        }
+
+        async function createInvite() {
+          const note = document.getElementById('invNote');
+          const usesRaw = document.getElementById('invUses').value.trim();
+          const uses = usesRaw === '' ? null
+            : Math.max(1, Math.min(200, parseInt(usesRaw, 10) || 1));
+          const r = await shareRequest('/api/invites', { note: note.value, uses });
+          const d = await r.json().catch(() => ({}));
+          const out = document.getElementById('acctNote');
+          if (!r.ok) { out.textContent = d.error || 'Could not create a code.'; return; }
+          const ok = await copyText(d.code);
+          out.textContent = ok
+            ? `Code ${d.code} created and copied — send it to them.`
+            : `Code ${d.code} created — copy it from the list below.`;
+          note.value = '';
+          loadAdminLists();
+        }
+
+        async function disableInvite(code) {
+          if (!confirm('Disable invite ' + code + '? People who already signed up stay.')) return;
+          await shareRequest('/api/invites', { disable: code });
+          loadAdminLists();
         }
 
         async function doLogout() {
@@ -1974,6 +2291,11 @@
             if (!btn) return;
             btn.hidden = !user;
             btn.title = user ? 'Log out (signed in as ' + user + ')' : 'Log out';
+            const acct = document.getElementById('accountBtn');
+            if (acct) {
+                acct.hidden = !user;
+                acct.title = user ? 'Account settings (' + user + ')' : 'Account settings';
+            }
             let tried = null;
             try { tried = sessionStorage.getItem('beatznbox_logout'); } catch (e) {}
             if (tried && user) {
@@ -5607,6 +5929,13 @@ body {
         document.getElementById('authSwitch').addEventListener('click', () => {
             showAuthScreen(AUTH_MODE === 'signup' ? 'login' : 'signup');
         });
+        document.getElementById('authForgot').addEventListener('click', () => {
+            showAuthScreen('forgot');
+        });
+        document.getElementById('resetForm').addEventListener('submit', submitReset);
+        // Before whoami: the reset card must win over the sign-in card, and
+        // the person following the link may not be signed in at all.
+        showResetFromUrl();
         loadSongList();     // not per-login; can start straight away
         // Playlists, clips and setups are ALL keyed by the login now, so all
         // three wait for whoami. Called before it, ME is still null and

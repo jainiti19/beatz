@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy to /opt/beatznbox/mail.json (0600, owned by beatznbox) to turn mail on. Without this file the site works exactly as before: signup notifications are skipped and 'Forgot password' says reset mail is not set up yet. Delete the _comment key in the real file.",
+  "host": "smtp.example.com",
+  "port": 465,
+  "user": "the provider's SMTP user",
+  "password": "the provider's SMTP password",
+  "from": "Beatz <beatznbox@wesimplyhome.com>",
+  "notify": "where signup notifications go (Iti's address)",
+  "base": "https://beatznbox.wesimplyhome.com"
+}

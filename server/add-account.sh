@@ -86,10 +86,19 @@ if os.path.exists(path):
 
 accts = d.setdefault('accounts', {})
 had = name in accts
-accts[name] = {'pw': bcrypt.hashpw(pw, bcrypt.gensalt(rounds=12)).decode('ascii'),
-               'role': role,
-               'created': (accts.get(name) or {}).get('created')
-                          or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+rec = accts.get(name) if isinstance(accts.get(name), dict) else {}
+# Preserve what this script does not manage: a re-run is also the manual
+# password-reset path, and forgetting `email` would silently break the
+# account's forgot-password route, while forgetting to bump `sess` would let
+# every old session cookie survive the reset it was meant to revoke.
+accts[name] = dict(
+    rec,
+    pw=bcrypt.hashpw(pw, bcrypt.gensalt(rounds=12)).decode('ascii'),
+    role=role,
+    created=rec.get('created') or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    sess=int(rec.get('sess') or 0) + (1 if had else 0),
+)
+accts[name].pop('reset', None)
 
 tmp = path + '.tmp'
 with open(tmp, 'w', encoding='utf-8') as f:
