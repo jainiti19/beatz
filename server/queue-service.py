@@ -145,6 +145,13 @@ MAX_SHARES_IN = 200             # playlists shared TO one login
 MAX_SHARES_PER_PLAYLIST = 50    # links + people on one playlist
 SHARE_SCOPE = 'share'           # the scope value a collaborator's write carries
 
+# A SHARED-set playlist is owned by the house, not by a login, so a share of
+# one is recorded under this sentinel owner. It is not a valid login name
+# (no "@" in the charset), so it can never collide with a real user. An admin
+# may share a house playlist -- the admin account sees ONLY the shared set, so
+# without this it could never share anything at all.
+SHARED_OWNER = '@shared'
+
 # Roles, weakest first. `editor` may write their OWN playlists, presets and
 # clips; `admin` may also write the shared set and manage users. `viewer` is
 # read-only, which is what `beatz` has been since 23 Sep.
@@ -224,6 +231,14 @@ def valid_login(name):
         and re.fullmatch(r'[A-Za-z0-9_.-]+', name) is not None
 
 
+def valid_owner(owner):
+    """A share owner: a login name, or the sentinel that stands for the
+    shared set itself. The two cannot collide -- the sentinel fails
+    valid_login -- which is what makes '@shared' safe as a dictionary key
+    beside real logins in `shares` and `shareLinks`."""
+    return owner == SHARED_OWNER or valid_login(owner)
+
+
 def share_role(shares, user, owner, name):
     """'view' | 'edit' | None: what `user` may do with `owner`'s `name`."""
     if not user or not owner or not name or user == owner:
@@ -232,10 +247,11 @@ def share_role(shares, user, owner, name):
     return rec if rec in SHARE_ROLES else None
 
 
-def visible_shares(user_pl, shares, user):
+def visible_shares(user_pl, shared_pl, shares, user):
     """({name: {'owner', 'role'}}, [shadowed]) for playlists shared to `user`.
 
-    Visible means the owner still HAS that playlist. A share whose name the
+    Visible means the owner still HAS that playlist: a login's own bucket, or
+    the shared set for a sentinel-owned share. A share whose name the
     caller also owns is SHADOWED -- their own playlist wins, and it is
     reported rather than quietly ignored, so deleting their own brings the
     share back. Dangling shares (owner gone, playlist deleted by hand) are
@@ -253,8 +269,11 @@ def visible_shares(user_pl, shares, user):
                 # one entry per name keeps the client's bare keys unambiguous.
                 shadowed.append({'name': name, 'owner': owner, 'role': role})
                 continue
-            if name not in (user_pl.get(owner) or {}):
-                continue                    # the owner deleted it; the share is dead
+            if owner == SHARED_OWNER:
+                if name not in shared_pl:
+                    continue            # the house deleted it; the share is dead
+            elif name not in (user_pl.get(owner) or {}):
+                continue                # the owner deleted it; the share is dead
             meta[name] = {'owner': owner, 'role': role}
     return meta, shadowed
 
@@ -267,6 +286,28 @@ def owned_shares(shares, user):
             if role in SHARE_ROLES:
                 out.setdefault(name, {})[recipient] = role
     return out
+
+
+def prune_shares_for(shares, links, owner, keep):
+    """Grants and links for playlists that no longer exist go with them: a
+    link to a deleted playlist must die with the playlist, or re-creating the
+    same name later would silently resurrect every old grant and link. `keep`
+    is the set of names in the owner's newly-written map; `shares` and `links`
+    are mutated in place."""
+    for recipient, by_owner in list(shares.items()):
+        held = by_owner.get(owner)
+        if not isinstance(held, dict):
+            continue
+        for gone in [n for n in list(held) if n not in keep]:
+            del held[gone]
+        if not held:
+            del by_owner[owner]
+        if not by_owner:
+            del shares[recipient]
+    for token in [t for t, r in links.items()
+                  if isinstance(r, dict) and r.get('owner') == owner
+                  and r.get('name') not in keep]:
+        del links[token]
 
 
 def key_playlist(key):
@@ -284,18 +325,20 @@ def merge_shared_entries(own, other, names):
     return out
 
 
-def shared_entries(buckets, user_pl, shares, user):
+def shared_entries(buckets, shared_buckets, user_pl, shared_pl, shares, user):
     """{key: value} taken from the owners' buckets, for every playlist shared
-    to `user` -- clips and presets alike. The keys are the same bare
+    to `user` -- clips and presets alike. A sentinel-owned share reads the
+    shared set's own maps instead. The keys are the same bare
     "<name>::<song>" the caller already uses for their own, so nothing
     downstream needs to know who owns a playlist."""
-    meta, _ = visible_shares(user_pl, shares, user)
+    meta, _ = visible_shares(user_pl, shared_pl, shares, user)
     by_owner = {}
     for name, m in meta.items():
         by_owner.setdefault(m['owner'], set()).add(name)
     out = {}
     for owner, names in by_owner.items():
-        out = merge_shared_entries(out, buckets.get(owner) or {}, names)
+        src = shared_buckets if owner == SHARED_OWNER else (buckets.get(owner) or {})
+        out = merge_shared_entries(out, src, names)
     return out
 
 
@@ -806,22 +849,36 @@ class Handler(BaseHTTPRequestHandler):
                       f, ensure_ascii=False)
         os.replace(tmp, self._playlists_path())     # atomic: no half-written file
 
-    def _playlist_payload(self, shared, user_pl, shares, links, rev, user):
+    def _playlist_payload(self, shared, user_pl, shares, links, rev, user, role):
         """What GET returns, what every 200 returns, and (with `error`) what a
         409 returns -- so a stale client reconciles from exactly the state it
         would have got from a fresh load. Only the caller's OWN shares and
-        links are in here: nobody sees who else has access to anything."""
-        meta, shadowed = visible_shares(user_pl, shares, user)
+        links are in here: nobody sees who else has access to anything.
+        `role` is the caller's: an admin also manages the house shares and
+        links (owner '@shared'), which is why it is passed in rather than
+        re-derived -- role_of() does not know about session accounts."""
+        meta, shadowed = visible_shares(user_pl, shared, shares, user)
         mine = dict(user_pl.get(user, {}) if user else {})
         for name, m in meta.items():
-            mine[name] = (user_pl.get(m['owner']) or {}).get(name, [])
+            if m['owner'] == SHARED_OWNER:
+                mine[name] = shared.get(name, [])
+            else:
+                mine[name] = (user_pl.get(m['owner']) or {}).get(name, [])
+        my_shares = owned_shares(shares, user)
+        if role == 'admin':
+            # The house shares are managed by ANY admin, so every admin sees
+            # them all in their panel and can remove a person or revoke a link.
+            for name, people in owned_shares(shares, SHARED_OWNER).items():
+                my_shares.setdefault(name, {}).update(people)
         my_links = {t: {'name': r.get('name'), 'role': r.get('role'),
                         'created': r.get('created')}
                     for t, r in links.items()
-                    if isinstance(r, dict) and r.get('owner') == user}
+                    if isinstance(r, dict)
+                    and (r.get('owner') == user
+                         or (role == 'admin' and r.get('owner') == SHARED_OWNER))}
         return {'ok': True, 'playlists': shared, 'mine': mine,
                 'sharedMeta': meta, 'shadowed': shadowed,
-                'myShares': owned_shares(shares, user), 'myLinks': my_links,
+                'myShares': my_shares, 'myLinks': my_links,
                 'rev': rev}
 
     def _share_target(self, data, key, user, role):
@@ -833,13 +890,17 @@ class Handler(BaseHTTPRequestHandler):
         scope = data.get('scope') or 'shared'
         owner = (data.get('owner') or '').strip()
         if scope == SHARE_SCOPE:
-            if not valid_login(owner):
+            if not valid_owner(owner):
                 return scope, owner, (400, 'owner is required')
             with PLAYLISTS_LOCK:
-                _, user_pl, shares, _, _ = self._read_playlists()
+                shared, user_pl, shares, _, _ = self._read_playlists()
                 name = key_playlist(key)
+                if owner == SHARED_OWNER:
+                    exists = name in shared
+                else:
+                    exists = name in (user_pl.get(owner) or {})
                 ok = (share_role(shares, user, owner, name) == 'edit'
-                      and name in (user_pl.get(owner) or {}))
+                      and exists)
             return scope, owner, None if ok else (403, 'read-only')
         return scope, owner, scope_allowed(scope, user, role, None)
 
@@ -848,8 +909,9 @@ class Handler(BaseHTTPRequestHandler):
         # The caller only ever sees their own bucket and what has been shared
         # with them, never anyone else's. The shared set is returned to
         # everyone, since that is what "shared" means.
-        user, _ = self._who()
-        return self._json(200, self._playlist_payload(shared, user_pl, shares, links, rev, user))
+        user, role = self._who()
+        return self._json(200, self._playlist_payload(
+            shared, user_pl, shares, links, rev, user, role))
 
     def post_playlists(self):
         data, err = self._read_json(MAX_BODY)
@@ -890,10 +952,11 @@ class Handler(BaseHTTPRequestHandler):
                 # One owner per write, and every name in it must be one they
                 # gave the caller edit on. Only the names actually sent are
                 # touched: a collaborator's delta can change a playlist but
-                # never delete one.
-                if not valid_login(owner):
+                # never delete one. A sentinel owner resolves to the shared
+                # set itself -- never a userPlaylists['@shared'] bucket.
+                if not valid_owner(owner):
                     return self._json(400, {'error': 'owner is required'})
-                bucket = user_pl.get(owner) or {}
+                bucket = shared if owner == SHARED_OWNER else (user_pl.get(owner) or {})
                 for name in clean:
                     if name not in bucket:
                         return self._json(404, {'error': 'no such playlist'})
@@ -914,37 +977,29 @@ class Handler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     return self._json(400, {'error': 'bad rev'})
                 if stale:
-                    body = self._playlist_payload(shared, user_pl, shares, links, rev, user)
+                    body = self._playlist_payload(
+                        shared, user_pl, shares, links, rev, user, role)
                     body.pop('ok', None)
                     body['error'] = 'stale'
                     return self._json(409, body)
 
             if scope == 'shared':
                 shared = clean
+                # The house set obeys the same rule as a personal one: a
+                # deleted playlist takes its grants and links with it.
+                prune_shares_for(shares, links, SHARED_OWNER, clean)
             elif scope == 'user':
                 user_pl[user] = clean
-                # Shares and links for playlists that no longer exist go with
-                # them: a link to a deleted playlist must die with the playlist.
-                for recipient, by_owner in list(shares.items()):
-                    held = by_owner.get(user)
-                    if not isinstance(held, dict):
-                        continue
-                    for gone in [n for n in list(held) if n not in clean]:
-                        del held[gone]
-                    if not held:
-                        del by_owner[user]
-                    if not by_owner:
-                        del shares[recipient]
-                for token in [t for t, r in links.items()
-                              if isinstance(r, dict) and r.get('owner') == user
-                              and r.get('name') not in clean]:
-                    del links[token]
+                prune_shares_for(shares, links, user, clean)
             else:
-                bucket = user_pl.setdefault(owner, {})
-                bucket.update(clean)
+                if owner == SHARED_OWNER:
+                    shared.update(clean)
+                else:
+                    user_pl.setdefault(owner, {}).update(clean)
             rev += 1
             self._write_playlists(shared, user_pl, shares, links, rev)
-            return self._json(200, self._playlist_payload(shared, user_pl, shares, links, rev, user))
+            return self._json(200, self._playlist_payload(
+                shared, user_pl, shares, links, rev, user, role))
 
     # ---- saved song setups -------------------------------------------
     # "Save Setup" lived in each browser's localStorage, so a mix saved on a
@@ -977,11 +1032,11 @@ class Handler(BaseHTTPRequestHandler):
         user, _ = self._who()
         own = user_pr.get(user, {}) if user else {}
         with PLAYLISTS_LOCK:
-            _, user_pl, shares, _, _ = self._read_playlists()
+            shared_pl, user_pl, shares, _, _ = self._read_playlists()
         # A collaborator sees the owner's mixes for the playlists shared with
         # them, under the same bare keys as their own -- the client never has
         # to know who owns a playlist. Their own entry wins a clash.
-        mine = shared_entries(user_pr, user_pl, shares, user) if user else {}
+        mine = shared_entries(user_pr, shared, user_pl, shared_pl, shares, user) if user else {}
         mine.update(own)
         return self._json(200, {'ok': True, 'presets': shared, 'mine': mine})
 
@@ -1029,7 +1084,8 @@ class Handler(BaseHTTPRequestHandler):
         with PRESETS_LOCK:
             shared, user_pr = self._read_presets()
             bucket_user = owner if scope == SHARE_SCOPE else user
-            target = shared if scope == 'shared' else user_pr.setdefault(bucket_user, {})
+            target = shared if (scope == 'shared' or owner == SHARED_OWNER) \
+                else user_pr.setdefault(bucket_user, {})
             if clean is None:
                 target.pop(key, None)
             else:
@@ -1073,10 +1129,10 @@ class Handler(BaseHTTPRequestHandler):
         user, _ = self._who()
         own = user_cl.get(user, {}) if user else {}
         with PLAYLISTS_LOCK:
-            _, user_pl, shares, _, _ = self._read_playlists()
+            shared_pl, user_pl, shares, _, _ = self._read_playlists()
         # Same merge as presets: the owner's clips for a playlist shared with
         # the caller arrive under the same bare keys, own entry winning.
-        mine = shared_entries(user_cl, user_pl, shares, user) if user else {}
+        mine = shared_entries(user_cl, shared, user_pl, shared_pl, shares, user) if user else {}
         mine.update(own)
         return self._json(200, {'ok': True, 'clips': shared, 'mine': mine})
 
@@ -1132,7 +1188,8 @@ class Handler(BaseHTTPRequestHandler):
         with CLIPS_LOCK:
             shared, user_cl = self._read_clips()
             bucket_user = owner if scope == SHARE_SCOPE else user
-            target = shared if scope == 'shared' else user_cl.setdefault(bucket_user, {})
+            target = shared if (scope == 'shared' or owner == SHARED_OWNER) \
+                else user_cl.setdefault(bucket_user, {})
             if clean is None:
                 target.pop(key, None)
             else:
@@ -1291,7 +1348,7 @@ class Handler(BaseHTTPRequestHandler):
         data, err = self._read_json(MAX_BODY)
         if err is not None:
             return
-        user, _ = self._who()
+        user, role = self._who()
         if not user:
             return self._json(400, {'error': 'login required'})
         with PLAYLISTS_LOCK:
@@ -1299,7 +1356,12 @@ class Handler(BaseHTTPRequestHandler):
             if data.get('revoke'):
                 token = str(data.get('token') or '').strip()
                 rec = links.get(token) if token else None
-                if not isinstance(rec, dict) or rec.get('owner') != user:
+                # A house link is any admin's to revoke; a personal one only
+                # its creator's.
+                mine_link = isinstance(rec, dict) and (
+                    rec.get('owner') == user
+                    or (role == 'admin' and rec.get('owner') == SHARED_OWNER))
+                if not mine_link:
                     return self._json(404, {'error': 'no such link'})
                 del links[token]
                 token = None
@@ -1308,18 +1370,28 @@ class Handler(BaseHTTPRequestHandler):
                 lrole = data.get('role')
                 if lrole not in SHARE_ROLES:
                     return self._json(400, {'error': 'role must be view or edit'})
-                if name not in (user_pl.get(user) or {}):
+                # The house set first for an admin: that is the set their
+                # screen shows, and the one they are looking at when they
+                # press Share. An editor can only ever share their own bucket.
+                if role == 'admin' and name in shared:
+                    share_owner = SHARED_OWNER
+                elif name in (user_pl.get(user) or {}):
+                    share_owner = user
+                else:
                     return self._json(404, {'error': 'no such playlist'})
                 mine_links = [r for r in links.values()
-                              if isinstance(r, dict) and r.get('owner') == user]
+                              if isinstance(r, dict)
+                              and (r.get('owner') == user
+                                   or (role == 'admin'
+                                       and r.get('owner') == SHARED_OWNER))]
                 if len(mine_links) >= MAX_SHARES_PER_PLAYLIST:
                     return self._json(400, {'error': 'too many share links'})
                 token = secrets.token_urlsafe(12)
-                links[token] = {'owner': user, 'name': name, 'role': lrole,
+                links[token] = {'owner': share_owner, 'name': name, 'role': lrole,
                                 'created': int(time.time())}
             rev += 1
             self._write_playlists(shared, user_pl, shares, links, rev)
-            body = self._playlist_payload(shared, user_pl, shares, links, rev, user)
+            body = self._playlist_payload(shared, user_pl, shares, links, rev, user, role)
             body['token'] = token        # the one just made, or None on a revoke
             return self._json(200, body)
 
@@ -1330,7 +1402,7 @@ class Handler(BaseHTTPRequestHandler):
         data, err = self._read_json(MAX_BODY)
         if err is not None:
             return
-        user, _ = self._who()
+        user, role = self._who()
         if not user:
             return self._json(400, {'error': 'login required'})
         token = str(data.get('token') or '').strip()
@@ -1340,11 +1412,19 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(rec, dict):
                 return self._json(404, {'error': 'that link is not valid'})
             owner, name, lrole = rec.get('owner'), rec.get('name'), rec.get('role')
-            if lrole not in SHARE_ROLES or not valid_login(owner) or not isinstance(name, str):
+            if lrole not in SHARE_ROLES or not valid_owner(owner) or not isinstance(name, str):
                 return self._json(404, {'error': 'that link is not valid'})
-            if name not in (user_pl.get(owner) or {}):
+            if owner == SHARED_OWNER:
+                exists = name in shared
+            else:
+                exists = name in (user_pl.get(owner) or {})
+            if not exists:
                 return self._json(404, {'error': 'that playlist no longer exists'})
-            if owner == user:
+            # An admin already has the house set in full; claiming a house
+            # link would only move the playlist into their "Shared with me"
+            # and hide their editing controls for it. Same answer as for
+            # anyone following their own link.
+            if owner == user or (owner == SHARED_OWNER and role == 'admin'):
                 return self._json(400, {'error': 'that is your own playlist'})
             held = shares.setdefault(user, {}).setdefault(owner, {})
             want = 'edit' if 'edit' in (held.get(name), lrole) else 'view'
@@ -1355,7 +1435,7 @@ class Handler(BaseHTTPRequestHandler):
                 held[name] = want
                 rev += 1
                 self._write_playlists(shared, user_pl, shares, links, rev)
-            body = self._playlist_payload(shared, user_pl, shares, links, rev, user)
+            body = self._playlist_payload(shared, user_pl, shares, links, rev, user, role)
             body['claimed'] = {'owner': owner, 'name': name, 'role': held.get(name)}
             return self._json(200, body)
 
@@ -1365,7 +1445,7 @@ class Handler(BaseHTTPRequestHandler):
         data, err = self._read_json(MAX_BODY)
         if err is not None:
             return
-        user, _ = self._who()
+        user, role = self._who()
         if not user:
             return self._json(400, {'error': 'login required'})
         name = str(data.get('name') or '').strip()[:60]
@@ -1375,7 +1455,7 @@ class Handler(BaseHTTPRequestHandler):
             shared, user_pl, shares, links, rev = self._read_playlists()
             if data.get('leave'):
                 owner = str(data.get('owner') or '').strip()
-                if not valid_login(owner):
+                if not valid_owner(owner):
                     return self._json(400, {'error': 'owner is required'})
                 held = (shares.get(user) or {}).get(owner)
                 if isinstance(held, dict) and name in held:
@@ -1387,30 +1467,38 @@ class Handler(BaseHTTPRequestHandler):
                     rev += 1
                     self._write_playlists(shared, user_pl, shares, links, rev)
             else:
-                if name not in (user_pl.get(user) or {}):
+                # Which of the caller's maps this playlist is in. The house
+                # set first for an admin: it is the set their screen shows,
+                # and the only one their Share panel ever offers.
+                if role == 'admin' and name in shared:
+                    owner_key = SHARED_OWNER
+                elif name in (user_pl.get(user) or {}):
+                    owner_key = user
+                else:
                     return self._json(404, {'error': 'no such playlist'})
                 recipient = str(data.get('user') or '').strip()
                 if not valid_login(recipient) or recipient == user:
                     return self._json(400, {'error': 'bad user name'})
-                held = (shares.get(recipient) or {}).get(user)
+                held = (shares.get(recipient) or {}).get(owner_key)
                 grant = data.get('role')
                 changed = False
                 if grant in SHARE_ROLES:
                     if held is None:
-                        held = shares.setdefault(recipient, {}).setdefault(user, {})
+                        held = shares.setdefault(recipient, {}).setdefault(owner_key, {})
                     changed = held.get(name) != grant
                     held[name] = grant
                 elif isinstance(held, dict) and name in held:
                     del held[name]
                     changed = True
                     if not held:
-                        del shares[recipient][user]
+                        del shares[recipient][owner_key]
                     if not shares.get(recipient):
                         del shares[recipient]
                 if changed:
                     rev += 1
                     self._write_playlists(shared, user_pl, shares, links, rev)
-            return self._json(200, self._playlist_payload(shared, user_pl, shares, links, rev, user))
+            return self._json(200, self._playlist_payload(
+                shared, user_pl, shares, links, rev, user, role))
 
     # ---- users -------------------------------------------------------
     # Who may log in and what they may do. The PASSWORD is not here: Caddy

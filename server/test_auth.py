@@ -513,6 +513,212 @@ class Sharing(ServiceCase):
                         'every concurrent grant must survive the read-modify-write')
 
 
+class SharedSetSharing(ServiceCase):
+    """An admin can share the SHARED set itself (1 Oct).
+
+    The admin account reads and writes only the house set, so own-bucket
+    sharing could never apply to it: every playlist it can see failed the
+    "is it yours" check and the Share control never appeared. A house share
+    is recorded under the sentinel owner '@shared' -- these tests pin the
+    whole path: link -> claim -> read -> collaborate -> leave/remove/prune.
+    """
+
+    seed_accounts = {
+        'root': (ROOT, 'admin'),
+        'root2': ('root2pass123', 'admin'),
+        'alice': (ALICE, 'editor'),
+        'dave': ('davepass123', 'viewer'),
+    }
+
+    # -- helpers -----------------------------------------------------------
+
+    def playlists(self, cookie=None):
+        status, d, _ = self.request('GET', '/api/playlists', cookie=cookie)
+        self.assertEqual(status, 200, d)
+        return d
+
+    def raw(self, name):
+        with open(os.path.join(self.tmp, name), encoding='utf-8') as f:
+            return json.load(f)
+
+    def make_shared(self, cookie, name, dirs=('song_a',)):
+        """Add one playlist to the house set, keeping the rest."""
+        d = self.playlists(cookie)
+        house = dict(d['playlists'])
+        house[name] = list(dirs)
+        status, out, _ = self.request('POST', '/api/playlists',
+                                      {'playlists': house, 'scope': 'shared',
+                                       'rev': d['rev']}, cookie=cookie)
+        self.assertEqual(status, 200, out)
+        return out
+
+    def make_link(self, cookie, name, role):
+        status, d, _ = self.request('POST', '/api/share-links',
+                                    {'name': name, 'role': role}, cookie=cookie)
+        self.assertEqual(status, 200, d)
+        return d
+
+    def claim(self, cookie, token):
+        return self.request('POST', '/api/share-links/claim', {'token': token},
+                            cookie=cookie)
+
+    def share_write(self, cookie, playlists, owner='@shared'):
+        status, d, _ = self.request('POST', '/api/playlists',
+                                    {'playlists': playlists, 'scope': 'share',
+                                     'owner': owner, 'rev': self.playlists(cookie)['rev']},
+                                    cookie=cookie)
+        return status, d
+
+    # -- the flow ----------------------------------------------------------
+
+    def test_01_admin_view_link_for_the_house_set(self):
+        root = self.login_cookie('root', ROOT)
+        dave = self.login_cookie('dave', 'davepass123')
+        alice = self.login_cookie('alice', ALICE)
+        self.make_shared(root, 'Antakshari', ['song_a'])
+
+        d = self.make_link(root, 'Antakshari', 'view')
+        token = d['token']
+        # The creator can MANAGE the link (myLinks) -- without this the card
+        # would say "No links yet" and Revoke would be unreachable.
+        self.assertIn(token, d['myLinks'])
+        self.assertEqual(self.raw('playlists.json')['shareLinks'][token]['owner'],
+                         '@shared')
+        # An editor cannot share a house playlist: only admins own it.
+        status, d, _ = self.request('POST', '/api/share-links',
+                                    {'name': 'Antakshari', 'role': 'view'},
+                                    cookie=alice)
+        self.assertEqual(status, 404, d)
+
+        status, d, _ = self.claim(dave, token)
+        self.assertEqual(status, 200, d)
+        self.assertEqual(d['claimed'],
+                         {'owner': '@shared', 'name': 'Antakshari', 'role': 'view'})
+        self.assertEqual(d['sharedMeta']['Antakshari'],
+                         {'owner': '@shared', 'role': 'view'})
+        self.assertEqual(d['mine']['Antakshari'], ['song_a'])
+
+        # View-only: playlist, clip and setup writes are all refused.
+        status, d = self.share_write(dave, {'Antakshari': ['song_z']})
+        self.assertEqual(status, 403, d)
+        for path, body in (('/api/clips', {'key': 'Antakshari::song_a',
+                                           'clip': {'start': 1, 'end': 9}}),
+                           ('/api/presets', {'key': 'Antakshari::song_a',
+                                             'setup': {'tag': 'mine'}})):
+            status, d, _ = self.request('POST', path,
+                                        dict(body, scope='share', owner='@shared'),
+                                        cookie=dave)
+            self.assertEqual(status, 403, d)
+        self.assertEqual(self.playlists(root)['playlists']['Antakshari'], ['song_a'])
+
+        # An admin following a house link gets the "your own playlist"
+        # answer: they already have the set, and claiming would move the
+        # playlist into their "Shared with me" and hide the controls.
+        status, d, _ = self.claim(root, token)
+        self.assertEqual(status, 400, d)
+
+    def test_02_edit_link_writes_land_in_the_house_maps(self):
+        root = self.login_cookie('root', ROOT)
+        alice = self.login_cookie('alice', ALICE)
+        self.make_shared(root, 'HouseMix', ['song_a'])
+        token = self.make_link(root, 'HouseMix', 'edit')['token']
+        self.assertEqual(self.claim(alice, token)[0], 200)
+
+        status, d = self.share_write(alice, {'HouseMix': ['song_a', 'song_b']})
+        self.assertEqual(status, 200, d)
+        raw = self.raw('playlists.json')
+        self.assertEqual(raw['playlists']['HouseMix'], ['song_a', 'song_b'],
+                         'a collaborator writes into the shared set itself')
+        self.assertNotIn('@shared', raw.get('userPlaylists') or {},
+                         'the sentinel must never become a user bucket')
+        # Anonymous readers see the house set, so the edit is live for all.
+        self.assertEqual(self.playlists()['playlists']['HouseMix'],
+                         ['song_a', 'song_b'])
+        # The admin sees who has the playlist.
+        self.assertEqual(self.playlists(root)['myShares']['HouseMix'],
+                         {'alice': 'edit'})
+
+        status, d, _ = self.request('POST', '/api/clips',
+                                    {'key': 'HouseMix::song_a',
+                                     'clip': {'start': 1, 'end': 9},
+                                     'scope': 'share', 'owner': '@shared'},
+                                    cookie=alice)
+        self.assertEqual(status, 200, d)
+        status, d, _ = self.request('POST', '/api/presets',
+                                    {'key': 'HouseMix::song_a',
+                                     'setup': {'tag': 'house'},
+                                     'scope': 'share', 'owner': '@shared'},
+                                    cookie=alice)
+        self.assertEqual(status, 200, d)
+        clips = self.raw('clips.json')
+        self.assertEqual(clips['HouseMix::song_a'], {'start': 1.0, 'end': 9.0})
+        self.assertNotIn('@shared', clips.get('__user__') or {})
+        presets = self.raw('presets.json')
+        self.assertEqual(presets['HouseMix::song_a']['tag'], 'house')
+        self.assertNotIn('@shared', presets.get('__user__') or {})
+
+        # The recipient's own GETs show them, under their bare keys.
+        status, d, _ = self.request('GET', '/api/clips', cookie=alice)
+        self.assertEqual(d['mine']['HouseMix::song_a'], {'start': 1.0, 'end': 9.0})
+        status, d, _ = self.request('GET', '/api/presets', cookie=alice)
+        self.assertEqual(d['mine']['HouseMix::song_a']['tag'], 'house')
+
+    def test_03_leave_remove_and_revoke(self):
+        root = self.login_cookie('root', ROOT)
+        root2 = self.login_cookie('root2', 'root2pass123')
+        alice = self.login_cookie('alice', ALICE)
+        self.make_shared(root, 'Leavable', ['song_a'])
+        token = self.make_link(root, 'Leavable', 'edit')['token']
+        self.assertEqual(self.claim(alice, token)[0], 200)
+
+        # Leave. This used to fail: the sentinel is not a login name, and the
+        # leave gate checked it with valid_login().
+        status, d, _ = self.request('POST', '/api/shares',
+                                    {'name': 'Leavable', 'owner': '@shared',
+                                     'leave': True}, cookie=alice)
+        self.assertEqual(status, 200, d)
+        self.assertNotIn('Leavable', d['sharedMeta'])
+        self.assertEqual(self.claim(alice, token)[0], 200, 'the link still works')
+
+        # Remove by name: the wire carries no owner, so an admin's house
+        # resolution must find the sentinel record.
+        status, d, _ = self.request('POST', '/api/shares',
+                                    {'name': 'Leavable', 'user': 'alice',
+                                     'role': None}, cookie=root)
+        self.assertEqual(status, 200, d)
+        self.assertNotIn('Leavable', self.playlists(alice)['sharedMeta'])
+
+        # Any admin can revoke a house link, not just its creator.
+        status, d, _ = self.request('POST', '/api/share-links',
+                                    {'token': token, 'revoke': True}, cookie=root2)
+        self.assertEqual(status, 200, d)
+        self.assertNotIn(token, d['myLinks'])
+        self.assertEqual(self.claim(alice, token)[0], 404)
+
+    def test_04_a_deleted_house_playlist_takes_its_shares_with_it(self):
+        root = self.login_cookie('root', ROOT)
+        alice = self.login_cookie('alice', ALICE)
+        self.make_shared(root, 'Doomed', ['song_a'])
+        token = self.make_link(root, 'Doomed', 'edit')['token']
+        self.assertEqual(self.claim(alice, token)[0], 200)
+
+        d = self.playlists(root)
+        house = dict(d['playlists'])
+        del house['Doomed']
+        status, out, _ = self.request('POST', '/api/playlists',
+                                      {'playlists': house, 'scope': 'shared',
+                                       'rev': d['rev']}, cookie=root)
+        self.assertEqual(status, 200, out)
+
+        raw = self.raw('playlists.json')
+        for by_owner in (raw.get('shares') or {}).values():
+            self.assertNotIn('Doomed', by_owner.get('@shared') or {},
+                             'a grant for a deleted house playlist must die with it')
+        self.assertNotIn(token, raw.get('shareLinks') or {})
+        self.assertNotIn('Doomed', self.playlists(alice)['sharedMeta'])
+        self.assertEqual(self.claim(alice, token)[0], 404)
+
+
 class Live(ServiceCase):
     """Live lyrics: the host publishes, anyone with the code follows, only the
     broadcast song's lyrics are reachable, and a viewer cannot publish."""

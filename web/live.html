@@ -42,6 +42,13 @@
   }
   .lyrics-line.past { color: #2B3534; }
   .lyrics-line.active { font-size: var(--bs-now); line-height: 1.2; color: #4DB6AC; font-weight: 600; }
+  /* The word sweep, as the app's own lyrics view has it: the word being
+     sung is brightest, the ones already sung stay lit. Colour only --
+     a size change here would reflow the line mid-sweep. */
+  .lyrics-word { transition: color 0.12s linear; }
+  .lyrics-line.active .lyrics-word { color: #7aa8a3; }
+  .lyrics-line.active .lyrics-word.sung { color: #80CBC4; }
+  .lyrics-line.active .lyrics-word.singing { color: #B2DFDB; }
   .lyric-roman { display: none; }
   .lyrics-line.active .lyric-roman {
     display: block; font-size: var(--bs-roman); line-height: 1.4;
@@ -107,9 +114,52 @@ function renderLines() {
       ? '<div class="lyric-roman">' + words.map(w => jd(w.roman || w.word)).join(' ') + '</div>'
       : '';
     return '<div class="lyrics-line" id="lyric-' + i + '">' +
-           escapeHtml(text) + roman + '</div>';
+           buildWordSpans(L, i) + roman + '</div>';
   }).join('');
   lastIdx = -2;
+}
+
+/* Per-word timings, wrapped so the sweep can move through the line -- the
+ * app's own lyrics view does this, and the follower's screen should read the
+ * same. Display text and aligned tokens are not 1:1 (the aligner strips
+ * punctuation and splits hyphenates), so walk both together matching on
+ * normalized form; a display word without a match stays plain rather than
+ * getting the wrong time. */
+function buildWordSpans(L, i) {
+  const aligned = Array.isArray(L.words) ? L.words : [];
+  const text = jd(L.text);
+  if (!aligned.length) return escapeHtml(text);
+  const display = text.split(/\s+/).filter(Boolean);
+  const norm = s => s.toLowerCase().replace(/[^a-z']/g, '');
+  // All display words outside [a-z'] (Devanagari, Urdu, Hangul...) normalise
+  // to '' and can never match a token; but the aligner built its tokens from
+  // these very words, so equal counts pair by position safely.
+  if (display.length === aligned.length && display.every(w => !norm(w))) {
+    return display.map((dw, di) =>
+      '<span class="lyrics-word" data-s="' + aligned[di].start +
+      '" data-e="' + aligned[di].end + '">' + escapeHtml(dw) + '</span>'
+    ).join(' ');
+  }
+  let ai = 0;
+  return display.map((dw) => {
+    const key = norm(dw);
+    let timing = null;
+    if (key && ai < aligned.length) {
+      // Hyphenates collapse to several aligned words; consume them all.
+      let j = ai, acc = '';
+      while (j < aligned.length && acc.length < key.length) {
+        acc += aligned[j].word;
+        j++;
+      }
+      if (acc === key) {
+        timing = { start: aligned[ai].start, end: aligned[j - 1].end };
+        ai = j;
+      }
+    }
+    if (!timing) return escapeHtml(dw);
+    return '<span class="lyrics-word" data-s="' + timing.start +
+           '" data-e="' + timing.end + '">' + escapeHtml(dw) + '</span>';
+  }).join(' ');
 }
 
 function escapeHtml(s) {
@@ -144,6 +194,39 @@ function computeActive(t) {
   return idx;
 }
 
+function clearWordStates(i) {
+  const line = document.getElementById('lyric-' + i);
+  if (line) line.querySelectorAll('.lyrics-word').forEach(w =>
+    w.classList.remove('sung', 'singing'));
+}
+
+let lastWordKey = '';
+
+// Sweep the words inside the active line: before the playhead is sung, the
+// current one is singing. DOM writes only when the boundary moves.
+function updateWordHighlight(idx, t) {
+  if (idx < 0) return;
+  const line = document.getElementById('lyric-' + idx);
+  if (!line) return;
+  const words = line.querySelectorAll('.lyrics-word');
+  if (!words.length) return;
+  let cur = -1;
+  for (let i = 0; i < words.length; i++) {
+    const s = parseFloat(words[i].dataset.s);
+    const e = parseFloat(words[i].dataset.e);
+    if (t >= s && t < e) { cur = i; break; }
+    if (t >= e) cur = i;          // past it; hold until the next starts
+    else break;
+  }
+  const key = idx + ':' + cur;
+  if (key === lastWordKey) return;
+  lastWordKey = key;
+  words.forEach((w, i) => {
+    w.classList.toggle('singing', i === cur);
+    w.classList.toggle('sung', i < cur);
+  });
+}
+
 function tick() {
   if (!lines) return;
   const t = nowPos();
@@ -152,7 +235,9 @@ function tick() {
     if (lastIdx >= 0) {
       const prev = document.getElementById('lyric-' + lastIdx);
       if (prev) prev.className = 'lyrics-line past';
+      clearWordStates(lastIdx);
     }
+    lastWordKey = '';
     const el = document.getElementById('lyric-' + idx);
     if (el) {
       el.className = 'lyrics-line active';
@@ -163,6 +248,7 @@ function tick() {
     }
     lastIdx = idx;
   }
+  updateWordHighlight(idx, t);
   // Dim when the updates stop coming: a locked phone, a tunnel, a host who
   // walked away. The last line stays readable rather than blanking.
   document.body.classList.toggle('stale', performance.now() - fetchedAt > 15000);

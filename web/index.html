@@ -407,6 +407,35 @@
         .live-url { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
                     white-space: nowrap; font-family: ui-monospace, monospace; }
         .live-row[hidden] { display: none; }
+        /* The live QR, in the row (for the host to hold up) and on the stage
+           (for the room to scan at once). White plate: scanners want dark
+           modules on a light field, and the app is dark. */
+        .live-qr { flex: 1 1 100%; display: flex; justify-content: center;
+                   padding: 8px 0 2px; }
+        .live-qr:empty { display: none; }
+        .live-qr svg { width: 172px; height: 172px; display: block;
+                       background: #fff; padding: 8px; border-radius: 10px; }
+        /* The stage button and its overlay. The player already carries the
+           QR in the live row; on the stage a button in the topbar raises it
+           big enough for the whole room. `hidden` must win over the stage
+           rule, so it gets !important -- the third time this pattern bites. */
+        .btn-qr { display: none; }
+        body.big-screen .btn-qr {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(255, 255, 255, .06); color: #B2DFDB;
+            border: 1px solid rgba(178, 223, 219, .35); border-radius: 999px;
+            padding: 10px 16px; font-size: var(--bs-chrome); cursor: pointer;
+        }
+        .btn-qr[hidden] { display: none !important; }
+        .stage-qr { position: fixed; inset: 0; z-index: 60;
+                    background: rgba(8, 12, 11, .93);
+                    display: flex; align-items: center; justify-content: center; }
+        .stage-qr[hidden] { display: none; }
+        .stage-qr-card { background: #fff; border-radius: 18px; text-align: center;
+                         padding: clamp(14px, 3vmin, 32px); }
+        .stage-qr-img svg { width: min(58vh, 58vw); height: min(58vh, 58vw); display: block; }
+        .stage-qr-note { margin-top: 12px; color: #0E1413; font-weight: 600;
+                         font-size: clamp(13px, min(3vh, 3.2vw), 24px); }
         @media (max-width: 820px), (pointer: coarse) { .btn-popout { display: none; } }
 
         .presets {
@@ -1353,10 +1382,31 @@
     </div>
   </div>
 </div>
+
+<!-- The stage's live QR, full screen: the whole room scans at once. Filled
+     by showStageQr(); tap anywhere to dismiss. -->
+<div class="stage-qr" id="stageQr" hidden onclick="hideStageQr()">
+  <div class="stage-qr-card">
+    <div class="stage-qr-img" id="stageQrImg"></div>
+    <div class="stage-qr-note">Scan to follow the lyrics</div>
+  </div>
+</div>
     <div class="topbar">
         <img class="brand-logo" src="data:image/webp;base64,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" alt="">
         <h1>BeatznBox</h1>
         <span class="now-playing" id="nowPlaying">Select a song to start</span>
+        <!-- The room's way in, on the stage only: shows the live QR big
+             enough to scan at once. Managed by setLiveUi(); see .btn-qr. -->
+        <button class="btn-qr" id="qrBtn" onclick="showStageQr()" hidden
+                title="Show the QR for the live lyrics" aria-label="Show the live QR">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linejoin="round"
+                 style="vertical-align:-2px"><rect x="3" y="3" width="7" height="7" rx="1"/>
+                 <rect x="14" y="3" width="7" height="7" rx="1"/>
+                 <rect x="3" y="14" width="7" height="7" rx="1"/>
+                 <path d="M14 14h2.5v2.5H14z"/><path d="M19.5 14v2.5"/><path d="M14 19.5h2.5"/>
+                 <path d="M19.5 19.5h1.5"/></svg>
+            <span>QR</span></button>
         <button class="lib-btn" id="libBtn" onclick="toggleLibrary()"
                 title="Back to the song list">Library</button>
         <div class="top-actions">
@@ -1457,6 +1507,7 @@
         </div>
     </div>
 
+    <script src="qrcode.js"></script>
     <script>
         const STEMS_BASE_URL = './stems';
         const stemUrl = (dir, file) =>
@@ -1739,6 +1790,12 @@
         function playlistOwner(name = selectedPlaylist) {
             const m = name ? sharedMeta[name] : null;
             return m ? m.owner : null;
+        }
+
+        // The wire keeps the raw owner ('@shared' for the house set); only
+        // what a person READS is prettied up.
+        function ownerLabel(owner) {
+            return owner === '@shared' ? 'shared' : owner;
         }
 
         // May this login change ANY playlist -- its own, or one shared with it
@@ -2126,10 +2183,14 @@
             }
             // chip-new: hidden for viewers (body.viewer), see the CSS.
             html += `<span class="chip chip-new" onclick="createPlaylist()">+</span>`;
-            // Sharing an own playlist, once we are looking at it -- same
-            // one-at-a-time rule as the delete cross, so a crowded row cannot
-            // be mis-tapped.
-            if (selectedPlaylist && ownNames.has(selectedPlaylist) && sharesSupported && isAdmin()) {
+            // Sharing, once we are looking at it -- same one-at-a-time rule as
+            // the delete cross, so a crowded row cannot be mis-tapped. An
+            // admin sees the HOUSE set, which is shareable too (as '@shared');
+            // a playlist shared TO us is never ours to pass on.
+            const shareable = ownNames.has(selectedPlaylist)
+                || (ME && ME.canEditShared && !(selectedPlaylist in sharedMeta)
+                    && selectedPlaylist in playlists);
+            if (selectedPlaylist && shareable && sharesSupported && isAdmin()) {
                 html += `<span class="chip chip-share-btn" onclick="sharePlaylist('${esc(selectedPlaylist)}')"`
                      +  ` title="Share this playlist">`
                      +  `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"`
@@ -2148,7 +2209,7 @@
                     const on = selectedPlaylist === name;
                     html += `<span class="chip chip-shared ${on ? 'active' : ''}"`
                          +  ` onclick="selectPlaylist('${esc(name)}')">${name}`
-                         +  `<span class="chip-share">${m.role === 'edit' ? 'can edit' : 'view only'} &middot; ${m.owner}</span>`
+                         +  `<span class="chip-share">${m.role === 'edit' ? 'can edit' : 'view only'} &middot; ${ownerLabel(m.owner)}</span>`
                          +  (on ? `<span class="chip-leave" onclick="event.stopPropagation();leaveSharedPlaylist('${esc(name)}')" title="Leave this shared playlist">&times;</span>` : '')
                          +  `</span>`;
                 }
@@ -2307,6 +2368,7 @@
                     try { localStorage.setItem(liveCodeKey(), liveCode); } catch (e) {}
                     const u = document.getElementById('liveUrl');
                     if (u) u.textContent = liveUrl();
+                    renderLiveQr();
                 }
             } catch (e) { /* offline: the next tick tries again */ }
         }
@@ -2329,6 +2391,8 @@
                 const u = document.getElementById('liveUrl');
                 if (u) u.textContent = liveUrl();
             }
+            renderLiveQr();
+            setLiveQr(true);
             const btn = document.querySelector('.btn-live');
             if (btn) btn.classList.add('on');
         }
@@ -2338,6 +2402,7 @@
             if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
             const row = document.getElementById('liveRow');
             if (row) row.hidden = true;
+            setLiveQr(false);
             const btn = document.querySelector('.btn-live');
             if (btn) btn.classList.remove('on');
             try { await fetch('/api/live/stop', { method: 'POST', credentials: 'include' }); }
@@ -2349,6 +2414,47 @@
 
         async function copyLiveUrl() {
             try { await navigator.clipboard.writeText(liveUrl()); } catch (e) {}
+        }
+
+        /* The QR is the point of the live share: hold the screen up instead
+         * of sending the link to each guest in turn. One code, two plates --
+         * the live row's, and (on the stage) the room-sized one. */
+        let liveQrSvg = '';
+        function renderLiveQr() {
+            liveQrSvg = '';
+            if (liveCode && typeof qrcode === 'function') {
+                try {
+                    const qr = qrcode(0, 'M');     // type auto-sized to the URL
+                    qr.addData(liveUrl());
+                    qr.make();
+                    // scalable: CSS sizes the two plates; the SVG scales.
+                    liveQrSvg = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+                } catch (e) { /* no QR beats a broken one */ }
+            }
+            for (const id of ['liveQr', 'stageQrImg']) {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = liveQrSvg;
+            }
+        }
+
+        /* The stage's QR button follows the live session; the overlay is
+         * dismissed by a tap anywhere on it. */
+        function setLiveQr(on) {
+            const btn = document.getElementById('qrBtn');
+            if (btn) btn.hidden = !on;
+            if (!on) hideStageQr();
+        }
+
+        function showStageQr() {
+            if (!liveCode) return;             // nothing to show yet
+            renderLiveQr();
+            const box = document.getElementById('stageQr');
+            if (box) box.hidden = false;
+        }
+
+        function hideStageQr() {
+            const box = document.getElementById('stageQr');
+            if (box) box.hidden = true;
         }
 
         /* ===== Sharing a playlist =====
@@ -2384,7 +2490,7 @@
                     + `<button class="share-btn" onclick="removeShare('${esc(name)}','${esc(u)}')">Remove</button></div>`).join('')
                 : '<div class="share-empty">Nobody yet.</div>';
             document.getElementById('shareNote').textContent = shadowedShares.length
-                ? 'Hidden: ' + shadowedShares.map(s => `\u201c${s.name}\u201d from ${s.owner} waits behind your own playlist of that name.`).join(' ')
+                ? 'Hidden: ' + shadowedShares.map(s => `\u201c${s.name}\u201d from ${ownerLabel(s.owner)} waits behind your own playlist of that name.`).join(' ')
                 : '';
             card.hidden = false;
         }
@@ -2471,7 +2577,7 @@
         async function leaveSharedPlaylist(name) {
             const meta = sharedMeta[name];
             if (!meta) return;
-            if (!confirm(`Leave \u201c${name}\u201d, shared by ${meta.owner}?`)) return;
+            if (!confirm(`Leave \u201c${name}\u201d, shared by ${ownerLabel(meta.owner)}?`)) return;
             const r = await shareRequest('/api/shares', { name, owner: meta.owner, leave: true });
             if (!r.ok) return notePlaylists('Could not leave that playlist.');
             if (selectedPlaylist === name) selectedPlaylist = null;
@@ -2498,7 +2604,7 @@
                     try { localStorage.setItem('beatznbox_claimed', JSON.stringify(done)); } catch (e) {}
                     try { history.replaceState(null, '', location.pathname); } catch (e) {}
                     applyPlaylists(d);
-                    notePlaylists(`\u201c${d.claimed.name}\u201d from ${d.claimed.owner} was added to Shared with me.`);
+                    notePlaylists(`\u201c${d.claimed.name}\u201d from ${ownerLabel(d.claimed.owner)} was added to Shared with me.`);
                     await loadPresets();
                     await loadClips();
                 } else if (r.status === 400 && d.error === 'that is your own playlist') {
@@ -2898,12 +3004,15 @@
                             d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>
                 </div>
                 <!-- The live link, once sharing is on. Anyone with it follows
-                     the lyrics on their own phone -- no account needed. -->
+                     the lyrics on their own phone -- no account needed. The
+                     QR is the point: hold the screen up instead of sending
+                     the link to each person. -->
                 <div class="live-row" id="liveRow" hidden>
                     <span>Live lyrics</span>
                     <span class="live-url" id="liveUrl"></span>
                     <button class="share-btn" onclick="copyLiveUrl()">Copy</button>
                     <button class="share-btn" onclick="stopLiveShare()">Stop</button>
+                    <div class="live-qr" id="liveQr"></div>
                 </div>
                 <div class="presets">
                     <button class="preset-btn" id="pre-singalong" onclick="applyPreset('singalong')">Sing along</button>
