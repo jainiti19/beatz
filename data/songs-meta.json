@@ -1138,7 +1138,8 @@
       "Yo Yo Honey Singh"
     ],
     "film": "Desi Kalakaar",
-    "year": null
+    "year": null,
+    "hide": true
   },
   "Kagaz_Ki_Kashti": {
     "title": "Woh Kagaz Ki Kashti",
@@ -1735,5 +1736,56 @@
     ],
     "film": "Yaadon Ki Baaraat",
     "year": 1973
+  },
+  "flowers": {
+    "title": "Flowers",
+    "singers": [
+      "Miley Cyrus"
+    ],
+    "film": "Billboard Hot 100 Charts (2024)",
+    "year": null
+  },
+  "aari_aari": {
+    "title": "Dhurandhar The Revenge - Aari Aari",
+    "singers": [
+      "Shashwat Sachdev",
+      "Bombay Rockers",
+      "Irshad Kamil",
+      "Khan Saab",
+      "Reble",
+      "Token",
+      "Jasmine Sandlas",
+      "Sudhir Yaduvanshi & Navtej Singh Rehal"
+    ],
+    "film": "Dhurandhar The Revenge - Aari Aari (From \"Dhurandhar The Revenge\") - Single",
+    "year": null
+  },
+  "pani_da_rang": {
+    "title": "Pani Da Rang",
+    "singers": [
+      "Ayushmann Khurrana"
+    ],
+    "film": "null",
+    "year": null
+  },
+  "Gangam_style": {
+    "title": "GANGNAM STYLE(강남스타일) M/V",
+    "singers": [
+      "PSY"
+    ],
+    "film": "",
+    "year": null
+  },
+  "Aa_Aa_Ee_Oo_Mera_Dil_Na_Todo": {
+    "hide": true
+  },
+  "Hamara_bajaj": {
+    "hide": true
+  },
+  "Jab_Ghar_ki_rounak_badhani_ho": {
+    "hide": true
+  },
+  "Tumse_milke_Dil_ka": {
+    "hide": true
   }
 }
