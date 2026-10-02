@@ -1787,5 +1787,31 @@
   },
   "Tumse_milke_Dil_ka": {
     "hide": true
+  },
+  "sun_re_sajaniya": {
+    "title": "Sun Re Sajaniya",
+    "singers": [
+      "Ali Zafar"
+    ],
+    "film": "Taron Bhari Ho Raat",
+    "year": null
+  },
+  "Tumne_Mujhe_Dekha": {
+    "title": "Tumne Mujhe Dekha Hokar Meherban",
+    "singers": [
+      "Mohammed Rafi",
+      "R. D. Burman & Majrooh Sultanpuri"
+    ],
+    "film": "Teesri Manzil",
+    "year": null
+  },
+  "laila_laila": {
+    "title": "Laila Laila",
+    "singers": [
+      "Amit Trivedi",
+      "Raftaar & Girish Nakod"
+    ],
+    "film": "Andhadhun (Original Motion Picture Soundtrack)",
+    "year": null
   }
 }
