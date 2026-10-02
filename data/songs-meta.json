@@ -1769,12 +1769,12 @@
     "year": null
   },
   "Gangam_style": {
-    "title": "GANGNAM STYLE(강남스타일) M/V",
+    "title": "Gangnam Style",
     "singers": [
       "PSY"
     ],
     "film": "",
-    "year": null
+    "year": 2012
   },
   "Aa_Aa_Ee_Oo_Mera_Dil_Na_Todo": {
     "hide": true
@@ -1817,5 +1817,8 @@
   "kehna_hai_kehna_hai": {
     "hide": true,
     "title": "Kehna Hai Kehna Hai"
+  },
+  "taake_jhaake": {
+    "title": "Taake Jhaake"
   }
 }
